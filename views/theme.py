@@ -1,6 +1,6 @@
 """Light / dark UI chrome that follows the desktop, or a fixed choice.
 
-Window ▸ Preferences ▸ Theme stores ``general/theme``: ``dark`` (the
+Window ▸ Preferences ▸ Theme stores the General setting ``theme``: ``dark`` (the
 default — IngeTrazo's look, Marco 2026-09-22: the user opts into the rest),
 ``light``, or ``system``, which follows the OS colour scheme and flips live
 when the user switches it — GNOME/KDE portals, Windows 10/11 and macOS all
@@ -20,24 +20,26 @@ grey is always too dark on one of the two backgrounds.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QSettings, Qt
+from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QPalette
 
 SYSTEM, LIGHT, DARK = "system", "light", "dark"
 THEMES = (SYSTEM, LIGHT, DARK)
-_KEY = "general/theme"
+_KEY = "theme"          # a General setting: core.general_settings (#266)
 
 # The one accent both themes share — selection and the IngeTrazo blue.
 _HIGHLIGHT = QColor(42, 93, 143)
 
 
 def saved_theme() -> str:
-    mode = str(QSettings().value(_KEY, DARK) or DARK)
+    from core import general_settings
+    mode = str(general_settings.value(_KEY, DARK) or DARK)
     return mode if mode in THEMES else DARK
 
 
 def save_theme(mode: str) -> None:
-    QSettings().setValue(_KEY, mode if mode in THEMES else DARK)
+    from core import general_settings
+    general_settings.set_value(_KEY, mode if mode in THEMES else DARK)
 
 
 def is_dark(mode: str, system_scheme: Qt.ColorScheme) -> bool:

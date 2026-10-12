@@ -13,6 +13,8 @@ from pathlib import Path, PurePosixPath
 
 from PySide6.QtGui import QVector3D
 
+from .meshexport import export_triangles
+
 # Cream painted on faces with no material colour (mirrors the viewport default).
 _DEFAULT_COLOR = (0.96, 0.95, 0.925)
 
@@ -89,7 +91,7 @@ def save_obj(scene, path) -> None:
             sh = tex.get("sh", 1.0) or 1.0
             rot = float(tex.get("rot", 0.0))
             uvw = tex.get("uvw")
-            for tri in face.triangulate():
+            for tri in export_triangles(face):
                 if uvw:
                     from core.texture import affine_uv
                     uv = affine_uv(uvw, list(tri))   # imported explicit UVs
@@ -98,12 +100,13 @@ def save_obj(scene, path) -> None:
                 groups.setdefault(key, []).append(
                     [(vidx(tri[k]), uvidx(uv[k])) for k in range(3)])
         else:
-            col = tuple(face.attrs.get("color") or _DEFAULT_COLOR)
+            # RGB only: an AI recipe's (r, g, b, 1.0) broke the .mtl writer.
+            col = tuple(face.attrs.get("color") or _DEFAULT_COLOR)[:3]
             key = ("color", col)
             materials.setdefault(key, {"color": col, "map": None})
             if face.attrs.get("mat") and "mat" not in materials[key]:
                 materials[key]["mat"] = face.attrs["mat"]
-            for tri in face.triangulate():
+            for tri in export_triangles(face):
                 groups.setdefault(key, []).append(
                     [(vidx(tri[k]), None) for k in range(3)])
 
@@ -114,12 +117,14 @@ def save_obj(scene, path) -> None:
     matname = export_names({k: materials[k] for k in keys})
 
     # Copy texture images next to the .obj so map_Kd resolves.
+    from core.texture import is_image_file
     for k in keys:
         mat = materials[k]
         if mat.get("map"):
             dst = path.parent / mat["map"]
             try:
-                if mat["src"].resolve() != dst.resolve():
+                if (mat["src"].resolve() != dst.resolve()
+                        and is_image_file(mat["src"])):
                     shutil.copy(mat["src"], dst)
             except Exception:  # noqa: BLE001 — best-effort; export still valid
                 pass

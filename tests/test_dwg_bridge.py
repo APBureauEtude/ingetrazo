@@ -24,7 +24,7 @@ def test_null_handles_are_stripped(tmp_path):
                           0, "ENDBLK", 5, 0,
                           0, "ENDSEC", 0, "EOF"))
     dwg_bridge._strip_null_handles(dxf)
-    lines = dxf.read_text().split("\n")
+    lines = dxf.read_text(encoding="utf-8").split("\n")
     assert "ENDBLK" in lines
     for i in range(0, len(lines) - 1, 2):
         assert not (lines[i].strip() == "5" and lines[i + 1].strip() == "0")
@@ -41,7 +41,7 @@ def test_reused_handles_are_renumbered_first_owner_keeps_it(tmp_path):
         0, "ENDSEC", 0, "EOF"))
     fixed = dwg_bridge._dedupe_handles(dxf)
     assert fixed == 1
-    lines = [ln.strip() for ln in dxf.read_text().split("\n")]
+    lines = [ln.strip() for ln in dxf.read_text(encoding="utf-8").split("\n")]
     handles = [lines[i + 1] for i in range(0, len(lines) - 1, 2)
                if lines[i] == "5"]
     assert handles[0] == "2"              # the table record kept its handle

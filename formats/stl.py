@@ -48,8 +48,9 @@ def _faces(scene):
 
 def iter_triangles(scene):
     """Yield ``(a, b, c)`` world-space triangles for the whole scene."""
+    from .meshexport import export_triangles
     for face in _faces(scene):
-        yield from face.triangulate()
+        yield from export_triangles(face)
 
 
 def _normal(a: QVector3D, b: QVector3D, c: QVector3D) -> QVector3D:

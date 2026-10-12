@@ -2906,5 +2906,13 @@
  "Export trays": "Eksportuj panele boczne",
  "Import trays": "Importuj panele boczne",
  "Trays (*.json)": "Panele boczne (*.json)",
- "This is not an IngeTrazo trays file.": "To nie jest plik paneli bocznych IngeTrazo."
+ "This is not an IngeTrazo trays file.": "To nie jest plik paneli bocznych IngeTrazo.",
+ "Type a length greater than zero to resize": "Wpisz długość większą od zera, aby zmienić rozmiar",
+ "Resized: the distance is now {d}": "Zmieniono rozmiar: odległość wynosi teraz {d}",
+ "Do you want to resize the model?": "Czy chcesz zmienić rozmiar modelu?",
+ "Note that components loaded from external files will not be resized.": "Uwaga: komponenty wczytane z plików zewnętrznych zachowają swój rozmiar.",
+ "Do you want to resize the active component?": "Czy chcesz zmienić rozmiar aktywnego komponentu?",
+ "Do you want to resize the active group?": "Czy chcesz zmienić rozmiar aktywnej grupy?",
+ "Resize": "Zmień rozmiar",
+ "Type the new length and Enter to resize.": "Wpisz nową długość i Enter, aby zmienić rozmiar."
 }

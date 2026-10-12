@@ -2911,5 +2911,13 @@
  "Field of View": "Campo de visão",
  "Drag down to widen the perspective's field of view, up to narrow it; or type an angle.": "Arraste para baixo para ampliar o campo de visão da perspectiva, para cima para reduzi-lo; ou digite um ângulo.",
  "The field of view only applies in perspective — Camera ▸ Toggle Perspective / Parallel (Shift+P)": "O campo de visão só se aplica em perspectiva — Câmera ▸ Alternar Perspectiva / Paralela (Shift+P)",
- "Drag down to widen the view angle, up to narrow it. Type an angle.": "Arraste para baixo para ampliar o ângulo, para cima para reduzi-lo. Digite um ângulo."
+ "Drag down to widen the view angle, up to narrow it. Type an angle.": "Arraste para baixo para ampliar o ângulo, para cima para reduzi-lo. Digite um ângulo.",
+ "Type a length greater than zero to resize": "Digite um comprimento maior que zero para redimensionar",
+ "Resized: the distance is now {d}": "Redimensionado: a distância agora é {d}",
+ "Do you want to resize the model?": "Deseja redimensionar o modelo?",
+ "Note that components loaded from external files will not be resized.": "Observe que os componentes carregados de arquivos externos não serão redimensionados.",
+ "Do you want to resize the active component?": "Deseja redimensionar o componente ativo?",
+ "Do you want to resize the active group?": "Deseja redimensionar o grupo ativo?",
+ "Resize": "Redimensionar",
+ "Type the new length and Enter to resize.": "Digite o novo comprimento e Enter para redimensionar."
 }

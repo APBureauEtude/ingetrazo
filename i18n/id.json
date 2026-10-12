@@ -2905,5 +2905,13 @@
  "Field of View": "Bidang Pandang",
  "Drag down to widen the perspective's field of view, up to narrow it; or type an angle.": "Seret ke bawah untuk memperlebar bidang pandang perspektif, ke atas untuk mempersempitnya; atau ketik sebuah sudut.",
  "The field of view only applies in perspective — Camera ▸ Toggle Perspective / Parallel (Shift+P)": "Bidang pandang hanya berlaku dalam perspektif — Kamera ▸ Beralih Perspektif / Paralel (Shift+P)",
- "Drag down to widen the view angle, up to narrow it. Type an angle.": "Seret ke bawah untuk memperlebar sudut, ke atas untuk mempersempitnya. Ketik sebuah sudut."
+ "Drag down to widen the view angle, up to narrow it. Type an angle.": "Seret ke bawah untuk memperlebar sudut, ke atas untuk mempersempitnya. Ketik sebuah sudut.",
+ "Type a length greater than zero to resize": "Ketik panjang lebih dari nol untuk mengubah ukuran",
+ "Resized: the distance is now {d}": "Ukuran diubah: jaraknya sekarang {d}",
+ "Do you want to resize the model?": "Apakah Anda ingin mengubah ukuran model?",
+ "Note that components loaded from external files will not be resized.": "Perhatikan bahwa komponen yang dimuat dari berkas eksternal tidak akan diubah ukurannya.",
+ "Do you want to resize the active component?": "Apakah Anda ingin mengubah ukuran komponen aktif?",
+ "Do you want to resize the active group?": "Apakah Anda ingin mengubah ukuran grup aktif?",
+ "Resize": "Ubah Ukuran",
+ "Type the new length and Enter to resize.": "Ketik panjang baru lalu Enter untuk mengubah ukuran."
 }

@@ -2903,5 +2903,13 @@
  "Field of View": "视野",
  "Drag down to widen the perspective's field of view, up to narrow it; or type an angle.": "向下拖动以扩大透视的视野，向上拖动以缩小；或输入角度。",
  "The field of view only applies in perspective — Camera ▸ Toggle Perspective / Parallel (Shift+P)": "视野仅适用于透视模式 — 相机 ▸ 切换透视 / 平行 (Shift+P)",
- "Drag down to widen the view angle, up to narrow it. Type an angle.": "向下拖动扩大视角，向上拖动缩小。可输入角度。"
+ "Drag down to widen the view angle, up to narrow it. Type an angle.": "向下拖动扩大视角，向上拖动缩小。可输入角度。",
+ "Type a length greater than zero to resize": "请输入大于零的长度以调整大小",
+ "Resized: the distance is now {d}": "已调整大小：距离现在为 {d}",
+ "Do you want to resize the model?": "要调整模型的大小吗？",
+ "Note that components loaded from external files will not be resized.": "注意：从外部文件加载的组件不会被调整大小。",
+ "Do you want to resize the active component?": "要调整当前组件的大小吗？",
+ "Do you want to resize the active group?": "要调整当前组的大小吗？",
+ "Resize": "调整大小",
+ "Type the new length and Enter to resize.": "输入新长度并按 Enter 以调整大小。"
 }

@@ -578,6 +578,13 @@ class MainWindow(QMainWindow):
         self.georef_tray = GeorefTray(self)
         from views.outliner import ProjectBrowser
         self.project_browser = ProjectBrowser(self)
+        # Window ▸ Manage Trays: the user's own trays (made here, before
+        # restoreState, so it puts them back where they were) and the
+        # sections each tray shows.
+        from views.manage_trays import TrayManager
+        self.tray_manager = TrayManager(self, {
+            "tray_properties": self.tray, "tray_bim": self.bim_tray,
+            "tray_georef": self.georef_tray})
         self._lay_out_trays()
         # The trays are tabbed: the tab bar already names the active panel,
         # so each dock's own title bar would say the same thing right above
@@ -1461,6 +1468,13 @@ class MainWindow(QMainWindow):
             lambda m=panels_menu: self._fill_panels_menu(m))
         window_menu.addMenu(panels_menu)
         self._panels_menu = panels_menu
+        manage_trays = QAction(tr("Manage Trays…"), self)
+        manage_trays.setStatusTip(tr(
+            "Make trays of your own and choose the sections each tray "
+            "shows."))
+        manage_trays.triggered.connect(lambda _c=False: self.open_manage_trays())
+        window_menu.addAction(manage_trays)
+        self._act_manage_trays = manage_trays
 
         toggle_profile = self.profile_dock.toggleViewAction()
         toggle_profile.setText(tr("Terrain profile"))
@@ -1669,7 +1683,7 @@ class MainWindow(QMainWindow):
     def _lay_out_trays(self) -> None:
         """The trays in their factory place: every one on the right, tabbed
         in the default order, extension panels after them."""
-        order = self._default_tray_order()
+        order = self._default_tray_order() + self._custom_tray_docks()
         order += [d for d in getattr(self, "_extension_docks", ())
                   if d not in order]
         for d in order:
@@ -1758,30 +1772,118 @@ class MainWindow(QMainWindow):
         """Right-click on the tray tabs → the Window ▸ Panels list, instead
         of Qt's toolbar-and-dock menu."""
         if self._tray_tab_bar_at(event.pos()):
-            menu = QMenu(self)
-            dock = self._dock_tab_at(event.pos())
-            if dock is not None:
-                left = self.dockWidgetArea(dock) == Qt.LeftDockWidgetArea
-                menu.addAction(
-                    tr("Move to the right side") if left
-                    else tr("Move to the left side"),
-                    lambda: self.move_dock(
-                        dock, Qt.RightDockWidgetArea if left
-                        else Qt.LeftDockWidgetArea))
-                menu.addSeparator()
-            self._fill_panels_menu(menu)
-            menu.exec(event.globalPos())
+            self._tray_tab_menu(event.pos()).exec(event.globalPos())
             event.accept()
             return
         super().contextMenuEvent(event)
+
+    def _tray_tab_menu(self, pos) -> QMenu:
+        """The right-click menu of the tray tab at ``pos`` (window
+        coordinates): to the other side, the Window ▸ Panels list, and
+        Manage Trays."""
+        menu = QMenu(self)
+        dock = self._dock_tab_at(pos)
+        if dock is not None:
+            left = self.dockWidgetArea(dock) == Qt.LeftDockWidgetArea
+            menu.addAction(
+                tr("Move to the right side") if left
+                else tr("Move to the left side"),
+                lambda: self.move_dock(
+                    dock, Qt.RightDockWidgetArea if left
+                    else Qt.LeftDockWidgetArea))
+            menu.addSeparator()
+        self._fill_panels_menu(menu)
+        menu.addSeparator()
+        menu.addAction(
+            tr("Manage Trays…"),
+            lambda: self.open_manage_trays(
+                dock.objectName() if dock is not None else None))
+        return menu
 
     def _sidebar_docks(self) -> list:
         return [d for d in (getattr(self, "tray", None),
                             getattr(self, "bim_tray", None),
                             getattr(self, "georef_tray", None),
                             getattr(self, "project_browser", None),
+                            *self._custom_tray_docks(),
                             *getattr(self, "_extension_docks", ()))
                 if d is not None]
+
+    def _custom_tray_docks(self) -> list:
+        manager = getattr(self, "tray_manager", None)
+        return manager.custom_docks() if manager is not None else []
+
+    # ---- Window ▸ Manage Trays (views/manage_trays.py) ----------------------
+    def open_manage_trays(self, tray: str | None = None) -> None:
+        """SketchUp's Manage Trays: trays of your own, and which sections
+        each tray shows. ``tray`` is selected when it is one of those (the
+        tab or section right-clicked); else the tray in front."""
+        from views.manage_trays import ManageTraysDialog
+        if tray is None:
+            tray = next((d.objectName() for d in self._sidebar_docks()
+                         if d.isVisible() and not d.visibleRegion().isEmpty()
+                         and d.objectName() in self.tray_manager.docks), None)
+        dialog = ManageTraysDialog(self, self.tray_manager, select=tray)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def add_tray_dock(self, dock) -> None:
+        """A tray just made in Manage Trays: a new tab on the right, in
+        front, with what the others got at start-up."""
+        from PySide6.QtCore import QTimer
+        others = self._side_docks(Qt.RightDockWidgetArea)
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        if others:
+            self.tabifyDockWidget(others[-1], dock)
+        self._keep_docked(dock)
+        dock.toggleViewAction().triggered.connect(
+            lambda on, d=dock: self._remember_tray_choice(d, on))
+        bump = lambda *_: QTimer.singleShot(0, self, self._place_sidebar_handle)
+        dock.visibilityChanged.connect(bump)
+        dock.dockLocationChanged.connect(bump)
+        self.set_tray_shown(dock, True)
+        QTimer.singleShot(0, self, self._style_dock_tabs)
+        menu = getattr(self, "_panels_menu", None)
+        if menu is not None:
+            self._fill_panels_menu(menu)
+
+    def remove_tray_dock(self, dock) -> None:
+        """A tray deleted in Manage Trays: its tab goes, and so does what
+        the settings remembered of it (closed, seen)."""
+        from PySide6.QtCore import QTimer
+        self.removeDockWidget(dock)
+        dock.hide()
+        name = dock.objectName()
+        st = QSettings()
+        for key in ("ui/hidden_trays", "ui/known_trays"):
+            if st.contains(key):
+                raw = st.value(key, []) or []
+                if isinstance(raw, str):
+                    raw = [raw]
+                st.setValue(key, sorted(str(x) for x in raw if str(x) != name))
+        # A folded side brings back what it remembers: not this one.
+        for attr in ("_sidebar_was", "_left_was"):
+            kept = getattr(self, attr, None)
+            if kept:
+                setattr(self, attr, [d for d in kept if d is not dock])
+        if getattr(self, "_sidebar_top", None) is dock:
+            self._sidebar_top = None
+        dock.deleteLater()
+        QTimer.singleShot(0, self, self._style_dock_tabs)
+        QTimer.singleShot(0, self, self._place_sidebar_handle)
+        menu = getattr(self, "_panels_menu", None)
+        if menu is not None:
+            self._fill_panels_menu(menu)
+
+    def _raise_tray_of(self, panel) -> None:
+        """Bring to the front the tray showing ``panel`` — the one Manage
+        Trays put it in, not necessarily the one it was made for."""
+        from PySide6.QtWidgets import QDockWidget
+        w = panel.parentWidget()
+        while w is not None and not isinstance(w, QDockWidget):
+            w = w.parentWidget()
+        if w is not None:
+            w.raise_()
 
     def _build_sidebar_handle(self) -> None:
         """LibreOffice's sidebar handle: a slim button sitting ON the line
@@ -6719,7 +6821,7 @@ class MainWindow(QMainWindow):
         mn, mx = mesh.bounds()
         if mn is not None:
             self.georef_tray.base_map.setup_for_bounds(datum, mn, mx)
-        self.georef_tray.raise_()
+        self._raise_tray_of(self.georef_tray.base_map)
         dlg.close()
         if mn is not None:
             self.viewport.camera.set_view("iso")
@@ -6859,7 +6961,7 @@ class MainWindow(QMainWindow):
 
         # Sync the base-map panel + set a reference capture around the import.
         self.georef_tray.base_map.setup_for_import(datum, scene.geo_paths)
-        self.georef_tray.raise_()
+        self._raise_tray_of(self.georef_tray.base_map)
         # Frame the imported traces (top view).
         self._frame_geo_paths(scene.geo_paths)
         self.statusBar().showMessage(
@@ -6956,7 +7058,7 @@ class MainWindow(QMainWindow):
         """File-menu twin of the Terrain panel's survey-CSV import, so every
         way into the model lives under File ▸ Import."""
         self.georef_tray.survey._on_import()
-        self.georef_tray.raise_()
+        self._raise_tray_of(self.georef_tray.survey)
 
     def _on_export_view_dxf(self) -> None:
         """The view on screen as a 2D line drawing for CAD, hidden lines

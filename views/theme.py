@@ -120,7 +120,14 @@ def tokens() -> dict[str, str]:
     app = QGuiApplication.instance()
     dark = (app is None
             or app.palette().color(QPalette.Window).lightness() < 128)
-    return {"muted": "#8a94a0" if dark else "#5a6472"}
+    # «bar», «bar_hover» and «frame»: a tray section's header, a strip set
+    # off from the panel — the dark palette's Mid is the window's own grey,
+    # so palette(mid) drew no frame there.
+    if dark:
+        return {"muted": "#8a94a0", "bar": "#3b3e44",
+                "bar_hover": "#474b52", "frame": "#5d636b"}
+    return {"muted": "#5a6472", "bar": "#dde0e4",
+            "bar_hover": "#cfd3d8", "frame": "#a3a9b1"}
 
 
 # ---- stylesheet templates that follow the theme ----------------------------

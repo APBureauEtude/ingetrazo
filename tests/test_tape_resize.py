@@ -335,3 +335,20 @@ def test_the_hint_offers_the_resize_once_measured(monkeypatch):
     assert "resize" in text and "Ctrl" in text
     tool.on_cancel(vp)
     assert "resize" not in hint_for("tape", tool, None, "all")
+
+
+def test_the_resize_hint_fits_the_bar_in_every_language(monkeypatch):
+    """The same character budget as test_status_hints_fit, which only
+    drives the tools' plain started phase, not this one."""
+    from core.i18n import set_language
+    from views.status_hints import hint_for
+    vp = _Vp(Scene())
+    tool, _asked = _measure(vp, V(0, 0), V(2, 0), monkeypatch=monkeypatch)
+    try:
+        for lang in ("en", "es", "fr", "de", "it", "pt-BR", "pl", "id",
+                     "zh-CN"):
+            set_language(lang)
+            text = hint_for("tape", tool, None, "parallel_perp")
+            assert len(text) <= 112, f"{lang}: {text}"
+    finally:
+        set_language("en")

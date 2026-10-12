@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import (QEvent, QObject, QPoint, QRunnable, Qt,
@@ -70,6 +71,11 @@ _ROW_MAX_WIDTH = 660
 #: maximised Full HD window, more on a wider one — no empty band at the
 #: right (Marco, 09-10).
 _COLUMN_WIDTH = 560
+#: Windows shows a new window, white, through its opening animation and
+#: until the first paint — ~0.4 s for this dialog on Marco's machine
+#: (#555, his recording of 12-10). It opens transparent and appears once
+#: painted, dark and complete.
+_HIDE_UNTIL_PAINTED = sys.platform == "win32"
 
 
 
@@ -139,6 +145,9 @@ class ExtensionManagerDialog(QDialog):
         self._images_timer.setSingleShot(True)
         self._images_timer.setInterval(0)
         self._images_timer.timeout.connect(self._load_visible_images)
+        self._waiting_first_paint = _HIDE_UNTIL_PAINTED
+        if self._waiting_first_paint:
+            self.setWindowOpacity(0.0)
         self._network = QNetworkAccessManager(self)
         self._pages: dict[str, dict] = {}
 
@@ -311,7 +320,16 @@ class ExtensionManagerDialog(QDialog):
         QThreadPool.globalInstance().start(worker)
 
     def _apply_catalog(self, snapshot) -> None:
+        previous = self._catalog_snapshot
         self._catalog_snapshot = snapshot
+        if (previous is not None
+                and snapshot.extensions == previous.extensions
+                and snapshot.reviewed == previous.reviewed):
+            # The refresh brought the catalog already on screen (the usual
+            # case: the cached copy shows first): only the date changes.
+            # Rebuilding both pages repainted the whole window (#555).
+            self._show_count(self._active_page_key())
+            return
         self._extensions = self._with_bundled(snapshot.extensions)
         self._reviewed = snapshot.reviewed
         for key in self._pages:
@@ -547,6 +565,23 @@ class ExtensionManagerDialog(QDialog):
                         grid.removeWidget(row)
                     self._place_cards(key, rows)
         return super().eventFilter(obj, event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._images_timer.start()
+        if self._waiting_first_paint:
+            # Never left invisible, whatever happens to the first paint.
+            QTimer.singleShot(600, self._reveal)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._waiting_first_paint:
+            # After this paint reaches the screen, not inside it.
+            self._waiting_first_paint = False
+            QTimer.singleShot(0, self._reveal)
+
+    def _reveal(self) -> None:
+        self.setWindowOpacity(1.0)
 
     def _on_tab_changed(self, _index: int) -> None:
         # Both pages are rebuilt whenever what they show changes (catalog,
@@ -852,6 +887,12 @@ class ExtensionManagerDialog(QDialog):
 
     def _load_visible_images(self, *_args) -> None:
         page = self._active_page()
+        if not page["scroll"].isVisible():
+            return   # showEvent asks again once there is a screen to fill
+        # Place the cards first: before the layout has run they all sit at
+        # the top-left, every one looked visible and opening the manager
+        # decoded all the screenshots (#555; ~0.25 s of white on Windows).
+        page["cards"].layout().activate()
         visible = page["scroll"].viewport().rect()
         for extension in self._filtered_extensions():
             label = page["image_labels"].get(extension.id)

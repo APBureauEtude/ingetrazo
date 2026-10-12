@@ -12,7 +12,12 @@ follow [SemVer](https://semver.org).
   todas las tarjetas, las viejas seguían pintadas un instante debajo de las
   nuevas y cada captura se volvía a leer y escalar. Ahora cambiar de pestaña
   solo muestra la otra página, una reconstrucción se pinta de una vez y las
-  tarjetas nacen con su imagen. Se notaba sobre todo en Windows.
+  tarjetas nacen con su imagen. Al abrirlo, la ventana ya no se queda en
+  blanco un tercio de segundo: se decodificaban todas las capturas, no solo
+  las visibles, y el catálogo recién descargado, igual al guardado, volvía a
+  reconstruir las dos páginas. En Windows, además, el gestor se abre
+  transparente y aparece en cuanto está pintado, en vez de mostrarse en
+  blanco durante la animación de apertura.
 
 ## [0.5.8] — 2026-10-12
 

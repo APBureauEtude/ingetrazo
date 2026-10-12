@@ -896,3 +896,71 @@ def test_switching_tabs_keeps_the_cards_and_their_screenshots(
         dialog.close()
         dialog.deleteLater()
         app.processEvents()
+
+
+def test_opening_decodes_only_the_visible_screenshots_and_a_same_refresh_keeps_the_cards(
+        tmp_path, monkeypatch):
+    """#555, the white window when the manager opens on Windows: every
+    screenshot was decoded before the first paint (the cards were not laid
+    out yet, so all looked visible), and the refresh that brings the same
+    catalog as the cached one rebuilt both pages again."""
+    app = QApplication.instance() or QApplication([])
+    extensions = [
+        manager.Extension(**{
+            **_extension(f"source {index}".encode(),
+                         f"extension_{index}").__dict__,
+            "screenshot": f"extension_{index}.png"})
+        for index in range(20)
+    ]
+    from views import extension_manager_dialog as dialog_module
+    _stub_catalog(monkeypatch, dialog_module, extensions)
+    monkeypatch.setattr(manager, "user_plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr(dialog_module.QStandardPaths, "writableLocation",
+                        lambda _location: str(tmp_path / "data"))
+    pixmap = QPixmap(64, 40)
+    pixmap.fill(QColor("red"))
+    shots = tmp_path / "data" / "extension-screenshots"
+    shots.mkdir(parents=True)
+    for extension in extensions:
+        pixmap.save(str(shots / extension.screenshot), "PNG")
+    dialog = dialog_module.ExtensionManagerDialog()
+    try:
+        _wait_for_catalog(dialog, app)
+        grid = dialog._pages["browse"]["grid"]
+        cards = [grid.itemAt(i).widget() for i in range(grid.count())]
+        dialog.resize(1180, 800)
+        dialog.show()
+        app.processEvents()
+        assert 0 < len(dialog._screenshots) < len(extensions)
+        # The refresh in the background brought the same catalog: the
+        # cards on screen stay.
+        assert [grid.itemAt(i).widget() for i in range(grid.count())] == cards
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()
+
+
+def test_on_windows_the_manager_appears_only_once_painted(
+        tmp_path, monkeypatch):
+    """#555: Windows showed the new window white until its first paint
+    (~0.4 s); it now opens transparent and appears once painted."""
+    app = QApplication.instance() or QApplication([])
+    from views import extension_manager_dialog as dialog_module
+    _stub_catalog(monkeypatch, dialog_module, [_extension(b"one")])
+    monkeypatch.setattr(manager, "user_plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr(dialog_module, "_HIDE_UNTIL_PAINTED", True)
+    dialog = dialog_module.ExtensionManagerDialog()
+    try:
+        _wait_for_catalog(dialog, app)
+        assert dialog.windowOpacity() == 0.0
+        dialog.show()
+        dialog.repaint()
+        loop = QEventLoop()
+        QTimer.singleShot(50, loop.quit)
+        loop.exec()
+        assert dialog.windowOpacity() == 1.0
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()

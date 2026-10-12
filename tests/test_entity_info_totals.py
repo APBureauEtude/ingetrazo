@@ -23,7 +23,7 @@ from core.group import Group  # noqa: E402
 from core.i18n import tr  # noqa: E402
 from core.mesh import Mesh  # noqa: E402
 from core.selection_totals import selected_area, selection_totals  # noqa: E402
-from core.units import fmt_area, fmt_len  # noqa: E402
+from core.units import fmt_area, fmt_len, fmt_volume  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -91,7 +91,7 @@ def test_two_faces_show_their_total_area(window):
     scene.selection.update(_two_faces(scene))
     text = _describe(window)
     assert f"2 {tr('faces')}" in text
-    assert f"{tr('Area')}: 5.000 m²" in text
+    assert f"{tr('Area')}: {fmt_area(5.0)}" in text
 
 
 def test_several_edges_show_their_total_length(window):
@@ -107,7 +107,7 @@ def test_solid_groups_show_their_total_volume(window):
     a, b = _box(0), _box(3, size=2.0)                         # 1 m³ + 8 m³
     scene.groups.extend([a, b])
     scene.selection.update([a, b])
-    assert f"{tr('Volume')}: 9.000 m³" in _describe(window)
+    assert f"{tr('Volume')}: {fmt_volume(9.0)}" in _describe(window)
 
 
 def test_no_volume_unless_every_group_is_a_solid(window):
@@ -146,7 +146,7 @@ def test_one_face_reads_its_area_and_no_vertex_count(window):
     scene.selection.add(face)
     panel = _panel(window)
     text = panel._label.text()
-    assert f"{tr('Area')}: 2.000 m²" in text
+    assert f"{tr('Area')}: {fmt_area(2.0)}" in text
     # No «Vertices: 4»: it read as four vertices selected beside the face.
     assert tr("Vertices") not in text
     assert panel.totals.faces == 1 and panel.totals.area == pytest.approx(2.0)

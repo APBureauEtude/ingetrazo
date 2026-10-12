@@ -3505,11 +3505,11 @@ class EntityInfoPanel(QWidget):
         parts = [f"{n} {tr(k)}" for k, n in counts.items() if n]
         rows = [f"<b>{tr('Selection')}</b>", ", ".join(parts)]
         if t.only("faces"):
-            rows.append(f"{tr('Area')}: {t.area:.3f} m²")
+            rows.append(f"{tr('Area')}: {fmt_area(t.area)}")
         elif t.only("edges"):
             rows.append(f"{tr('Length')}: {fmt_len(t.length)}")
         elif t.only("groups") and t.volume_complete:
-            rows.append(f"{tr('Volume')}: {t.volume:.3f} m³")
+            rows.append(f"{tr('Volume')}: {fmt_volume(t.volume)}")
         return "<br>".join(rows)
 
     def _solid_volume(self, group):

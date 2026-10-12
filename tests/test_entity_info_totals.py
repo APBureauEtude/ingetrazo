@@ -146,7 +146,7 @@ def test_one_face_reads_its_area_and_no_vertex_count(window):
     scene.selection.add(face)
     panel = _panel(window)
     text = panel._label.text()
-    assert f"{tr('Area')}: 2.000 m²" in text
+    assert f"{tr('Area')}: {fmt_area(2.0)}" in text
     # No «Vertices: 4»: it read as four vertices selected beside the face.
     assert tr("Vertices") not in text
     assert panel.totals.faces == 1 and panel.totals.area == pytest.approx(2.0)

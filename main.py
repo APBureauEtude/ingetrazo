@@ -139,6 +139,10 @@ def _open_document_in(window, doc: "Path") -> None:
     the native backend after the first paint (big models parse for seconds —
     the window must be visible, not frozen pre-show). Shared by the initial
     launch and the single-instance second-launch handler."""
+    # The extensions first, if the window deferred them (#440): one of them
+    # may own this file type. A no-op once they are loaded.
+    if hasattr(window, "load_extensions"):
+        window.load_extensions()
     ext = doc.suffix.lower()
     if ext == ".igz" or ext in getattr(window, "file_openers", {}):
         window.open_path(doc)       # an extension's own type goes to its opener
@@ -423,7 +427,8 @@ def main() -> int:
     from views.tooltips import WrappingToolTips
     tooltips = WrappingToolTips(app)
     app.installEventFilter(tooltips)
-    window = MainWindow()
+    # The extensions' setup waits until the window is on screen (#440).
+    window = MainWindow(defer_extensions=True)
     # From here on, a FileOpen Apple Event (macOS double-click / Open With,
     # or a second one while this instance is already the running app — see
     # _App.event) opens straight into this window, no process handoff
@@ -498,13 +503,24 @@ def main() -> int:
         # the next launch.
         app.aboutToQuit.connect(lambda: QLocalServer.removeServer(_SOCKET))
 
-    # A document passed on the command line (the OS file association's
-    # double-click hands it as argv[1]) opens right away.
-    if arg:
-        doc = Path(arg)
-        if doc.exists():
-            _open_document_in(window, doc)
     window.show()
+    from PySide6.QtCore import QTimer
+
+    def _after_first_frame():
+        # The plugins' setup, now that the window is up (#440) — and only
+        # then the document passed on the command line (the OS file
+        # association's double-click hands it as argv[1]): an extension may
+        # register the opener for its own file type.
+        window.load_extensions()
+        if arg:
+            doc = Path(arg)
+            if doc.exists():
+                _open_document_in(window, doc)
+
+    QTimer.singleShot(0, _after_first_frame)
+    # Which units to work in, once the window is up (off for good with
+    # «Don't show this at startup»; Preferences ▸ Units turns it back on).
+    QTimer.singleShot(0, window.offer_units_at_start)
     _offer_appimage_integration(window)
     return app.exec()
 

@@ -80,11 +80,12 @@ class Group:
         # padlock function is not saved in the .igz file»).
         self.locked = False
         #: The external file this component was loaded from — its file
-        #: name, from Insert (a document) or the component library — or
-        #: ``None`` for one modelled here. A Tape Measure resize of the
-        #: whole model leaves such a component at its real size and only
-        #: moves it (core/resize.py): a chair placed in a plan stays a
-        #: chair when the plan is rescaled.
+        #: name, from Insert (a document), the component library or the
+        #: kept components of another document — or ``None`` for one
+        #: modelled here. A Tape Measure resize of the whole model leaves
+        #: such a component at its real size and only moves it
+        #: (core/resize.py): a chair placed in a plan stays a chair when
+        #: the plan is rescaled.
         self.source = None
         # Stable identity that survives save/load — what a scene names when
         # it remembers which objects it hides. Fresh per object; a copy gets

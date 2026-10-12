@@ -21,7 +21,7 @@ from views import prompts as _prompts
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QRect, QSettings, QSize, Qt
+from PySide6.QtCore import QObject, QPoint, QRect, QSettings, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -84,27 +84,104 @@ def _ral_name(entry: dict) -> str:
     return entry["name"]
 
 
-class _Section(QWidget):
-    """A collapsible section: a header button that toggles its content."""
+#: What a section header dragged out of its place carries: the section's key.
+SECTION_MIME = "application/x-ingetrazo-tray-section"
 
-    def __init__(self, title: str, content: QWidget) -> None:
+#: A section's header: a framed strip, as SketchUp's tray dialogs have —
+#: an underline alone did not tell where one section ended and the next
+#: began. Colours from views.theme.tokens, re-applied on a theme change.
+_HEADER_CSS = (
+    "QToolButton {{ font-weight: bold; text-align: left; padding: 4px 6px;"
+    " border: 1px solid {frame}; border-radius: 3px; background: {bar}; }}"
+    "QToolButton:hover {{ background: {bar_hover}; }}")
+
+
+class _SectionHeader(QToolButton):
+    """The title strip of a tray section: a click folds the section, a
+    drag moves it (dropped in a :class:`SectionStack`), a right-click
+    offers the same moves from a menu."""
+
+    def __init__(self, section) -> None:
         super().__init__()
+        self._section = section
+        self._press = None
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 — Qt override
+        if event.button() == Qt.LeftButton:
+            self._press = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 — Qt override
+        from PySide6.QtWidgets import QApplication
+        press = self._press
+        if (press is not None and event.buttons() & Qt.LeftButton
+                and (event.position().toPoint() - press).manhattanLength()
+                >= QApplication.startDragDistance()):
+            self._press = None
+            self.setDown(False)             # a drag, not a click: no fold
+            self._drag(press)
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 — Qt override
+        self._press = None
+        super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 — Qt override
+        stack = _stack_of(self)
+        if stack is None:
+            super().contextMenuEvent(event)
+            return
+        stack.section_menu(self._section).exec(event.globalPos())
+        event.accept()
+
+    def _drag(self, hot) -> None:
+        from PySide6.QtCore import QMimeData
+        from PySide6.QtGui import QDrag
+        from PySide6.QtWidgets import QApplication
+        mime = QMimeData()
+        mime.setData(SECTION_MIME, self._section.key.encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.setHotSpot(hot)
+        # Every drag event over a tray goes to its stack while this runs,
+        # whatever is under the pointer: a text field in Entity info would
+        # otherwise take the drop and refuse it.
+        router = _SectionDropRouter()
+        app = QApplication.instance()
+        app.installEventFilter(router)
+        try:
+            drag.exec(Qt.MoveAction)
+        finally:
+            app.removeEventFilter(router)
+            router.finish()
+
+
+class _Section(QWidget):
+    """A collapsible section: a framed header that folds its content with
+    a click and moves the section with a drag. ``key`` names it for the
+    tray layout (core.tray_layout); by default its panel's class."""
+
+    def __init__(self, title: str, content: QWidget,
+                 key: str | None = None) -> None:
+        super().__init__()
+        self.title = title
+        self.key = key or type(content).__name__
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        self._btn = QToolButton()
-        self._btn.setText(f"  {title}")
+        self._btn = _SectionHeader(self)
+        self._btn.setText(f" {title}")
         self._btn.setCheckable(True)
         self._btn.setChecked(True)
         self._btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self._btn.setArrowType(Qt.DownArrow)
-        # Clean, light header (QGIS-style): plain bold title on the panel
-        # background with a subtle underline — no dark bar. Uses palette() roles
-        # so it adapts to light and dark themes.
-        self._btn.setStyleSheet(
-            "QToolButton { font-weight: bold; padding: 6px 4px; border: none;"
-            " border-bottom: 1px solid palette(mid); text-align: left; }"
-            "QToolButton:hover { background: palette(midlight); }")
+        self._btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._btn.setStatusTip(tr(
+            "Click to fold or unfold this section; drag it to move it, "
+            "or right-click for more."))
+        theme_style(self._btn, _HEADER_CSS)
         self._btn.toggled.connect(self._on_toggle)
         self._content = content
         lay.addWidget(self._btn)
@@ -3516,24 +3593,202 @@ def _let_narrow(widget: QWidget) -> None:
         combo.setMinimumContentsLength(_COMBO_MIN_CHARS)
 
 
-def _scrolled(sections) -> QScrollArea:
-    """A scroll area wrapping a vertical stack of collapsible sections."""
-    inner = QWidget()
-    col = QVBoxLayout(inner)
-    col.setContentsMargins(0, 0, 0, 0)
-    col.setSpacing(2)
-    scroll = QScrollArea()
-    anchor = _ScrollAnchor(scroll)
-    for title, widget in sections:
-        section = _Section(title, widget)
-        section.installEventFilter(anchor)
-        col.addWidget(section)
-    col.addStretch(1)
-    _let_narrow(inner)
-    scroll.setWidgetResizable(True)
-    scroll.setWidget(inner)
-    scroll.setMinimumWidth(240)
-    return scroll
+def _stack_of(widget):
+    """The :class:`SectionStack` ``widget`` is in, or ``None``."""
+    while widget is not None and not isinstance(widget, SectionStack):
+        widget = widget.parentWidget()
+    return widget
+
+
+class _SectionDropRouter(QObject):
+    """While a section header is dragged: the drag events over any tray go
+    to that tray's :class:`SectionStack`, which shows where the section
+    would land and takes the drop."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._stack = None
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt override
+        from PySide6.QtCore import QEvent
+        t = event.type()
+        if t == QEvent.DragLeave:
+            if self._stack is not None and _stack_of(obj) is self._stack:
+                self._stack.drag_left()
+            return False
+        if t not in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop) \
+                or not isinstance(obj, QWidget) \
+                or not event.mimeData().hasFormat(SECTION_MIME):
+            return False
+        stack = _stack_of(obj)
+        if stack is None:
+            return False
+        if self._stack is not None and self._stack is not stack:
+            self._stack.drag_left()
+        self._stack = stack
+        pos = obj.mapTo(stack.widget(), event.position().toPoint())
+        if t == QEvent.Drop:
+            key = bytes(event.mimeData().data(SECTION_MIME)).decode("utf-8")
+            stack.drop(key, pos.y())
+            self._stack = None
+        else:
+            stack.drag_over(pos.y())
+        event.acceptProposedAction()
+        return True
+
+    def finish(self) -> None:
+        if self._stack is not None:
+            self._stack.drag_left()
+            self._stack = None
+
+
+class SectionStack(QScrollArea):
+    """A tray's body: its sections top to bottom in a scroll area.
+
+    A section is moved by dragging its header — a line shows where it
+    will land, in this tray or another one — or from its header's
+    right-click menu. The stack only asks for the move:
+    ``sectionMoved(key, index)``, ``index`` counted among this stack's
+    sections without the moved one; the window's tray manager does it and
+    remembers it (views.manage_trays). ``manageRequested`` is the menu's
+    Manage Trays entry."""
+
+    sectionMoved = Signal(str, int)
+    manageRequested = Signal()
+
+    #: How close to the top or bottom edge a dragged section scrolls the
+    #: tray, and by how much per tick.
+    _EDGE_PX = 28
+    _SCROLL_STEP = 18
+
+    def __init__(self, sections=()) -> None:
+        super().__init__()
+        inner = QWidget()
+        inner.setAcceptDrops(True)
+        self._col = QVBoxLayout(inner)
+        # No side margins: they would widen the trays' 240 px floor.
+        self._col.setContentsMargins(0, 2, 0, 2)
+        self._col.setSpacing(3)
+        self._col.addStretch(1)
+        self._anchor = _ScrollAnchor(self)
+        self._sections: list[_Section] = []
+        self._line = QFrame(inner)
+        self._line.setFixedHeight(3)
+        self._line.setStyleSheet("background: palette(highlight);")
+        self._line.hide()
+        self._edge = 0
+        from PySide6.QtCore import QTimer
+        self._scroll_timer = QTimer(self)
+        self._scroll_timer.setInterval(40)
+        self._scroll_timer.timeout.connect(self._scroll_tick)
+        sections = list(sections)
+        # Narrowed BEFORE they are laid out: a combo box keeps the minimum
+        # width it first measured, and set_sections shows the sections.
+        for s in sections:
+            _let_narrow(s)
+        self.set_sections(sections)
+        self.setWidgetResizable(True)
+        self.setWidget(inner)
+        self.setMinimumWidth(240)
+
+    def sections(self) -> list:
+        return list(self._sections)
+
+    def set_sections(self, sections: list) -> None:
+        """Show exactly ``sections``, in this order. One taken from
+        another stack moves here; one left out is no longer laid out here
+        (its owner puts it somewhere else)."""
+        for s in self._sections:
+            self._col.removeWidget(s)
+            if s not in sections:
+                s.removeEventFilter(self._anchor)
+        for i, s in enumerate(sections):
+            self._col.insertWidget(i, s)
+            s.installEventFilter(self._anchor)
+            s.show()
+        self._sections = list(sections)
+
+    def section_menu(self, section) -> QMenu:
+        """A section header's right-click menu."""
+        menu = QMenu(self)
+        i = self._sections.index(section) if section in self._sections else -1
+        up = menu.addAction(tr("Move up"))
+        up.setEnabled(i > 0)
+        up.triggered.connect(
+            lambda _c=False: self.sectionMoved.emit(section.key, i - 1))
+        down = menu.addAction(tr("Move down"))
+        down.setEnabled(0 <= i < len(self._sections) - 1)
+        down.triggered.connect(
+            lambda _c=False: self.sectionMoved.emit(section.key, i + 1))
+        menu.addSeparator()
+        menu.addAction(tr("Manage Trays…"), self.manageRequested.emit)
+        return menu
+
+    # ---- a section header dragged over this stack --------------------------
+    def _insert_index(self, y: int) -> int:
+        """Where a section dropped at ``y`` (inner widget) goes, counted
+        among the sections as they are now: before the first one whose
+        middle is below ``y``."""
+        for i, s in enumerate(self._sections):
+            if y < s.y() + s.height() / 2:
+                return i
+        return len(self._sections)
+
+    def drag_over(self, y: int) -> None:
+        i = self._insert_index(y)
+        gap = self._col.spacing()
+        if i < len(self._sections):
+            at = self._sections[i].y() - (gap + self._line.height()) // 2
+        elif self._sections:
+            last = self._sections[-1]
+            at = last.y() + last.height() + (gap - self._line.height()) // 2
+        else:
+            at = 0
+        inner = self.widget()
+        self._line.setGeometry(0, max(0, at), inner.width(),
+                               self._line.height())
+        self._line.show()
+        self._line.raise_()
+        # Near the top or bottom edge, the tray scrolls on its own: a long
+        # Materials section stood between Parts and the top.
+        in_view = y - self.verticalScrollBar().value()
+        h = self.viewport().height()
+        self._edge = (-1 if in_view < self._EDGE_PX
+                      else 1 if in_view > h - self._EDGE_PX else 0)
+        if self._edge and not self._scroll_timer.isActive():
+            self._scroll_timer.start()
+        elif not self._edge:
+            self._scroll_timer.stop()
+
+    def drag_left(self) -> None:
+        self._line.hide()
+        self._edge = 0
+        self._scroll_timer.stop()
+
+    def drop(self, key: str, y: int) -> None:
+        index = self._insert_index(y)
+        self.drag_left()
+        keys = [s.key for s in self._sections]
+        if key in keys:
+            current = keys.index(key)
+            if current < index:
+                index -= 1                  # counted without itself
+            if current == index:
+                return
+        # After the drag has returned: the header being dragged is the
+        # one that moves.
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self, lambda: self.sectionMoved.emit(key, index))
+
+    def _scroll_tick(self) -> None:
+        bar = self.verticalScrollBar()
+        bar.setValue(bar.value() + self._edge * self._SCROLL_STEP)
+
+
+def _scrolled(sections) -> SectionStack:
+    """A scroll area wrapping a vertical stack of collapsible sections:
+    ``(title, panel)`` or ``(title, panel, key)`` each."""
+    return SectionStack([_Section(*entry) for entry in sections])
 
 
 
@@ -4112,13 +4367,15 @@ class Tray(QDockWidget):
         # Styles, Shadows and Dimension style are NOT here: they live in
         # their own on-demand docks (toolbar toggles) — the always-open tray
         # was drowning.
+        # Keyed as core.tray_layout names them: Window ▸ Manage Trays
+        # moves them to other trays and reorders them.
         self.setWidget(_scrolled([
-            (tr("Entity info"), self.entity_info),
-            (tr("Layers"), self.layers),
-            (tr("Scenes"), self.scenes),
-            (tr("Materials"), self.materials),
-            (tr("Components"), self.components),
-            (tr("Parts"), self.parts),
+            (tr("Entity info"), self.entity_info, "entity_info"),
+            (tr("Layers"), self.layers, "layers"),
+            (tr("Scenes"), self.scenes, "scenes"),
+            (tr("Materials"), self.materials, "materials"),
+            (tr("Components"), self.components, "components"),
+            (tr("Parts"), self.parts, "parts"),
         ]))
 
     def on_scene_changed(self) -> None:
@@ -4155,7 +4412,7 @@ class BimTray(QDockWidget):
                          | QDockWidget.DockWidgetFloatable
                          | QDockWidget.DockWidgetClosable)
         self.bim = BimPanel(window)
-        self.setWidget(_scrolled([(tr("BIM tagging"), self.bim)]))
+        self.setWidget(_scrolled([(tr("BIM tagging"), self.bim, "bim")]))
 
     def on_scene_changed(self) -> None:
         self.bim.refresh()
@@ -4281,8 +4538,9 @@ class GeorefTray(QDockWidget):
                          | QDockWidget.DockWidgetClosable)
         self.base_map = BaseMapPanel(window)
         self.survey = SurveyPointsPanel(window)
-        self.setWidget(_scrolled([(tr("Base map"), self.base_map),
-                                  (tr("Survey points"), self.survey)]))
+        self.setWidget(_scrolled([
+            (tr("Base map"), self.base_map, "base_map"),
+            (tr("Survey points"), self.survey, "survey")]))
 
     def on_scene_changed(self) -> None:
         self.base_map.on_scene_changed()

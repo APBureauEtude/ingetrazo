@@ -7,7 +7,8 @@ import json
 import zipfile
 
 import pytest
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QBuffer, QEventLoop, QIODevice, QTimer
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -834,3 +835,64 @@ def test_an_identical_loose_file_counts_as_a_copy(tmp_path, monkeypatch):
     with pytest.raises(manager.ExtensionManagerError, match="my_old_name.py"):
         manager.install_extension(_extension(payload))
     assert not (tmp_path / "sample").exists()
+
+
+def test_switching_tabs_keeps_the_cards_and_their_screenshots(
+        tmp_path, monkeypatch):
+    """#555: every tab switch rebuilt all the cards, the old ones stayed
+    painted until deleteLater and each new card started without its
+    picture — a flash between the tabs, worst on Windows."""
+    app = QApplication.instance() or QApplication([])
+    extensions = [
+        manager.Extension(**{
+            **_extension(f"source {index}".encode(),
+                         f"extension_{index}").__dict__,
+            "screenshot": f"extension_{index}.png"})
+        for index in range(3)
+    ]
+    from views import extension_manager_dialog as dialog_module
+    _stub_catalog(monkeypatch, dialog_module, extensions)
+    monkeypatch.setattr(manager, "user_plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr(dialog_module.QStandardPaths, "writableLocation",
+                        lambda _location: str(tmp_path / "data"))
+    pixmap = QPixmap(64, 40)
+    pixmap.fill(QColor("red"))
+    buffer = QBuffer()
+    buffer.open(QIODevice.WriteOnly)
+    pixmap.save(buffer, "PNG")
+    png = bytes(buffer.data())
+    shots = tmp_path / "data" / "extension-screenshots"
+    shots.mkdir(parents=True)
+    for extension in extensions:
+        (shots / extension.screenshot).write_bytes(png)
+    dialog = dialog_module.ExtensionManagerDialog()
+    try:
+        _wait_for_catalog(dialog, app)
+        dialog.resize(1180, 800)
+        dialog.show()
+        app.processEvents()
+        grid = dialog._pages["browse"]["grid"]
+        cards = [grid.itemAt(i).widget() for i in range(grid.count())]
+        labels = dict(dialog._pages["browse"]["image_labels"])
+        assert set(dialog._screenshots) == {e.id for e in extensions}
+        assert all(not label.pixmap().isNull() for label in labels.values())
+
+        dialog._tabs.setCurrentIndex(1)
+        app.processEvents()
+        dialog._tabs.setCurrentIndex(0)
+        app.processEvents()
+        assert [grid.itemAt(i).widget() for i in range(grid.count())] == cards
+        assert "3 of 3 extensions" in dialog._catalog_info.text()
+
+        # A rebuild (a filter, an install): the old cards leave the screen
+        # at once and the new ones are born with their screenshot.
+        dialog._render_page("browse")
+        assert all(card.isHidden() for card in cards)
+        for ident, label in dialog._pages["browse"]["image_labels"].items():
+            assert label is not labels[ident]
+            assert not label.pixmap().isNull()
+            assert label.text() == ""
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()

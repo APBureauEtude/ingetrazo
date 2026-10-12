@@ -128,6 +128,17 @@ class ExtensionManagerDialog(QDialog):
         self._startup_state = (startup_state if startup_state is not None
                                else extension_startup_state())
         self._requested_images: set[str] = set()
+        # Screenshots already decoded and scaled, by extension id: a card
+        # built again (a filter, an install) is born with its image instead
+        # of «Preview unavailable» and then the picture (#555).
+        self._screenshots: dict[str, QPixmap] = {}
+        # Which cards are on screen is asked once the layout has placed
+        # them; asked right after building, every card still sat at the
+        # top-left and all the screenshots were decoded at once (#555).
+        self._images_timer = QTimer(self)
+        self._images_timer.setSingleShot(True)
+        self._images_timer.setInterval(0)
+        self._images_timer.timeout.connect(self._load_visible_images)
         self._network = QNetworkAccessManager(self)
         self._pages: dict[str, dict] = {}
 
@@ -251,7 +262,7 @@ class ExtensionManagerDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.verticalScrollBar().valueChanged.connect(
-            self._load_visible_images)
+            self._images_timer.start)
         cards = QWidget()
         grid = QGridLayout(cards)
         grid.setContentsMargins(2, 2, 2, 12)
@@ -279,6 +290,8 @@ class ExtensionManagerDialog(QDialog):
             "cards": cards,
             "grid": grid,
             "image_labels": {},
+            "shown": 0,
+            "total": 0,
         }
         return page
 
@@ -413,6 +426,9 @@ class ExtensionManagerDialog(QDialog):
             item = grid.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # Out of the layout is not off the screen: until deleteLater
+                # runs, the old card would be painted under the new ones.
+                widget.hide()
                 widget.deleteLater()
         page["image_labels"].clear()
 
@@ -470,25 +486,37 @@ class ExtensionManagerDialog(QDialog):
 
     def _render_page(self, key: str, *_args) -> None:
         page = self._pages[key]
-        self._clear_cards(key)
-        extensions = self._filtered_extensions(key)
-        language = current_language()
-        rows = [self._make_row(extension, language, page["cards"], key)
-                for extension in extensions]
-        unknown = self._hand_only(key) if key == "installed" else []
-        rows += [self._make_hand_row(path, page["cards"]) for path in unknown]
-        self._place_cards(key, rows)
+        cards = page["cards"]
+        # One repaint for the whole swap, not one per card taken out and
+        # put in: on Windows the half-built page showed as a flash (#555).
+        cards.setUpdatesEnabled(False)
+        try:
+            self._clear_cards(key)
+            extensions = self._filtered_extensions(key)
+            language = current_language()
+            rows = [self._make_row(extension, language, cards, key)
+                    for extension in extensions]
+            unknown = self._hand_only(key) if key == "installed" else []
+            rows += [self._make_hand_row(path, cards) for path in unknown]
+            self._place_cards(key, rows)
+        finally:
+            cards.setUpdatesEnabled(True)
+        page["shown"] = len(extensions) + len(unknown)
+        page["total"] = (sum(installed_info(e.id) is not None
+                             or installation_conflict(e.id)
+                             for e in self._extensions)
+                         + len(self._hand_only(key, filtered=False))
+                         if key == "installed" else len(self._extensions))
         if key == self._active_page_key():
-            total = (sum(installed_info(e.id) is not None
-                         or installation_conflict(e.id)
-                         for e in self._extensions)
-                     + len(self._hand_only(key, filtered=False))
-                     if key == "installed" else len(self._extensions))
-            self._catalog_info.setText(
-                tr("{shown} of {total} extensions",
-                   shown=len(extensions) + len(unknown), total=total)
-                + self._catalog_status_suffix())
-            self._load_visible_images()
+            self._show_count(key)
+            self._images_timer.start()
+
+    def _show_count(self, key: str) -> None:
+        page = self._pages[key]
+        self._catalog_info.setText(
+            tr("{shown} of {total} extensions",
+               shown=page["shown"], total=page["total"])
+            + self._catalog_status_suffix())
 
     def _columns(self, key: str) -> int:
         """How many columns of cards fit the page's width."""
@@ -521,7 +549,13 @@ class ExtensionManagerDialog(QDialog):
         return super().eventFilter(obj, event)
 
     def _on_tab_changed(self, _index: int) -> None:
-        self._render_page(self._active_page_key())
+        # Both pages are rebuilt whenever what they show changes (catalog,
+        # install, enable, their own filters), so a tab change only shows
+        # the other one. Rebuilding it here, on every switch, was the
+        # flash between the two tabs (#555).
+        key = self._active_page_key()
+        self._show_count(key)
+        self._images_timer.start()
 
     def _make_row(self, extension: Extension, language: str,
                   parent: QWidget, page_key: str) -> QWidget:
@@ -561,6 +595,10 @@ class ExtensionManagerDialog(QDialog):
             "background: palette(alternate-base); "
             "color: palette(text); border: none;")
         self._pages[page_key]["image_labels"][extension.id] = image
+        cached = self._screenshots.get(extension.id)
+        if cached is not None:
+            image.setPixmap(cached)
+            image.setText("")
 
         image_details = QWidget()
         image_details.setFixedWidth(_IMAGE_SIZE[0])
@@ -817,7 +855,7 @@ class ExtensionManagerDialog(QDialog):
         visible = page["scroll"].viewport().rect()
         for extension in self._filtered_extensions():
             label = page["image_labels"].get(extension.id)
-            if label is None:
+            if label is None or extension.id in self._screenshots:
                 continue
             label_rect = label.geometry()
             label_rect.moveTopLeft(label.mapTo(
@@ -874,15 +912,18 @@ class ExtensionManagerDialog(QDialog):
             reply.deleteLater()
 
     def _set_screenshot(self, ident: str, data: bytes) -> None:
-        label = self._active_page()["image_labels"].get(ident)
-        if label is None:
-            return
         pixmap = QPixmap()
-        if pixmap.loadFromData(data):
-            label.setPixmap(pixmap.scaled(
-                label.size(), Qt.KeepAspectRatioByExpanding,
-                Qt.SmoothTransformation))
-            label.setText("")
+        if not pixmap.loadFromData(data):
+            return
+        scaled = pixmap.scaled(
+            *_IMAGE_SIZE, Qt.KeepAspectRatioByExpanding,
+            Qt.SmoothTransformation)
+        self._screenshots[ident] = scaled
+        for page in self._pages.values():
+            label = page["image_labels"].get(ident)
+            if label is not None:
+                label.setPixmap(scaled)
+                label.setText("")
 
     def _confirm_manual_copies(self, extension: Extension, paths) -> bool:
         answer = QMessageBox.question(

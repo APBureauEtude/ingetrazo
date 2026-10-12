@@ -1,6 +1,7 @@
 """A section growing above what you are looking at does not move it
 (Marco, 23-09: the materials list jumped whenever Entity Info filled up on
-selecting something)."""
+selecting something). Each section has its height now (the separator
+under it sets it), and a panel that grows scrolls inside its section."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
@@ -24,16 +25,19 @@ def test_growing_a_section_above_keeps_the_view_still():
     scroll.resize(300, 400)
     scroll.show()
     _settle()
+    library = scroll.sections()[1]
     bar = scroll.verticalScrollBar()
     bar.setValue(600)                  # looking at the library, far below
     _settle()
+    y = library.y()
     top.setMinimumHeight(240)          # Entity Info fills up: +200 px
     _settle()
-    assert bar.value() == 800          # the library did not move on screen
+    assert library.y() == y            # the library did not move on screen
+    assert bar.value() == 600
     scroll.close()
 
 
-def test_at_the_top_nothing_is_compensated():
+def test_a_section_that_fills_up_scrolls_inside_itself():
     top = QLabel("info")
     top.setMinimumHeight(40)
     tall = QWidget()
@@ -42,11 +46,12 @@ def test_at_the_top_nothing_is_compensated():
     scroll.resize(300, 400)
     scroll.show()
     _settle()
-    bar = scroll.verticalScrollBar()
-    bar.setValue(0)
+    info = scroll.sections()[0]
+    height = info.height()
     top.setMinimumHeight(240)
     _settle()
-    assert bar.value() == 0
+    assert info.height() == height
+    assert info._body.verticalScrollBar().maximum() > 0
     scroll.close()
 
 

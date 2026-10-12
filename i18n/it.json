@@ -2891,5 +2891,13 @@
  "New Tray": "Nuovo vassoio",
  "Rename Tray": "Rinomina vassoio",
  "Delete Tray": "Elimina vassoio",
- "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Eliminare il vassoio «{name}»? Le sue sezioni tornano nei vassoi da cui provenivano."
+ "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Eliminare il vassoio «{name}»? Le sue sezioni tornano nei vassoi da cui provenivano.",
+ "Tabs at the bottom": "Schede in basso",
+ "Put the trays' tabs under them instead of on top.": "Mette le schede dei vassoi sotto invece che sopra.",
+ "Save the trays — their sections, side, order and which are open — to a file, to take them to another computer": "Salva i vassoi — le loro sezioni, il lato, l'ordine e quali sono aperti — in un file, per portarli su un altro computer",
+ "Arrange the trays as a file saved them": "Dispone i vassoi come li ha salvati un file",
+ "Export trays": "Esporta vassoi",
+ "Import trays": "Importa vassoi",
+ "Trays (*.json)": "Vassoi (*.json)",
+ "This is not an IngeTrazo trays file.": "Questo non è un file di vassoi di IngeTrazo."
 }

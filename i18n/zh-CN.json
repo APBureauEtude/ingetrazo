@@ -2891,5 +2891,13 @@
  "New Tray": "新建托盘",
  "Rename Tray": "重命名托盘",
  "Delete Tray": "删除托盘",
- "Delete the tray “{name}”? Its sections go back to the trays they came from.": "删除托盘“{name}”？其中的部分会回到原来的托盘。"
+ "Delete the tray “{name}”? Its sections go back to the trays they came from.": "删除托盘“{name}”？其中的部分会回到原来的托盘。",
+ "Tabs at the bottom": "选项卡在底部",
+ "Put the trays' tabs under them instead of on top.": "将托盘的选项卡放在下方而不是上方。",
+ "Save the trays — their sections, side, order and which are open — to a file, to take them to another computer": "将托盘（其中的部分、所在侧、顺序以及哪些已打开）保存到文件，以便带到另一台电脑",
+ "Arrange the trays as a file saved them": "按文件中保存的方式排列托盘",
+ "Export trays": "导出托盘",
+ "Import trays": "导入托盘",
+ "Trays (*.json)": "托盘 (*.json)",
+ "This is not an IngeTrazo trays file.": "这不是 IngeTrazo 托盘文件。"
 }

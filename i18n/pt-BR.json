@@ -2899,5 +2899,13 @@
  "New Tray": "Nova bandeja",
  "Rename Tray": "Renomear bandeja",
  "Delete Tray": "Excluir bandeja",
- "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Excluir a bandeja “{name}”? Suas seções voltam para as bandejas de onde vieram."
+ "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Excluir a bandeja “{name}”? Suas seções voltam para as bandejas de onde vieram.",
+ "Tabs at the bottom": "Abas embaixo",
+ "Put the trays' tabs under them instead of on top.": "Coloca as abas das bandejas embaixo delas em vez de em cima.",
+ "Save the trays — their sections, side, order and which are open — to a file, to take them to another computer": "Salve as bandejas — suas seções, lado, ordem e quais estão abertas — em um arquivo para levá-las a outro computador",
+ "Arrange the trays as a file saved them": "Organiza as bandejas como um arquivo as salvou",
+ "Export trays": "Exportar bandejas",
+ "Import trays": "Importar bandejas",
+ "Trays (*.json)": "Bandejas (*.json)",
+ "This is not an IngeTrazo trays file.": "Este não é um arquivo de bandejas do IngeTrazo."
 }

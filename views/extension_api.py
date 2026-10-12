@@ -174,8 +174,13 @@ class ExtensionApp:
 
     def show_panel(self, dock) -> None:
         """Bring a tab from :meth:`add_panel` to the front — shown again
-        if the user hid it from Window ▸ Panels."""
-        self._window.set_tray_shown(dock, True)
+        if the user hid it from Window ▸ Panels — or the tray Window ▸
+        Manage Trays put it in."""
+        show = getattr(self._window, "show_panel_dock", None)
+        if show is not None:
+            show(dock)
+        else:
+            self._window.set_tray_shown(dock, True)
 
     def add_menu_action(self, text: str, fn, shortcut: str | None = None,
                         tip: str | None = None):

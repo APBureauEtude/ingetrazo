@@ -2890,5 +2890,13 @@
  "New Tray": "Nouvelle palette",
  "Rename Tray": "Renommer la palette",
  "Delete Tray": "Supprimer la palette",
- "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Supprimer la palette « {name} » ? Ses sections retournent dans les palettes d'où elles venaient."
+ "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Supprimer la palette « {name} » ? Ses sections retournent dans les palettes d'où elles venaient.",
+ "Tabs at the bottom": "Onglets en bas",
+ "Put the trays' tabs under them instead of on top.": "Place les onglets des palettes en dessous plutôt qu'au-dessus.",
+ "Save the trays — their sections, side, order and which are open — to a file, to take them to another computer": "Enregistre les palettes — leurs sections, leur côté, leur ordre et celles qui sont ouvertes — dans un fichier, pour les emporter sur un autre ordinateur",
+ "Arrange the trays as a file saved them": "Dispose les palettes comme un fichier les a enregistrées",
+ "Export trays": "Exporter les palettes",
+ "Import trays": "Importer les palettes",
+ "Trays (*.json)": "Palettes (*.json)",
+ "This is not an IngeTrazo trays file.": "Ce n'est pas un fichier de palettes IngeTrazo."
 }

@@ -2901,5 +2901,13 @@
  "New Tray": "Neues Fach",
  "Rename Tray": "Fach umbenennen",
  "Delete Tray": "Fach löschen",
- "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Das Fach „{name}“ löschen? Seine Abschnitte kehren in die Fächer zurück, aus denen sie kamen."
+ "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Das Fach „{name}“ löschen? Seine Abschnitte kehren in die Fächer zurück, aus denen sie kamen.",
+ "Tabs at the bottom": "Registerkarten unten",
+ "Put the trays' tabs under them instead of on top.": "Die Registerkarten der Fächer unter sie statt darüber setzen.",
+ "Save the trays — their sections, side, order and which are open — to a file, to take them to another computer": "Die Fächer – ihre Abschnitte, Seite, Reihenfolge und welche offen sind – in einer Datei speichern, um sie auf einen anderen Computer mitzunehmen",
+ "Arrange the trays as a file saved them": "Die Fächer so anordnen, wie eine Datei sie gespeichert hat",
+ "Export trays": "Fächer exportieren",
+ "Import trays": "Fächer importieren",
+ "Trays (*.json)": "Fächer (*.json)",
+ "This is not an IngeTrazo trays file.": "Dies ist keine IngeTrazo-Fächerdatei."
 }

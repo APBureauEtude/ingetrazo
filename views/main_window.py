@@ -584,7 +584,8 @@ class MainWindow(QMainWindow):
         from views.manage_trays import TrayManager
         self.tray_manager = TrayManager(self, {
             "tray_properties": self.tray, "tray_bim": self.bim_tray,
-            "tray_georef": self.georef_tray})
+            "tray_georef": self.georef_tray},
+            panels={"browser": self.project_browser})
         self._lay_out_trays()
         # The trays are tabbed: the tab bar already names the active panel,
         # so each dock's own title bar would say the same thing right above
@@ -1814,6 +1815,26 @@ class MainWindow(QMainWindow):
         return manager.custom_docks() if manager is not None else []
 
     # ---- Window ▸ Manage Trays (views/manage_trays.py) ----------------------
+    @staticmethod
+    def _tabs_bottom_saved() -> bool:
+        return str(QSettings().value("ui/tray_tabs_bottom", "false")).lower() \
+            in ("1", "true")
+
+    def tray_tabs_bottom(self) -> bool:
+        from PySide6.QtWidgets import QTabWidget
+        return self.tabPosition(Qt.RightDockWidgetArea) == QTabWidget.South
+
+    def set_tray_tabs_bottom(self, on: bool) -> None:
+        """The side trays' tabs under them (Manage Trays' check box) or
+        on top, as they come; remembered."""
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QTabWidget
+        QSettings().setValue("ui/tray_tabs_bottom", bool(on))
+        self.setTabPosition(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea,
+                            QTabWidget.South if on else QTabWidget.North)
+        QTimer.singleShot(0, self, self._style_dock_tabs)
+        QTimer.singleShot(0, self, self._place_sidebar_handle)
+
     def open_manage_trays(self, tray: str | None = None) -> None:
         """SketchUp's Manage Trays: trays of your own, and which sections
         each tray shows. ``tray`` is selected when it is one of those (the
@@ -1831,10 +1852,14 @@ class MainWindow(QMainWindow):
         """A tray just made in Manage Trays: a new tab on the right, in
         front, with what the others got at start-up."""
         from PySide6.QtCore import QTimer
-        others = self._side_docks(Qt.RightDockWidgetArea)
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
-        if others:
-            self.tabifyDockWidget(others[-1], dock)
+        # Tabbed with Properties, as an extension's panel is — even with
+        # every tray closed: added beside them instead, it opened a second
+        # group of tabs under the first once they came back.
+        area = self.dockWidgetArea(self.tray)
+        if area == Qt.NoDockWidgetArea:
+            area = Qt.RightDockWidgetArea
+        self.addDockWidget(area, dock)
+        self.tabifyDockWidget(self.tray, dock)
         self._keep_docked(dock)
         dock.toggleViewAction().triggered.connect(
             lambda on, d=dock: self._remember_tray_choice(d, on))
@@ -2087,8 +2112,10 @@ class MainWindow(QMainWindow):
         each tray is is part of the window layout, saved with it."""
         from PySide6.QtCore import QSize
         from PySide6.QtWidgets import QTabWidget, QToolButton
+        # On top unless the user put them at the bottom (Manage Trays).
         self.setTabPosition(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea,
-                            QTabWidget.North)
+                            QTabWidget.South if self._tabs_bottom_saved()
+                            else QTabWidget.North)
         self.viewport.setAcceptDrops(True)
         self.installEventFilter(self)           # new tab bars, as Qt makes them
         act = QAction(tr("Left sidebar"), self)
@@ -2634,9 +2661,22 @@ class MainWindow(QMainWindow):
         if st.contains("ui/hidden_trays"):
             st.setValue("ui/hidden_trays", sorted(hidden))
         self._mark_trays_known(st, [dock.objectName()])
+        # A dialog of Window ▸ Manage Trays too: it can go in any tray.
+        manager = getattr(self, "tray_manager", None)
+        if manager is not None:
+            manager.adopt(dock)
         menu = getattr(self, "_panels_menu", None)
         if menu is not None:
             self._fill_panels_menu(menu)
+
+    def show_panel_dock(self, dock) -> None:
+        """Bring a side panel forward (``ExtensionApp.show_panel``): the
+        tray showing it now — Manage Trays may have put it in another one —
+        and back in its own when the user had taken it out of every tray."""
+        manager = getattr(self, "tray_manager", None)
+        if manager is not None and manager.show_dialog(dock.objectName()):
+            return
+        self.set_tray_shown(dock, True)
 
     def extension_panels(self) -> dict:
         """``objectName`` → dock for every panel an extension added."""

@@ -2898,5 +2898,13 @@
  "New Tray": "Nowy panel boczny",
  "Rename Tray": "Zmień nazwę panelu bocznego",
  "Delete Tray": "Usuń panel boczny",
- "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Usunąć panel boczny „{name}”? Jego sekcje wrócą do paneli, z których pochodzą."
+ "Delete the tray “{name}”? Its sections go back to the trays they came from.": "Usunąć panel boczny „{name}”? Jego sekcje wrócą do paneli, z których pochodzą.",
+ "Tabs at the bottom": "Zakładki na dole",
+ "Put the trays' tabs under them instead of on top.": "Umieszcza zakładki paneli bocznych pod nimi zamiast nad nimi.",
+ "Save the trays — their sections, side, order and which are open — to a file, to take them to another computer": "Zapisz panele boczne — ich sekcje, stronę, kolejność i to, które są otwarte — do pliku, aby przenieść je na inny komputer",
+ "Arrange the trays as a file saved them": "Ułóż panele boczne tak, jak zapisano je w pliku",
+ "Export trays": "Eksportuj panele boczne",
+ "Import trays": "Importuj panele boczne",
+ "Trays (*.json)": "Panele boczne (*.json)",
+ "This is not an IngeTrazo trays file.": "To nie jest plik paneli bocznych IngeTrazo."
 }

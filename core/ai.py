@@ -600,7 +600,13 @@ def build_request(provider: str, model: str, api_key: str,
                "User-Agent": USER_AGENT}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    payload = {"model": model, "max_tokens": max_tokens,
+    # OpenAI's own API deprecated max_tokens and its newer models reject
+    # it with HTTP 400 («Use 'max_completion_tokens' instead», #517); the
+    # new name works for every OpenAI model. The other OpenAI-compatible
+    # services (Groq, Gemini, OpenRouter, DeepSeek, Ollama) keep the name
+    # they have always accepted.
+    limit = "max_completion_tokens" if provider == "openai" else "max_tokens"
+    payload = {"model": model, limit: max_tokens,
                "messages": oai_msgs}
     return (f"{base}/chat/completions", headers,
             json.dumps(payload).encode())

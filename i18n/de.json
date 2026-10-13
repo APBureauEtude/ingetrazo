@@ -2883,5 +2883,15 @@
  "Area, centroid and second moments of the selected faces.": "Fläche, Schwerpunkt und Flächenträgheitsmomente der ausgewählten Flächen.",
  "Leave the group first (Esc) — nested groups aren't supported yet": "Zuerst die Gruppe verlassen (Esc) – verschachtelte Gruppen werden noch nicht unterstützt",
  "This model is not georeferenced and the scene has no datum yet. Set a location in the Terrain tray first, or pick an ODM export that includes odm_georeferencing_model_geo.txt.": "Dieses Modell ist nicht georeferenziert und die Szene hat noch kein Datum. Legen Sie zuerst im Bereich Gelände einen Standort fest oder wählen Sie einen ODM-Export mit odm_georeferencing_model_geo.txt.",
- "Top view, parallel — so the trace lands where you click. Restored when you leave the tool.": "Draufsicht, parallel – damit der Linienzug dort landet, wo Sie klicken. Wird beim Verlassen des Werkzeugs wiederhergestellt."
+ "Top view, parallel — so the trace lands where you click. Restored when you leave the tool.": "Draufsicht, parallel – damit der Linienzug dort landet, wo Sie klicken. Wird beim Verlassen des Werkzeugs wiederhergestellt.",
+ "Accent colour:": "Akzentfarbe:",
+ "IngeTrazo orange": "IngeTrazo-Orange",
+ "Blue": "Blau",
+ "Green": "Grün",
+ "Red": "Rot",
+ "Purple": "Lila",
+ "Yellow": "Gelb",
+ "Colour of the details of the icons and of the toolbar buttons under the mouse. «Same as the system» uses the desktop's accent colour. The selection in the 3D view stays orange. Applies at once.": "Farbe der Details der Symbole und der Symbolleistenknöpfe unter der Maus. „Wie das System“ verwendet die Akzentfarbe des Desktops. Die Auswahl in der 3D-Ansicht bleibt orange. Wirkt sofort.",
+ "Export STL": "STL exportieren",
+ "Unit of the STL file (3D printing programs expect millimetres)": "Einheit der STL-Datei (3D-Druckprogramme erwarten Millimeter)"
 }

@@ -7,7 +7,8 @@ import json
 import zipfile
 
 import pytest
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QBuffer, QEventLoop, QIODevice, QTimer
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -59,6 +60,22 @@ def _stub_catalog(monkeypatch, module, extensions, reviewed=None):
         # Only the catalog under test: the extensions shipped with the app
         # have their own test (test_extension_manager_hand_installed.py).
         monkeypatch.setattr(module, "bundled_extensions", lambda: [])
+
+
+def _card_rule(row, widget) -> str:
+    """The rule a card's widget wears. Cards share one style sheet, set on
+    each page's card area (#555: a dozen per card cost 24 ms a card on
+    Windows), and each widget is found in it by its object name."""
+    from views.extension_manager_dialog import _CARD_RULES
+    sheet = row.parentWidget().styleSheet()
+    if widget is row:
+        selector = ""
+    elif widget.objectName():
+        selector = f" {type(widget).__name__}#{widget.objectName()}"
+    else:
+        selector = f" {type(widget).__name__}"
+    assert _CARD_RULES[selector] in sheet
+    return _CARD_RULES[selector]
 
 
 def _wait_for_catalog(dialog, app):
@@ -438,18 +455,18 @@ def test_manager_shows_update_and_trust_details_without_downloading(
         assert "Repository ↗" in buttons
         repository = next(button for button in row.findChildren(QPushButton)
                           if button.text() == "Repository ↗")
-        assert "padding: 3px 7px" in repository.styleSheet()
+        assert "padding: 3px 7px" in _card_rule(row, repository)
         author_column = row.findChildren(QLabel)
         author = next(label for label in row.findChildren(QLabel)
                       if label.text() == "by Author")
-        assert "font-size: 13px" in author.styleSheet()
+        assert "font-size: 13px" in _card_rule(row, author)
         license_label = next(label for label in row.findChildren(QLabel)
                              if label.text() == "License: MIT")
         assert author_column.index(license_label) > author_column.index(
             next(label for label in author_column
                  if label.text().startswith("Drawing")))
-        assert "font-size: 13px" in license_label.styleSheet()
-        assert "font-weight: bold" in license_label.styleSheet()
+        assert "font-size: 13px" in _card_rule(row, license_label)
+        assert "font-weight: bold" in _card_rule(row, license_label)
         assert download_calls == []
     finally:
         dialog.close()
@@ -491,7 +508,7 @@ def test_long_author_tags_and_license_wrap_within_preview_width(
         tags_layout = next(layout for layout in row.findChildren(
             dialog_module.FlowLayout))
         image_details = tags_layout.parentWidget()
-        assert image_details.styleSheet() == "background: transparent;"
+        assert _card_rule(row, image_details) == "background: transparent;"
         assert tags_layout.heightForWidth(dialog_module._IMAGE_SIZE[0]) \
             > max(tags_layout.itemAt(index).sizeHint().height()
                   for index in range(tags_layout.count()))
@@ -685,13 +702,13 @@ def test_extension_manager_styles_follow_dark_palette(tmp_path, monkeypatch):
             _wait_for_catalog(dialog, app)
             row = dialog._pages["browse"]["grid"].itemAt(0).widget()
             assert "background: palette(window)" in dialog.styleSheet()
-            assert "background: palette(base)" in row.styleSheet()
-            assert "color: palette(text)" in row.styleSheet()
+            assert "background: palette(base)" in _card_rule(row, row)
+            assert "color: palette(text)" in _card_rule(row, QLabel())
             assert "background: palette(base)" in (
                 dialog._pages["browse"]["search"].styleSheet())
-            assert "color: palette(link)" in next(
+            assert "color: palette(link)" in _card_rule(row, next(
                 button for button in row.findChildren(QPushButton)
-                if button.text() == "Repository ↗").styleSheet()
+                if button.text() == "Repository ↗"))
         finally:
             dialog.close()
             dialog.deleteLater()
@@ -834,3 +851,175 @@ def test_an_identical_loose_file_counts_as_a_copy(tmp_path, monkeypatch):
     with pytest.raises(manager.ExtensionManagerError, match="my_old_name.py"):
         manager.install_extension(_extension(payload))
     assert not (tmp_path / "sample").exists()
+
+
+def test_switching_tabs_keeps_the_cards_and_their_screenshots(
+        tmp_path, monkeypatch):
+    """#555: every tab switch rebuilt all the cards, the old ones stayed
+    painted until deleteLater and each new card started without its
+    picture — a flash between the tabs, worst on Windows."""
+    app = QApplication.instance() or QApplication([])
+    extensions = [
+        manager.Extension(**{
+            **_extension(f"source {index}".encode(),
+                         f"extension_{index}").__dict__,
+            "screenshot": f"extension_{index}.png"})
+        for index in range(3)
+    ]
+    from views import extension_manager_dialog as dialog_module
+    _stub_catalog(monkeypatch, dialog_module, extensions)
+    monkeypatch.setattr(manager, "user_plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr(dialog_module.QStandardPaths, "writableLocation",
+                        lambda _location: str(tmp_path / "data"))
+    pixmap = QPixmap(64, 40)
+    pixmap.fill(QColor("red"))
+    buffer = QBuffer()
+    buffer.open(QIODevice.WriteOnly)
+    pixmap.save(buffer, "PNG")
+    png = bytes(buffer.data())
+    shots = tmp_path / "data" / "extension-screenshots"
+    shots.mkdir(parents=True)
+    for extension in extensions:
+        (shots / extension.screenshot).write_bytes(png)
+    dialog = dialog_module.ExtensionManagerDialog()
+    try:
+        _wait_for_catalog(dialog, app)
+        dialog.resize(1180, 800)
+        dialog.show()
+        app.processEvents()
+        grid = dialog._pages["browse"]["grid"]
+        cards = [grid.itemAt(i).widget() for i in range(grid.count())]
+        labels = dict(dialog._pages["browse"]["image_labels"])
+        assert set(dialog._screenshots) == {e.id for e in extensions}
+        assert all(not label.pixmap().isNull() for label in labels.values())
+
+        dialog._tabs.setCurrentIndex(1)
+        app.processEvents()
+        dialog._tabs.setCurrentIndex(0)
+        app.processEvents()
+        assert [grid.itemAt(i).widget() for i in range(grid.count())] == cards
+        assert "3 of 3 extensions" in dialog._catalog_info.text()
+
+        # A rebuild (a filter, an install): the old cards leave the screen
+        # at once and the new ones are born with their screenshot.
+        dialog._render_page("browse")
+        assert all(card.isHidden() for card in cards)
+        for ident, label in dialog._pages["browse"]["image_labels"].items():
+            assert label is not labels[ident]
+            assert not label.pixmap().isNull()
+            assert label.text() == ""
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()
+
+
+def test_opening_decodes_only_the_visible_screenshots_and_a_same_refresh_keeps_the_cards(
+        tmp_path, monkeypatch):
+    """#555, the white window when the manager opens on Windows: every
+    screenshot was decoded before the first paint (the cards were not laid
+    out yet, so all looked visible), and the refresh that brings the same
+    catalog as the cached one rebuilt both pages again."""
+    app = QApplication.instance() or QApplication([])
+    extensions = [
+        manager.Extension(**{
+            **_extension(f"source {index}".encode(),
+                         f"extension_{index}").__dict__,
+            "screenshot": f"extension_{index}.png"})
+        for index in range(20)
+    ]
+    from views import extension_manager_dialog as dialog_module
+    _stub_catalog(monkeypatch, dialog_module, extensions)
+    monkeypatch.setattr(manager, "user_plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr(dialog_module.QStandardPaths, "writableLocation",
+                        lambda _location: str(tmp_path / "data"))
+    pixmap = QPixmap(64, 40)
+    pixmap.fill(QColor("red"))
+    shots = tmp_path / "data" / "extension-screenshots"
+    shots.mkdir(parents=True)
+    for extension in extensions:
+        pixmap.save(str(shots / extension.screenshot), "PNG")
+    dialog = dialog_module.ExtensionManagerDialog()
+    try:
+        _wait_for_catalog(dialog, app)
+        grid = dialog._pages["browse"]["grid"]
+        cards = [grid.itemAt(i).widget() for i in range(grid.count())]
+        dialog.resize(1180, 800)
+        dialog.show()
+        app.processEvents()
+        assert 0 < len(dialog._screenshots) < len(extensions)
+        # The refresh in the background brought the same catalog: the
+        # cards on screen stay.
+        assert [grid.itemAt(i).widget() for i in range(grid.count())] == cards
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()
+
+
+def test_on_windows_the_manager_appears_only_once_painted(
+        tmp_path, monkeypatch):
+    """#555: Windows showed the new window white until its first paint
+    (~0.4 s); it now opens transparent and appears once painted."""
+    app = QApplication.instance() or QApplication([])
+    from views import extension_manager_dialog as dialog_module
+    _stub_catalog(monkeypatch, dialog_module, [_extension(b"one")])
+    monkeypatch.setattr(manager, "user_plugins_dir", lambda: tmp_path)
+    monkeypatch.setattr(dialog_module, "_HIDE_UNTIL_PAINTED", True)
+    dialog = dialog_module.ExtensionManagerDialog()
+    try:
+        _wait_for_catalog(dialog, app)
+        assert dialog.windowOpacity() == 0.0
+        dialog.show()
+        dialog.repaint()
+        loop = QEventLoop()
+        QTimer.singleShot(50, loop.quit)
+        loop.exec()
+        assert dialog.windowOpacity() == 1.0
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()
+
+
+def test_building_the_manager_never_shows_a_stray_window(tmp_path, monkeypatch):
+    """#555: each card's «Repository ↗» button got setVisible(True) before
+    it was in the card, so it became a window of its own and was shown —
+    on Windows 43 little windows flashed and the build took 0.9 s."""
+    app = QApplication.instance() or QApplication([])
+    from PySide6.QtCore import QEvent, QObject
+    extensions = [_extension(f"source {i}".encode(), f"extension_{i}")
+                  for i in range(5)]
+    from views import extension_manager_dialog as dialog_module
+    _stub_catalog(monkeypatch, dialog_module, extensions)
+    monkeypatch.setattr(manager, "user_plugins_dir", lambda: tmp_path)
+    shown = []
+
+    class Watch(QObject):
+        def eventFilter(self, obj, event):
+            if (event.type() == QEvent.Show and obj.isWidgetType()
+                    and obj.isWindow()):
+                shown.append(type(obj).__name__)
+            return False
+
+    watch = Watch()
+    app.installEventFilter(watch)
+    try:
+        dialog = dialog_module.ExtensionManagerDialog()
+        _wait_for_catalog(dialog, app)
+    finally:
+        app.removeEventFilter(watch)
+    try:
+        assert shown == []
+        dialog.show()
+        app.processEvents()
+        row = dialog._pages["browse"]["grid"].itemAt(0).widget()
+        repository = next(button for button in row.findChildren(QPushButton)
+                          if button.text() == "Repository ↗")
+        assert repository.isVisible()
+        assert dialog._pages["browse"]["reviewed"].isVisible()
+        assert not dialog._pages["installed"]["reviewed"].isVisibleTo(dialog)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        app.processEvents()

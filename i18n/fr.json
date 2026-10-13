@@ -2872,5 +2872,15 @@
  "Imported {name} — {t} triangles": "{name} importé : {t} triangles",
  "Distribute": "Distribuer",
  "Top view, parallel — so the trace lands where you click. Restored when you leave the tool.": "Vue de dessus en parallèle, pour que le tracé tombe là où vous cliquez. Rétablie en quittant l'outil.",
- "No code came back — asking for the recipe.": "Aucun code reçu : demande de la recette."
+ "No code came back — asking for the recipe.": "Aucun code reçu : demande de la recette.",
+ "Accent colour:": "Couleur d'accent :",
+ "IngeTrazo orange": "Orange IngeTrazo",
+ "Blue": "Bleu",
+ "Green": "Vert",
+ "Red": "Rouge",
+ "Purple": "Violet",
+ "Yellow": "Jaune",
+ "Colour of the details of the icons and of the toolbar buttons under the mouse. «Same as the system» uses the desktop's accent colour. The selection in the 3D view stays orange. Applies at once.": "Couleur des détails des icônes et des boutons des barres sous la souris. « Identique au système » utilise la couleur d'accent du bureau. La sélection dans la vue 3D reste orange. S'applique immédiatement.",
+ "Export STL": "Exporter en STL",
+ "Unit of the STL file (3D printing programs expect millimetres)": "Unité du fichier STL (les logiciels d'impression 3D attendent des millimètres)"
 }

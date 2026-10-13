@@ -2880,5 +2880,15 @@
  "Imported {name} — {t} triangles": "Zaimportowano {name} — trójkąty (liczba: {t})",
  "Distribute": "Rozmieść",
  "Top view, parallel — so the trace lands where you click. Restored when you leave the tool.": "Widok z góry, równoległy — aby ślad trafiał tam, gdzie klikasz. Przywracany po wyjściu z narzędzia.",
- "No code came back — asking for the recipe.": "Nie wrócił żaden kod — proszę o przepis."
+ "No code came back — asking for the recipe.": "Nie wrócił żaden kod — proszę o przepis.",
+ "Accent colour:": "Kolor akcentu:",
+ "IngeTrazo orange": "Pomarańczowy IngeTrazo",
+ "Blue": "Niebieski",
+ "Green": "Zielony",
+ "Red": "Czerwony",
+ "Purple": "Fioletowy",
+ "Yellow": "Żółty",
+ "Colour of the details of the icons and of the toolbar buttons under the mouse. «Same as the system» uses the desktop's accent colour. The selection in the 3D view stays orange. Applies at once.": "Kolor detali ikon i przycisków pasków pod kursorem myszy. „Taki sam jak system” używa koloru akcentu pulpitu. Zaznaczenie w widoku 3D pozostaje pomarańczowe. Działa od razu.",
+ "Export STL": "Eksportuj STL",
+ "Unit of the STL file (3D printing programs expect millimetres)": "Jednostka pliku STL (programy do druku 3D oczekują milimetrów)"
 }

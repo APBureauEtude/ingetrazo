@@ -932,6 +932,21 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     scene.georef = None
     scene.photo_mesh = survey
     scene.tile_layer = None
+    # The writer leaves a block out when it holds the default (no planes,
+    # nothing hidden, no own scales…), so what the file does not bring is
+    # reset here — or it leaked from the document open before (#602).
+    from core.layers import DEFAULT_LAYER, Layer
+    scene.layers = [Layer(DEFAULT_LAYER)]
+    scene.section_planes = []
+    scene.show_section_planes = True
+    scene.show_section_cuts = True
+    scene.show_hidden_objects = False
+    scene.show_hidden_geometry = False
+    scene.custom_scales = []
+    scene.back_face_color = None
+    from core.scene import Scene
+    scene.dimension_style = \
+        Scene.__dataclass_fields__["dimension_style"].default_factory()
 
     tick(0.35, "Building geometry…")
     _load_mesh(scene.mesh, payload, geom)

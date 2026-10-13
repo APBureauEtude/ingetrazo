@@ -15,6 +15,14 @@ follow [SemVer](https://semver.org).
   selección en el visor 3D sigue en naranja.
 
 ### Corregido
+- **Abrir otro documento ya no arrastra los planos de sección del
+  anterior** (#602, ArchXQ IT): un archivo sin planos se abría con los del
+  documento que estaba abierto antes, y al guardarlo se quedaban grabados
+  en él. Lo mismo pasaba con los interruptores de planos y cortes, Objetos
+  y Geometría ocultos, las escalas propias, el color del dorso de las caras
+  y las capas que el archivo no tenía. Ahora cada documento se abre solo
+  con lo suyo. Y Archivo ▸ Nuevo borra también un documento que solo
+  tenía planos de sección.
 - **Borrar la diagonal de un rectángulo ya no le da la vuelta a la cara**
   (#529, @GWydouw): al unir dos caras de un mismo plano, el contorno salía
   en cualquiera de los dos sentidos, y casi la mitad de las veces la cara

@@ -2919,5 +2919,18 @@
  "Export trays": "Fächer exportieren",
  "Import trays": "Fächer importieren",
  "Trays (*.json)": "Fächer (*.json)",
- "This is not an IngeTrazo trays file.": "Dies ist keine IngeTrazo-Fächerdatei."
+ "This is not an IngeTrazo trays file.": "Dies ist keine IngeTrazo-Fächerdatei.",
+ "Take the trays out into a window of their own": "Die Fächer in ein eigenes Fenster herausnehmen",
+ "Put the trays back in the main window": "Die Fächer zurück ins Hauptfenster setzen",
+ "Put the trays back on the left side of the main window": "Die Fächer zurück an die linke Seite des Hauptfensters setzen",
+ "Put the trays back on the right side of the main window": "Die Fächer zurück an die rechte Seite des Hauptfensters setzen",
+ "Put the dialogs back in the trays they came from": "Die Dialoge in die Fächer zurücksetzen, aus denen sie kamen",
+ "Fill the screen the window is on": "Den Bildschirm füllen, auf dem das Fenster ist",
+ "Give the window its size back": "Dem Fenster seine Größe zurückgeben",
+ "Drag to move the window; double-click to fill the screen or give it its size back.": "Ziehen, um das Fenster zu verschieben; Doppelklick, um den Bildschirm zu füllen oder ihm seine Größe zurückzugeben.",
+ "Drag to move all the trays of this side, onto the other side or out of the window; double-click to take them out.": "Ziehen, um alle Fächer dieser Seite zu verschieben, auf die andere Seite oder aus dem Fenster heraus; Doppelklick, um sie herauszunehmen.",
+ "Drag to make the section above taller or shorter; double-click to give it back its own height.": "Ziehen, um den Abschnitt darüber höher oder niedriger zu machen; Doppelklick, um ihm seine eigene Höhe zurückzugeben.",
+ "Out in a window of its own: checking it puts it here.": "Draußen in einem eigenen Fenster: Ankreuzen setzt es hierher.",
+ "Trays": "Fächer",
+ "Dialogs": "Dialoge"
 }

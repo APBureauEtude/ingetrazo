@@ -6,7 +6,7 @@ dragging a tab there or from its menu, each side folding on its own."""
 from __future__ import annotations
 
 from PySide6.QtCore import QMimeData, QPointF, Qt
-from PySide6.QtWidgets import QApplication, QTabBar, QTabWidget
+from PySide6.QtWidgets import QApplication, QTabBar, QTabWidget, QWidget
 
 _app = QApplication.instance() or QApplication([])
 
@@ -108,31 +108,40 @@ def test_the_tab_under_the_pointer_names_its_tray():
     _close(win)
 
 
-def test_a_tray_alone_on_its_side_still_has_a_tab():
-    from views.main_window import _DockTitleTab
+def test_a_tray_alone_on_its_side_still_has_its_name_and_menu():
+    """No tab bar from Qt for a tray alone on its side: the strip over
+    that side names it, and right-clicked or dropped on does what a tab
+    does."""
     win = _window()
     win.move_dock(win.project_browser, Qt.LeftDockWidgetArea)
     _app.processEvents()
+    win._style_dock_tabs()
     _app.processEvents()
-    tab = win.project_browser.titleBarWidget()
-    assert isinstance(tab, _DockTitleTab)
-    assert tab.isVisible() and tab.tabText(0) == "Browser"
-    centre = tab.mapTo(win, tab.tabRect(0).center())
-    assert win._dock_tab_at(centre) is win.project_browser
+    band = win.band(Qt.LeftDockWidgetArea)
+    assert band.isVisible() and band.name() == "Browser"
+    texts = [a.text() for a in win.band_menu(win.project_browser).actions()]
+    assert "Move to the right side" in texts
     win.move_dock(win.project_browser, Qt.RightDockWidgetArea)
+    _app.processEvents()
+    win._style_dock_tabs()
+    assert not win.band(Qt.LeftDockWidgetArea).isVisible()   # side empty
     _close(win)
 
 
 def test_a_tabbed_tray_does_not_name_itself_twice():
+    """Its own title bar stays empty: the strip over the side names the
+    tab in front, once for all of them."""
     win = _window()
-    from views.main_window import _DockTitleTab
     win._style_dock_tabs()
-    assert not isinstance(win.tray.titleBarWidget(), _DockTitleTab)  # tabbed
-    win.move_dock(win.project_browser, Qt.LeftDockWidgetArea)
+    band = win.band(Qt.RightDockWidgetArea)
+    assert type(win.tray.titleBarWidget()) is QWidget
+    top = win.front_tray(Qt.RightDockWidgetArea)
+    assert band.name() == top.windowTitle()
+    other = next(d for d in win.tabifiedDockWidgets(top) if not d.isHidden())
+    other.raise_()                                     # another tab in front
     _app.processEvents()
     win._style_dock_tabs()
-    assert isinstance(win.project_browser.titleBarWidget(), _DockTitleTab)
-    win.move_dock(win.project_browser, Qt.RightDockWidgetArea)
+    assert band.name() == other.windowTitle()
     _close(win)
 
 

@@ -2911,5 +2911,18 @@
  "Export trays": "Ekspor baki",
  "Import trays": "Impor baki",
  "Trays (*.json)": "Baki (*.json)",
- "This is not an IngeTrazo trays file.": "Ini bukan berkas baki IngeTrazo."
+ "This is not an IngeTrazo trays file.": "Ini bukan berkas baki IngeTrazo.",
+ "Take the trays out into a window of their own": "Keluarkan baki ke jendela tersendiri",
+ "Put the trays back in the main window": "Kembalikan baki ke jendela utama",
+ "Put the trays back on the left side of the main window": "Kembalikan baki ke sisi kiri jendela utama",
+ "Put the trays back on the right side of the main window": "Kembalikan baki ke sisi kanan jendela utama",
+ "Put the dialogs back in the trays they came from": "Kembalikan dialog ke baki asalnya",
+ "Fill the screen the window is on": "Penuhi layar tempat jendela berada",
+ "Give the window its size back": "Kembalikan ukuran jendela",
+ "Drag to move the window; double-click to fill the screen or give it its size back.": "Seret untuk memindahkan jendela; klik ganda untuk memenuhi layar atau mengembalikan ukurannya.",
+ "Drag to move all the trays of this side, onto the other side or out of the window; double-click to take them out.": "Seret untuk memindahkan semua baki di sisi ini, ke sisi lain atau ke luar jendela; klik ganda untuk mengeluarkannya.",
+ "Drag to make the section above taller or shorter; double-click to give it back its own height.": "Seret untuk membuat bagian di atasnya lebih tinggi atau lebih pendek; klik ganda untuk mengembalikan tinggi aslinya.",
+ "Out in a window of its own: checking it puts it here.": "Di luar, dalam jendela tersendiri: mencentangnya akan menaruhnya di sini.",
+ "Trays": "Baki",
+ "Dialogs": "Dialog"
 }

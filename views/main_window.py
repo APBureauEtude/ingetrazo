@@ -151,24 +151,6 @@ def _obj_parts(temp):
         soften_smooth_edges(kid.mesh, cos_threshold=0.55)
     return group
 
-class _DockTitleTab(QTabBar):
-    """The title bar of a side tray: one tab with its name, as the tabs Qt
-    draws when trays share a side — so a tray alone on its side still has
-    a tab to drag to the other side, to right-click and to drop on. Qt
-    hides it while the tray is tabbed with others (their tab bar shows)."""
-
-    def __init__(self, window, dock) -> None:
-        super().__init__(dock)
-        self.addTab(dock.windowTitle())
-        self.setDrawBase(False)
-        self.setExpanding(False)
-        self.setElideMode(Qt.ElideNone)
-        dock.windowTitleChanged.connect(lambda t: self.setTabText(0, t))
-        self.setProperty("ingetrazo_watched", True)
-        self.setAcceptDrops(True)
-        self.installEventFilter(window)
-
-
 class _DockDropZone(QWidget):
     """Where a dragged tray tab can go, shown while it is dragged: a
     translucent panel at one edge of the viewport, lit while the pointer is
@@ -378,6 +360,20 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self, self._pack_toolbars)
         if not getattr(self, "_ndof_connected", False):
             self._connect_ndof()
+        if getattr(self, "_seat_on_show", False):
+            # Now, before the first paint: Qt's next layout pass then
+            # clears the tab bars the reshuffle went through.
+            self._seat_on_show = False
+            self._seat_bands_if_needed()
+        if not getattr(self, "_tray_windows_restored", False):
+            # The trays that were out in windows of their own go back out
+            # once this window is on screen (theirs stand above it).
+            from PySide6.QtCore import QTimer
+            self._tray_windows_restored = True
+            QTimer.singleShot(0, self, self.restore_tray_windows)
+            manager = getattr(self, "tray_manager", None)
+            if manager is not None:
+                QTimer.singleShot(0, manager, manager.show_windows)
 
     # ---- 3D mouse (issue #108) ----------------------------------------------
     def _route_window_toggle(self, name: str, own):
@@ -1597,6 +1593,9 @@ class MainWindow(QMainWindow):
             # first start; from here on the user's choice rules it.
             st.setValue("ui/hidden_trays", sorted(hidden))
         self._mark_trays_known(st, [d.objectName() for d in docks])
+        # A layout saved before the strips, or a strip it put under the
+        # trays: each strip first on its side again.
+        self._seat_bands_if_needed()
         if not self.tray.isHidden():
             self.tray.raise_()
         # Filled now too, not only when it opens: F3 finds each tab there.
@@ -1682,6 +1681,8 @@ class MainWindow(QMainWindow):
         st = QSettings()
         st.remove("ui/hidden_trays")
         st.remove("ui/known_trays")
+        for tw in list(self._tray_windows().values()):
+            self.dock_back(tw)
         self._lay_out_trays()
         hidden = self._hidden_tray_names(st)
         for d in self._sidebar_docks():
@@ -1729,6 +1730,10 @@ class MainWindow(QMainWindow):
                 act.setChecked(True)
             dock.show()
             dock.raise_()
+            tw = self._tray_window_of(dock)
+            if tw is not None:
+                tw.show()
+                tw.raise_()
         else:
             dock.hide()
         self._remember_tray_choice(dock, shown)
@@ -1761,26 +1766,387 @@ class MainWindow(QMainWindow):
 
     def _tray_tab_menu(self, pos) -> QMenu:
         """The right-click menu of the tray tab at ``pos`` (window
-        coordinates): to the other side, the Window ▸ Panels list, and
-        Manage Trays."""
+        coordinates): its strip's (:meth:`band_menu`)."""
+        return self.band_menu(self._dock_tab_at(pos))
+
+    def band_menu(self, dock) -> QMenu:
+        """A tray's right-click menu (its tab or its title strip): out
+        into a window of its own or back, to the other side, the Window ▸
+        Panels list, and Manage Trays."""
         menu = QMenu(self)
-        dock = self._dock_tab_at(pos)
-        if dock is not None:
-            left = self.dockWidgetArea(dock) == Qt.LeftDockWidgetArea
-            menu.addAction(
-                tr("Move to the right side") if left
-                else tr("Move to the left side"),
-                lambda: self.move_dock(
-                    dock, Qt.RightDockWidgetArea if left
-                    else Qt.LeftDockWidgetArea))
-            menu.addSeparator()
+        # The list first: it starts by clearing the menu it fills — the
+        # «Move to the … side» put before it never showed.
         self._fill_panels_menu(menu)
+        first = menu.actions()[0] if menu.actions() else None
+        head = []
+        tw = self._tray_window_of(dock)
+        if tw is not None:
+            head.append((tr("Put the trays back in the main window"),
+                         lambda: self.dock_back(tw)))
+        elif dock is not None:
+            area = self.dockWidgetArea(dock)
+            left = area == Qt.LeftDockWidgetArea
+            head.append((tr("Take the trays out into a window of their own"),
+                         lambda: self.detach_side(area)))
+            head.append((tr("Move to the right side") if left
+                         else tr("Move to the left side"),
+                         lambda: self.move_dock(
+                             dock, Qt.RightDockWidgetArea if left
+                             else Qt.LeftDockWidgetArea)))
+        for text, fn in head:
+            act = QAction(text, menu)
+            act.triggered.connect(lambda _c=False, f=fn: f())
+            menu.insertAction(first, act)
+        if head and first is not None:
+            menu.insertSeparator(first)
         menu.addSeparator()
         menu.addAction(
             tr("Manage Trays…"),
             lambda: self.open_manage_trays(
                 dock.objectName() if dock is not None else None))
         return menu
+
+    # ---- the trays out in a window of their own (views/tray_window.py) -------
+    def _tray_windows(self) -> dict:
+        """Side (Qt.DockWidgetArea) → the window its trays are out in."""
+        tws = getattr(self, "_tray_windows_by_side", None)
+        if tws is None:
+            tws = self._tray_windows_by_side = {}
+        return tws
+
+    def _tray_window_of(self, dock):
+        from views.tray_window import TrayWindow
+        w = dock.parentWidget() if dock is not None else None
+        return w if isinstance(w, TrayWindow) else None
+
+    def detach_side(self, area, at=None, docks=None):
+        """The trays of the ``area`` side — the open ones and the closed —
+        out into a window of their own, its top-left at ``at`` (a screen
+        point) or where the side was. Returns the window."""
+        from PySide6.QtCore import QPoint, QSize
+        from views.tray_window import TrayWindow, tab_order
+        if area not in (Qt.LeftDockWidgetArea, Qt.RightDockWidgetArea):
+            return None
+        if docks is None:
+            docks = [d for d in self._sidebar_docks()
+                     if self.dockWidgetArea(d) == area]
+        if not docks:
+            return None
+        docks = tab_order(self, docks)
+        front = next((d for d in docks if d.isVisible()
+                      and not d.visibleRegion().isEmpty()), None)
+        tw = self._tray_windows().get(area)
+        if tw is None:
+            tw = self._tray_windows()[area] = TrayWindow(self, area)
+            seen = front or docks[0]
+            tw.resize(QSize(max(280, seen.width()),
+                            max(420, seen.height() + 30)))
+            if at is None:
+                at = (seen.mapToGlobal(QPoint(0, 0)) if seen.isVisible()
+                      else self.mapToGlobal(QPoint(self.width() - tw.width(),
+                                                   80)))
+            tw.move(at)
+        tw.take(docks, front)
+        tw.show()
+        self._after_trays_moved()
+        return tw
+
+    def dock_back(self, tw, area=None) -> None:
+        """A tray window's trays back on their side (or ``area``), tabbed
+        in their order with what is there, the one in front still in
+        front; the window goes."""
+        from views.tray_window import tab_order
+        area = area or tw.area
+        docks = tab_order(tw, tw.docks())
+        front = tw.front()
+        anchor = next((d for d in self._sidebar_docks()
+                       if d.parentWidget() is self
+                       and self.dockWidgetArea(d) == area), None)
+        for d in docks:
+            self.addDockWidget(area, d)
+            if anchor is None:
+                anchor = d
+            else:
+                self.tabifyDockWidget(anchor, d)
+        act = (self._act_left_sidebar if area == Qt.LeftDockWidgetArea
+               else self._act_sidebar)
+        if not act.isChecked():
+            act.blockSignals(True)
+            act.setChecked(True)
+            act.blockSignals(False)
+        if front is not None and not front.isHidden():
+            front.raise_()
+        self._drop_tray_window(tw)
+        self._after_trays_moved()
+
+    def _drop_tray_window(self, tw) -> None:
+        for area, w in list(self._tray_windows().items()):
+            if w is tw:
+                del self._tray_windows()[area]
+        tw._closing = True
+        tw.close()
+        tw.deleteLater()
+
+    def drop_in_window(self, mime, tw) -> None:
+        """A tab, a side or another tray window dropped on a tray window's
+        tabs or strip: in there."""
+        text = bytes(mime.data(self.DOCK_MIME)).decode("utf-8")
+        if text.startswith("group:"):
+            area = Qt.DockWidgetArea(int(text[6:]))
+            tw.take([d for d in self._sidebar_docks()
+                     if self.dockWidgetArea(d) == area])
+        elif text.startswith("window:"):
+            other = self._tray_windows().get(Qt.DockWidgetArea(int(text[7:])))
+            if other is not None and other is not tw:
+                tw.take(other.docks())
+        else:
+            dock = self._dock_named(mime)
+            if dock is not None and dock.parentWidget() is not tw:
+                tw.take([dock])
+        self._after_trays_moved()
+
+    def drag_band(self, band, press) -> None:
+        """A tray's title strip dragged: the whole side (or the whole tray
+        window) goes where it is dropped — a side, its drop zone, the
+        viewport's half — and out of the window, where nothing takes it,
+        into a window of its own (a tray window just moves there)."""
+        from PySide6.QtCore import QMimeData
+        from PySide6.QtGui import QCursor, QDrag
+        area = band.area
+        payload = f"group:{int(area.value)}"
+        data = QMimeData()
+        data.setData(self.DOCK_MIME, payload.encode("utf-8"))
+        drag = QDrag(band)
+        drag.setMimeData(data)
+        drag.setPixmap(band.grab())
+        drag.setHotSpot(press)
+        self.show_drop_zones(True)
+        try:
+            done = drag.exec(Qt.MoveAction)
+        finally:
+            self.show_drop_zones(False)
+        if done != Qt.IgnoreAction:
+            return
+        self.detach_side(area, at=QCursor.pos() - press)
+
+    def band(self, area):
+        """The title strip over the ``area`` side's trays."""
+        docks = getattr(self, "_band_docks", None)
+        return docks[area].band if docks and area in docks else None
+
+    def front_tray(self, area):
+        """The tray in front on the ``area`` side of this window — of its
+        upper group of tabs, when it has more than one."""
+        docks = self._side_docks(area)
+        shown = [d for d in docks if not d.visibleRegion().isEmpty()]
+        if shown:
+            return min(shown, key=lambda d: d.y())
+        return docks[0] if docks else None
+
+    def _refresh_bands(self) -> None:
+        """Each strip names the tab in front on its side, and shows while
+        that side has trays open (not during the clean screen)."""
+        bands = getattr(self, "_band_docks", None)
+        if not bands:
+            return
+        clean = (self._act_clean_screen.isChecked()
+                 if hasattr(self, "_act_clean_screen") else False)
+        for area, dock in bands.items():
+            front = self.front_tray(area)
+            dock.band.set_name(front.windowTitle() if front is not None
+                               else "")
+            want = front is not None and not clean
+            if dock.isHidden() == want:
+                dock.setVisible(want)
+
+    def _seat_bands_if_needed(self) -> None:
+        """Each strip first on its side. Read on screen: before the window
+        shows, the tabs' order is not there to keep — then it waits for
+        the first show."""
+        bands = getattr(self, "_band_docks", None)
+        if not bands:
+            return
+        if not self.isVisible():
+            self._seat_on_show = True
+            return
+        self._refresh_bands()
+        self.layout().activate()
+        wrong = []
+        for area, band in bands.items():
+            docks = self._side_docks(area)
+            if docks and not band.isHidden() \
+                    and band.y() > min(d.y() for d in docks):
+                wrong.append(area)
+        if wrong:
+            self._seat_bands(wrong)
+
+    def _side_groups(self, area) -> list:
+        """The trays of a side as they stand: its groups of tabs top to
+        bottom, each in its tab order, a tray alone a group of one; the
+        closed trays go with the first group."""
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QTabBar
+        docks = [d for d in self._sidebar_docks()
+                 if d.parentWidget() is self
+                 and self.dockWidgetArea(d) == area]
+        groups, seen = [], set()
+        for bar in self.findChildren(QTabBar):
+            # Qt keeps spare tab bars around, out of sight.
+            if bar.parent() is not self or not bar.isVisible() \
+                    or not self.rect().contains(bar.mapTo(self, QPoint(0, 0))):
+                continue
+            group = []
+            for i in range(bar.count()):
+                d = next((x for x in docks if x not in seen and x not in group
+                          and x.windowTitle() == bar.tabText(i)), None)
+                if d is not None:
+                    group.append(d)
+            if group:
+                groups.append((bar.mapTo(self, QPoint(0, 0)).y(), group))
+                seen.update(group)
+        for d in docks:
+            if d not in seen and not d.isHidden():
+                groups.append((d.y(), [d]))
+                seen.add(d)
+        groups = [g for _y, g in sorted(groups, key=lambda yg: yg[0])]
+        closed = [d for d in docks if d not in seen]
+        if closed:
+            if groups:
+                groups[0].extend(closed)
+            else:
+                groups.append(closed)
+        return groups
+
+    def _seat_bands(self, areas=None) -> None:
+        """Each strip first on its side, over the trays' tabs: the side's
+        groups of tabs laid out again after it as they stood — same
+        groups, same order, the closed trays closed and the ones in front
+        in front."""
+        # Without Qt's animation: animated, every step of the reshuffle
+        # left a tab bar on screen until it played out.
+        options = self.dockOptions()
+        self.setDockOptions(options & ~QMainWindow.AnimatedDocks)
+        for area, band in getattr(self, "_band_docks", {}).items():
+            if areas is not None and area not in areas:
+                continue
+            groups = self._side_groups(area)
+            hidden = {d for g in groups for d in g if d.isHidden()}
+            fronts = [next((d for d in g if d.isVisible()
+                            and not d.visibleRegion().isEmpty()), None)
+                      for g in groups]
+            self.addDockWidget(area, band)
+            for g in groups:
+                self.addDockWidget(area, g[0])
+                for d in g[1:]:
+                    self.tabifyDockWidget(g[0], d)
+            for g in groups:
+                for d in g:
+                    d.setVisible(d not in hidden)
+            for front in fronts:
+                if front is not None and not front.isHidden():
+                    front.raise_()
+        # The arrangement applied afresh: the tab bars the reshuffle went
+        # through stayed on screen, emptied, until a later pass.
+        self.restoreState(self.saveState())
+        self.setDockOptions(options)
+        self._style_dock_tabs()
+
+    def _after_trays_moved(self) -> None:
+        from PySide6.QtCore import QTimer
+        self._style_dock_tabs()
+        QTimer.singleShot(0, self, self._place_sidebar_handle)
+        menu = getattr(self, "_panels_menu", None)
+        if menu is not None:
+            self._fill_panels_menu(menu)
+        self.remember_tray_windows()
+
+    def tray_window_entries(self) -> list:
+        """The tray windows as data: their side, their tabs in order, the
+        one in front, where the window is (its own size, when it fills a
+        screen) and whether it fills one."""
+        from views.tray_window import tab_order
+        entries = []
+        for area, tw in self._tray_windows().items():
+            front = tw.front()
+            r = tw.normal_rect()
+            entries.append({
+                "side": "left" if area == Qt.LeftDockWidgetArea else "right",
+                "docks": [d.objectName() for d in tab_order(tw, tw.docks())],
+                "front": front.objectName() if front is not None else None,
+                "rect": [r.x(), r.y(), r.width(), r.height()],
+                "maximized": tw.is_max()})
+        return entries
+
+    def remember_tray_windows(self) -> None:
+        """Where the tray windows are, saved a moment after they stop
+        moving."""
+        from PySide6.QtCore import QTimer
+        timer = getattr(self, "_tray_windows_timer", None)
+        if timer is None:
+            timer = self._tray_windows_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(300)
+            timer.timeout.connect(self._save_tray_windows)
+        timer.start()
+
+    def _save_tray_windows(self) -> None:
+        import json
+        if getattr(self, "_tray_windows_saved_for_good", False):
+            return
+        QSettings().setValue("ui/tray_windows",
+                             json.dumps(self.tray_window_entries()))
+
+    def restore_tray_windows(self, entries=None) -> None:
+        """The tray windows as they were (or as ``entries`` say): each
+        with its tabs, in front the same, where it was. Tabs this window
+        does not have (an extension not loaded yet) join when they come."""
+        import json
+        if entries is None:
+            try:
+                entries = json.loads(QSettings().value("ui/tray_windows", "")
+                                     or "[]")
+            except (TypeError, ValueError):
+                return
+        if not isinstance(entries, list):
+            return
+        by_name = {d.objectName(): d for d in self._sidebar_docks()}
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            area = (Qt.LeftDockWidgetArea if e.get("side") == "left"
+                    else Qt.RightDockWidgetArea)
+            names = e.get("docks") if isinstance(e.get("docks"), list) else []
+            docks = [by_name[n] for n in names if n in by_name]
+            tw = self.detach_side(area, docks=docks) if docks else None
+            if tw is None:
+                continue
+            self._place_tray_window(tw, e)
+            front = by_name.get(e.get("front"))
+            if front in docks and not front.isHidden():
+                front.raise_()
+
+    def _place_tray_window(self, tw, entry: dict) -> None:
+        """A tray window where ``entry`` says — on a screen that is still
+        there, or on the main window's — and filling it if it did."""
+        from PySide6.QtCore import QByteArray, QPoint
+        if "rect" not in entry and isinstance(entry.get("geometry"), str):
+            tw.restoreGeometry(QByteArray.fromBase64(       # saved before
+                entry["geometry"].encode("ascii")))
+        tw.place(entry, self.mapToGlobal(QPoint(0, 0)))
+
+    def _saved_tray_window_side(self, name: str):
+        """The side whose tray window ``name`` was in last time, if any."""
+        import json
+        try:
+            entries = json.loads(QSettings().value("ui/tray_windows", "")
+                                 or "[]")
+        except (TypeError, ValueError):
+            return None
+        for e in entries if isinstance(entries, list) else ():
+            if isinstance(e, dict) and name in (e.get("docks") or ()):
+                return (Qt.LeftDockWidgetArea if e.get("side") == "left"
+                        else Qt.RightDockWidgetArea)
+        return None
 
     def _sidebar_docks(self) -> list:
         return [d for d in (getattr(self, "tray", None),
@@ -1813,6 +2179,9 @@ class MainWindow(QMainWindow):
         QSettings().setValue("ui/tray_tabs_bottom", bool(on))
         self.setTabPosition(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea,
                             QTabWidget.South if on else QTabWidget.North)
+        for tw in self._tray_windows().values():
+            tw.setTabPosition(Qt.AllDockWidgetAreas,
+                              QTabWidget.South if on else QTabWidget.North)
         QTimer.singleShot(0, self, self._style_dock_tabs)
         QTimer.singleShot(0, self, self._place_sidebar_handle)
 
@@ -1836,11 +2205,15 @@ class MainWindow(QMainWindow):
         # Tabbed with Properties, as an extension's panel is — even with
         # every tray closed: added beside them instead, it opened a second
         # group of tabs under the first once they came back.
-        area = self.dockWidgetArea(self.tray)
-        if area == Qt.NoDockWidgetArea:
-            area = Qt.RightDockWidgetArea
-        self.addDockWidget(area, dock)
-        self.tabifyDockWidget(self.tray, dock)
+        tw = self._tray_window_of(self.tray)
+        if tw is not None:
+            tw.take([dock])
+        else:
+            area = self.dockWidgetArea(self.tray)
+            if area == Qt.NoDockWidgetArea:
+                area = Qt.RightDockWidgetArea
+            self.addDockWidget(area, dock)
+            self.tabifyDockWidget(self.tray, dock)
         self._keep_docked(dock)
         dock.toggleViewAction().triggered.connect(
             lambda on, d=dock: self._remember_tray_choice(d, on))
@@ -1885,9 +2258,12 @@ class MainWindow(QMainWindow):
         """Bring to the front the tray showing ``panel`` — the one Manage
         Trays put it in, not necessarily the one it was made for."""
         from PySide6.QtWidgets import QDockWidget
+        from views.tray_window import DialogWindow
         w = panel.parentWidget()
-        while w is not None and not isinstance(w, QDockWidget):
+        while w is not None and not isinstance(w, (QDockWidget, DialogWindow)):
             w = w.parentWidget()
+        if isinstance(w, DialogWindow):
+            w.show()
         if w is not None:
             w.raise_()
 
@@ -1956,8 +2332,11 @@ class MainWindow(QMainWindow):
         y = edge.y() + (self.viewport.height() - btn.height()) // 2
         btn.move(x, max(0, y))
         btn.raise_()
-        btn.setVisible(not self._act_clean_screen.isChecked()
-                       if hasattr(self, "_act_clean_screen") else True)
+        out = (Qt.RightDockWidgetArea in self._tray_windows()
+               and not self._side_docks(Qt.RightDockWidgetArea))
+        btn.setVisible(not out and (not self._act_clean_screen.isChecked()
+                                    if hasattr(self, "_act_clean_screen")
+                                    else True))
         left = getattr(self, "_left_handle", None)
         if left is not None:
             start = self.viewport.mapTo(self, QPoint(0, 0))
@@ -1978,7 +2357,7 @@ class MainWindow(QMainWindow):
         them back; the chevron turns to point the way. The RIGHT side's
         trays — the left side folds on its own (Ctrl+F6)."""
         docks = [d for d in self._sidebar_docks()
-                 if self.dockWidgetArea(d) != Qt.LeftDockWidgetArea]
+                 if self.dockWidgetArea(d) == Qt.RightDockWidgetArea]
         if on:
             shown = getattr(self, "_sidebar_was", None) or docks[:1]
             for d in docks:
@@ -1995,6 +2374,7 @@ class MainWindow(QMainWindow):
                                       and not d.visibleRegion().isEmpty()), None)
             for d in docks:
                 d.hide()
+        self._refresh_bands()
         btn = getattr(self, "_sidebar_handle", None)
         if btn is not None:
             key = "side_collapse" if on else "side_expand"
@@ -2014,7 +2394,13 @@ class MainWindow(QMainWindow):
             for tb in self.findChildren(QToolBar):
                 tb.hide()
             for dock in self.findChildren(QDockWidget):
-                dock.hide()
+                if dock.window() is self:   # a tray window goes whole
+                    dock.hide()
+            self._clean_tray_windows = [tw for tw in self._tray_windows().values()
+                                        if tw.isVisible()]
+            for tw in self._clean_tray_windows:
+                tw.hide()
+            self._clean_tray_windows += self.tray_manager.hide_windows()
             self.menuBar().hide()
             self.statusBar().hide()
             self._clean_screen_exit_button().show()
@@ -2030,6 +2416,10 @@ class MainWindow(QMainWindow):
             state = getattr(self, "_clean_screen_state", None)
             if state is not None:
                 self.restoreState(state)
+            for tw in getattr(self, "_clean_tray_windows", ()):
+                tw.show()
+            self._clean_tray_windows = []
+            self._refresh_bands()
             self.menuBar().show()
             self.statusBar().show()
             from PySide6.QtCore import QTimer
@@ -2121,6 +2511,13 @@ class MainWindow(QMainWindow):
         btn.setStyleSheet(self._sidebar_handle.styleSheet())
         btn.clicked.connect(lambda: act.setChecked(not act.isChecked()))
         self._left_handle = btn
+        # A title strip over each side's trays, first on that side.
+        from views.tray_window import TrayBandDock
+        self._band_docks = {}
+        for area in (Qt.RightDockWidgetArea, Qt.LeftDockWidgetArea):
+            band = self._band_docks[area] = TrayBandDock(self, area)
+            self.addDockWidget(area, band)
+        self._seat_bands_if_needed()
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self, self._style_dock_tabs)
         QTimer.singleShot(0, self, self._place_sidebar_handle)
@@ -2130,9 +2527,11 @@ class MainWindow(QMainWindow):
                 if not d.isHidden() and self.dockWidgetArea(d) == area]
 
     def _dock_tab_bars(self) -> list:
+        """The tab bars of the trays: the window's, and its tray windows'."""
         from PySide6.QtWidgets import QTabBar
+        owners = {self, *self._tray_windows().values()}
         return [tb for tb in self.findChildren(QTabBar)
-                if tb.parent() is self]
+                if tb.parent() in owners]
 
     def _style_dock_tabs(self) -> None:
         """Whole names, scroll arrows: the composer's tabs. Qt makes a tab
@@ -2148,9 +2547,9 @@ class MainWindow(QMainWindow):
                 tb.setProperty("ingetrazo_watched", True)
                 tb.setAcceptDrops(True)
                 tb.installEventFilter(self)
-        # A tray alone on its side has no tab bar from Qt — only its title
-        # bar, an empty strip: it gets a tab of its own there, so it can
-        # still be dragged across, right-clicked and dropped on.
+        # A tray's own title bar stays empty: the strip over the side's
+        # trays (views/tray_window.py) names the tab in front — over the
+        # tabs, not inside one tray — and carries them all.
         from PySide6.QtCore import QTimer
         for d in self._sidebar_docks():
             if d.property("ingetrazo_titles") is None:
@@ -2158,18 +2557,16 @@ class MainWindow(QMainWindow):
                 bump = lambda *_a: QTimer.singleShot(0, self, self._style_dock_tabs)
                 d.visibilityChanged.connect(bump)
                 d.dockLocationChanged.connect(bump)
-            # Tabbed with others, Qt's tab bar already names it: an empty
-            # title bar, as the trays always had (its own tab would read
-            # twice). Alone on its side: its own tab.
-            tabbed = any(not o.isHidden() for o in self.tabifiedDockWidgets(d))
             current = d.titleBarWidget()
-            if tabbed and isinstance(current, _DockTitleTab):
+            if current is None or type(current) is not QWidget:
                 d.setTitleBarWidget(QWidget(d))
-                current.deleteLater()
-            elif not tabbed and not isinstance(current, _DockTitleTab):
-                d.setTitleBarWidget(_DockTitleTab(self, d))
                 if current is not None:
                     current.deleteLater()
+        # A tray window whose last tab was dragged out goes.
+        for tw in list(self._tray_windows().values()):
+            if not tw.docks():
+                self._drop_tray_window(tw)
+        self._refresh_bands()
 
     def _dock_of_tab(self, bar, index):
         if index < 0:
@@ -2226,6 +2623,7 @@ class MainWindow(QMainWindow):
             self._left_was = self._side_docks(Qt.LeftDockWidgetArea)
             for d in self._left_was:
                 d.hide()
+        self._refresh_bands()
         btn = getattr(self, "_left_handle", None)
         if btn is not None:
             btn.setIcon(tool_icon("side_expand" if on else "side_collapse"))
@@ -2265,7 +2663,10 @@ class MainWindow(QMainWindow):
             elif t == QEvent.Drop and \
                     event.mimeData().hasFormat(self.DOCK_MIME):
                 here = self._dock_of_tab(obj, 0)
-                if here is not None:
+                tw = self._tray_window_of(here)
+                if tw is not None:
+                    self.drop_in_window(event.mimeData(), tw)
+                elif here is not None:
                     self.drop_on_side(event.mimeData(),
                                       self.dockWidgetArea(here))
                 event.acceptProposedAction()
@@ -2294,6 +2695,11 @@ class MainWindow(QMainWindow):
         text = bytes(mime.data(self.DOCK_MIME)).decode("utf-8")
         if text.startswith("group:"):
             self.move_side(Qt.DockWidgetArea(int(text[6:])), area)
+            return
+        if text.startswith("window:"):
+            tw = self._tray_windows().get(Qt.DockWidgetArea(int(text[7:])))
+            if tw is not None:
+                self.dock_back(tw, area)
             return
         dock = self._dock_named(mime)
         if dock is not None:
@@ -2358,8 +2764,13 @@ class MainWindow(QMainWindow):
         if dock is None:
             return
         data = QMimeData()
-        payload = (f"group:{int(self.dockWidgetArea(dock).value)}" if group
-                   else dock.objectName())
+        tw = self._tray_window_of(dock)
+        if group and tw is not None:
+            payload = f"window:{int(tw.area.value)}"
+        elif group:
+            payload = f"group:{int(self.dockWidgetArea(dock).value)}"
+        else:
+            payload = dock.objectName()
         data.setData(self.DOCK_MIME, payload.encode("utf-8"))
         drag = QDrag(bar)
         drag.setMimeData(data)
@@ -2648,9 +3059,39 @@ class MainWindow(QMainWindow):
         manager = getattr(self, "tray_manager", None)
         if manager is not None:
             manager.adopt(dock)
+        # Out in a tray window last time: back in it.
+        side = self._saved_tray_window_side(dock.objectName())
+        if side is not None:
+            tw = self._tray_windows().get(side)
+            if tw is not None:
+                tw.take([dock])
+            else:
+                self.detach_side(side, docks=[dock])
+        else:
+            self._join_side_group(dock)
         menu = getattr(self, "_panels_menu", None)
         if menu is not None:
             self._fill_panels_menu(menu)
+
+    def _join_side_group(self, dock) -> None:
+        """One group of tabs per side: a panel put back in a place of its
+        own joins the other trays of its side. Putting a title strip on
+        top re-lays the side out as the window shows, before the
+        extensions load; the layout still kept their old places, and the
+        AI panel came back there — a second group, over the strip."""
+        if dock.parentWidget() is not self:
+            return
+        area = self.dockWidgetArea(dock)
+        others = [d for d in self._sidebar_docks()
+                  if d is not dock and d.parentWidget() is self
+                  and self.dockWidgetArea(d) == area]
+        if not others:
+            return
+        anchor = next((d for d in others if not d.isHidden()), others[0])
+        if not dock.isHidden() and not anchor.isHidden() \
+                and anchor in self.tabifiedDockWidgets(dock):
+            return                          # already one of them
+        self.tabifyDockWidget(anchor, dock)
 
     def show_panel_dock(self, dock) -> None:
         """Bring a side panel forward (``ExtensionApp.show_panel``): the
@@ -7285,6 +7726,16 @@ class MainWindow(QMainWindow):
         act = getattr(self, "_act_clean_screen", None)
         clean_state = getattr(self, "_clean_screen_state", None)
         st = QSettings()
+        # The tray windows first: where they are, saved once more and for
+        # good — a save still waiting must not run after this window.
+        self._save_tray_windows()
+        self._tray_windows_saved_for_good = True
+        self.tray_manager.save_windows(final=True)
+        timer = getattr(self, "_tray_windows_timer", None)
+        if timer is not None:
+            timer.stop()
+        for tw in self._tray_windows().values():
+            tw._closing = True
         st.setValue("ui/window_state",
                     clean_state if (act is not None and act.isChecked()
                                     and clean_state is not None)

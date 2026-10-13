@@ -535,35 +535,61 @@ def test_a_filling_section_takes_the_height_left_until_folded():
     small = _Section("Small", _tall(80), "small")
     tree = _Section("Tree", QWidget(), "tree", fill=True)
     stack = _shown_stack(small, tree)
+    col = stack._col
     assert small.height() == small.natural_height()
-    assert tree.y() + tree.height() >= stack.viewport().height() - 2
-    assert not stack._filler.isVisible()
+    assert tree.y() + tree.height() >= stack.viewport().height() - 4
+    assert (col.stretch(1), col.stretch(2)) == (1, 0)
     tree._btn.setChecked(False)                 # folded: just its header
     _settle()
     assert tree.height() == tree.header_height()
-    assert stack._filler.isVisible()
+    assert (col.stretch(1), col.stretch(2)) == (0, 1)
     tree._btn.setChecked(True)
     stack.close()
 
 
-def test_the_separator_under_a_section_sets_its_height_and_it_is_kept():
-    """Marco's sections only folded; between two of them a separator now
-    gives one the height it takes from the other, and remembers it."""
+def _drag_grip(section, dy):
+    """Press the grip under ``section``, move it by ``dy``, let go."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    grip = section._grip
+    at = QPointF(grip.width() / 2, grip.height() / 2)
+    start = QPointF(grip.mapToGlobal(at.toPoint()))
+    for kind, y, buttons in ((QEvent.MouseButtonPress, 0, Qt.LeftButton),
+                             (QEvent.MouseMove, dy, Qt.LeftButton),
+                             (QEvent.MouseButtonRelease, dy, Qt.NoButton)):
+        _app.sendEvent(grip, QMouseEvent(
+            kind, at + QPointF(0, y), start + QPointF(0, y), Qt.LeftButton,
+            buttons, Qt.NoModifier))
+    _settle()
+
+
+def test_the_grip_under_a_section_sets_its_height_only_and_pushes_the_rest():
+    """The user: the separator changes the section above it, the one
+    below is not resized but pushed. And the height is remembered."""
     from views.tray import _Section
     top = _Section("Top", _tall(300), "sep_top")
     below = _Section("Below", _tall(300), "sep_below")
     stack = _shown_stack(top, below)
-    before = top.height()
-    stack._split.moveSplitter(top.y() + before - 120, 1)   # dragged up
-    _settle()
-    assert top.height() < before
-    assert top._body.verticalScrollBar().maximum() > 0   # scrolls inside
+    before, below_height, below_y = top.height(), below.height(), below.y()
+    _drag_grip(top, -120)                                   # dragged up
+    assert top.height() == before - 120
+    assert below.height() == below_height                   # not resized…
+    assert below.y() == below_y - 120                       # …pulled up
+    assert top._body.verticalScrollBar().maximum() > 0      # scrolls inside
+    _drag_grip(top, 200)                                    # and down
+    assert top.height() == before + 80
+    assert below.height() == below_height and below.y() == below_y + 80
     kept = top.kept_height()
     assert kept == top.height()
     stack.close()
     again = _shown_stack(_Section("Top", _tall(300), "sep_top"),
                          _Section("Below", _tall(300), "sep_below"))
-    assert again.sections()[0].height() == kept          # the next time
+    first = again.sections()[0]
+    assert first.height() == kept                           # the next time
+    first._grip.mouseDoubleClickEvent(None)                 # its own again
+    _settle()
+    assert first.height() == first.natural_height()
+    assert first.kept_height() is None
     again.close()
 
 

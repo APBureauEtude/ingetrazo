@@ -6,6 +6,10 @@ follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 
+### Added
+- Japanese UI translations, selectable as **日本語** in Preferences, with
+  coverage for Qt standard buttons and stable shortcut action identifiers.
+
 ## [0.5.8] — 2026-10-12
 
 **Gestor de extensiones, unidades para todo el documento y un Navegador del

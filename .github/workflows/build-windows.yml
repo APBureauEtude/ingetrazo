@@ -8,6 +8,14 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      publicar:
+        description: >-
+          Archivos para publicar (reemplazar en una release): nunca con la
+          firma de prueba, que Windows no reconoce y que Smart App Control
+          puede bloquear (#566)
+        type: boolean
+        default: false
 
 # El GITHUB_TOKEN necesita esto para adjuntar archivos al release.
 permissions:
@@ -129,10 +137,14 @@ jobs:
         env:
           TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
           POLICY: ${{ vars.SIGNPATH_POLICY }}
+          PUBLICAR: ${{ inputs.publicar }}
         run: |
           if [ -z "$TOKEN" ]; then
             echo "Sin SIGNPATH_API_TOKEN: sale sin firmar"
-          elif [[ "$GITHUB_REF" == refs/tags/* && "$POLICY" != release-signing ]]; then
+          elif [[ ( "$GITHUB_REF" == refs/tags/* || "$PUBLICAR" == true ) && "$POLICY" != release-signing ]]; then
+            # (Lanzado a mano con «publicar»: igual que un tag. Los archivos
+            # de la 0.5.8 se reemplazaron con builds a mano y salieron con
+            # el certificado de prueba, #566.)
             # Una release con el certificado de prueba no sirve: Windows no
             # confía en él. Mejor sin firmar, como antes.
             echo "::warning::Release sin SIGNPATH_POLICY=release-signing: sale sin firmar"

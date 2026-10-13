@@ -851,3 +851,24 @@ def test_rejected_key_names_the_prefix_to_check():
     hint = AsistenteDialog._bad_key_hint("groq", err)
     assert hint is not None and "gsk_" in hint
     assert AsistenteDialog._bad_key_hint("groq", "HTTP 503: busy") is None
+
+
+def test_openai_asks_for_max_completion_tokens():
+    """OpenAI's newer models reject ``max_tokens`` with HTTP 400 (#517);
+    ``max_completion_tokens`` works for all of them. The other
+    OpenAI-compatible services keep ``max_tokens``, the name they accept."""
+    msgs = [{"role": "user", "text": "x"}]
+    _u, _h, payload = ai.build_request("openai", "gpt-5", "sk-k", "SYS",
+                                       msgs, max_tokens=8192)
+    body = json.loads(payload)
+    assert body["max_completion_tokens"] == 8192
+    assert "max_tokens" not in body
+    for provider in ("groq", "gemini", "openrouter", "deepseek", "ollama"):
+        _u, _h, payload = ai.build_request(provider, "m", "k", "SYS", msgs,
+                                           max_tokens=8192)
+        body = json.loads(payload)
+        assert body["max_tokens"] == 8192, provider
+        assert "max_completion_tokens" not in body, provider
+    _u, _h, payload = ai.build_request("anthropic", "claude-sonnet-5", "k",
+                                       "SYS", msgs, max_tokens=8192)
+    assert json.loads(payload)["max_tokens"] == 8192

@@ -11083,7 +11083,16 @@ class Viewport(QOpenGLWidget):
         X-ray and wireframe show everything, so nothing hides a snap there
         (the usual trick: switch to X-ray to dimension the floor of a pool through
         its water). Hidden-line and shaded keep the visible-only rule.
+
+        The active section cut is checked first, in every style: what it
+        cuts away is gone, not behind something. Dropping only the edges
+        with BOTH ends on the hidden side (``_snap_scene``) left the edge
+        that crosses the cut — a wall's vertical, cut halfway up — and its
+        hidden end and stretch still snapped (#384).
         """
+        sp = _active_cut(self.scene)
+        if sp is not None and sp.side(world) > 1e-6:
+            return True
         if self._effective_style().face_mode in ("xray", "wireframe"):
             return False
         idx = self._pick_index()
@@ -11138,6 +11147,8 @@ class Viewport(QOpenGLWidget):
         rules — it asks ``_is_occluded`` point by point."""
         import numpy as np
         worlds = list(worlds)
+        if worlds and _active_cut(self.scene) is not None:
+            return [self._is_occluded(w) for w in worlds]   # the cut first (#384)
         out = [False] * len(worlds)
         if not worlds or self._effective_style().face_mode in ("xray",
                                                                "wireframe"):
@@ -11468,12 +11479,12 @@ class Viewport(QOpenGLWidget):
             # reset». It used to be a no-op.
             if tool is not None:
                 tool.on_cancel(self)
+            self.inference.clear_references()
             self.axis_lock = None
             self._shift_lock = None
             self.reference_edge = None
             self.reference_mode = None
             self.linear_inference_mode = "all"
-            self.last_snap = None
             self._refresh_snap()
             return
         # Picking a drawing tool always leaves camera-navigation mode — and
@@ -11494,13 +11505,7 @@ class Viewport(QOpenGLWidget):
         # quietly constraining a tool that never asked for it.
         self.axis_lock = None
         self._hover_entity = None  # stale highlight from the previous tool
-        self.last_snap = None      # stale snap marker from the previous tool
-        self._center_ref = None
-        self._acquired_edge = None  # drop any held parallel reference
-        self._acquired_point = None
-        self._acquired_face_normal = None
-        self._encouraged = []
-        self._dwell_point = None
+        self.inference.clear_references()
         if tool is not None:
             tool.on_activate(self)
         self._apply_tool_cursor()
@@ -11786,6 +11791,7 @@ class Viewport(QOpenGLWidget):
         this viewport has shown before it is drawn."""
         self.end_group_edit()
         old = (self.scene, self.history)
+        self.inference.reset()
         self.reset_document_caches()
         seen = max(getattr(self, "_versions_seen", 0), self.scene.version, scene.version)
         scene.version = self._versions_seen = seen + 1
@@ -12865,6 +12871,15 @@ class Viewport(QOpenGLWidget):
             if t == "p" and hasattr(self.active_tool, "on_profile_value"):
                 ev.accept()
                 return True
+        # Right after a copy, "x5" is the array written multiplier first
+        # (#542): the bare X must reach the value box, not the Text tool.
+        if (ev.type() == QEvent.ShortcutOverride and not self._value_buffer
+                and not _is_chord(ev.modifiers())
+                and ev.text().lower() == "x"
+                and getattr(self.active_tool, "accepts_array", False)
+                and self._array_pending()):
+            ev.accept()
+            return True
         return super().event(ev)
 
     def _tool_claims_key(self, ev) -> bool:
@@ -13041,7 +13056,7 @@ class Viewport(QOpenGLWidget):
     def escape(self) -> None:
         """The Esc cascade (standard CAD), ONE step per press: a typed value
         buffer, then a sticky constraint (axis lock / reference), then the
-        tool's in-progress action, then the selection, then — nothing in
+        array window a copy just opened, then the tool's in-progress action, then the selection, then — nothing in
         progress — step out ONE level of the open group, and
         finally the tool's own cancel. The window's «Cancel current tool»
         action (shortcut Esc, which fires BEFORE this widget's key event)
@@ -13054,6 +13069,13 @@ class Viewport(QOpenGLWidget):
         if self.release_constraints():
             return
         tool = self.active_tool
+        close = getattr(tool, "close_array_window", None)
+        if callable(close) and self._array_pending():
+            # Right after a copy the array window is what is open: Esc
+            # closes it before touching the selection, so a bare X is the
+            # Text shortcut again (#542).
+            close()
+            return
         if tool is not None and type(tool).__name__ == "PasteTool":
             win = self.window()
             activate = getattr(win, "_activate_tool", None)
@@ -13384,9 +13406,17 @@ class Viewport(QOpenGLWidget):
                 if _re.search(r"[\d\"']\s*(mm|cm|m|in|ft)\b|\d\s*[\"']",
                               self._value_buffer.lower()):
                     value = ("abs_len", value)
+            # Did this value actually commit geometry? Same signal as a
+            # click that commits (see _dispatch_tool_click): a chaining tool
+            # like Line stays busy the instant the segment exists, so "busy"
+            # is not "the operation that used the arrow lock has ended". The
+            # typed length must drop the lock exactly like the second click.
+            history = getattr(self, "history", None)
+            _before = len(history.undo_stack) if history is not None else 0
             self.active_tool.on_value(self, value)
+            _drew = history is not None and len(history.undo_stack) > _before
             self._set_value_buffer("")
-            self._release_axis_lock_after_operation()
+            self._release_axis_lock_after_operation(committed=_drew)
             return True
 
         if key == Qt.Key_Backspace:
@@ -13417,8 +13447,12 @@ class Viewport(QOpenGLWidget):
             # "*3" / "3*": the array multiplier ("x" works too).
             self._set_value_buffer(self._value_buffer + text)
             return True
-        if arrays and text.lower() == "x" and self._current_token_tail():
-            # "3x" — only after a digit: bare X stays the Text tool shortcut.
+        if arrays and text.lower() == "x" and (
+                self._current_token_tail()
+                or (not self._value_buffer and self._array_pending())):
+            # "3x" — after a digit; bare X stays the Text tool shortcut,
+            # except right after a copy, where "x5" is the array written
+            # multiplier first (#542), as common a habit as "5x".
             self._set_value_buffer(self._value_buffer + text)
             return True
         if (text.lower() == "p" and self._current_token_tail()
@@ -13560,6 +13594,12 @@ class Viewport(QOpenGLWidget):
         if len(nums) in (2, 3):
             return tuple(nums)
         return None
+
+    def _array_pending(self) -> bool:
+        """Whether the active tool just made a copy that «x5» would turn
+        into an array (#542)."""
+        pending = getattr(self.active_tool, "array_pending", None)
+        return bool(pending(self)) if callable(pending) else False
 
     def _current_token_tail(self) -> str:
         """The portion of the buffer after the last ``;`` or space."""

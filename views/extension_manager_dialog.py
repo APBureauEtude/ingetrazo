@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import (QEvent, QObject, QPoint, QRunnable, Qt,
@@ -70,6 +71,59 @@ _ROW_MAX_WIDTH = 660
 #: maximised Full HD window, more on a wider one — no empty band at the
 #: right (Marco, 09-10).
 _COLUMN_WIDTH = 560
+#: Windows shows a new window, white, through its opening animation and
+#: until the first paint — ~0.4 s for this dialog on Marco's machine
+#: (#555, his recording of 12-10). It opens transparent and appears once
+#: painted, dark and complete.
+_HIDE_UNTIL_PAINTED = sys.platform == "win32"
+
+#: Everything a card wears, set ONCE on each page's card area (below the
+#: page's own «background: palette(window)», which would win from above). Each card used to set
+#: about a dozen style sheets of its own, and on Windows every
+#: setStyleSheet builds and applies a style: 24 ms per card, over a second
+#: with the app frozen before the manager could appear (#555, Marco's
+#: measurement of 12-10). Each rule names the card, so it wins over the
+#: card's own QLabel rule exactly as the widget's own sheet did.
+_ROW = "QWidget#extensionRow"
+_CARD_RULES = {
+    "": "background: palette(base); border: 1px solid palette(midlight);",
+    " QLabel": "background: transparent; border: none; "
+               "color: palette(text);",
+    " QLabel#extImage": "background: palette(alternate-base); "
+                        "color: palette(text); border: none;",
+    " QWidget#extImageDetails": "background: transparent;",
+    " QLabel#extByline": "color: palette(text); font-size: 13px;",
+    " QPushButton#extRepository":
+        "color: palette(link); background: palette(base); "
+        "border: 1px solid palette(midlight); border-radius: 4px; "
+        "padding: 3px 7px; font-size: 11px;",
+    " QPushButton#extRepository:hover":
+        "color: palette(link); background: palette(alternate-base); "
+        "border-color: palette(mid);",
+    " QLabel#extChip": "color: palette(link); "
+                       "background: palette(alternate-base); "
+                       "border-radius: 8px; padding: 2px 6px; "
+                       "font-size: 10px;",
+    " QLabel#extLicense": "color: palette(text); font-weight: bold; "
+                          "font-size: 13px;",
+    " QLabel#extVersions": "color: palette(text); font-size: 10px; "
+                           "font-weight: bold;",
+    " QLabel#extBadge": "color: palette(link); "
+                        "border: 1px solid palette(link); "
+                        "border-radius: 3px; padding: 2px 5px; "
+                        "font-size: 9px; font-weight: bold;",
+    " QLabel#extTitle": "font-weight: bold; font-size: 15px; "
+                        "color: palette(text); background: transparent;",
+    " QLabel#extCommunity": "color: palette(link); font-size: 11px;",
+    " QLabel#extRestart": "color: palette(link); font-weight: bold; "
+                          "font-size: 11px;",
+    " QLabel#extWarning": "color: palette(link);",
+    " QLabel#extError": "color: palette(bright-text); font-weight: bold;",
+    " QLabel#extHandTitle": "font-weight: bold; font-size: 15px;",
+    " QLabel#extHandWhere": "color: palette(mid); font-size: 11px;",
+}
+_CARD_STYLE = "".join(f"{_ROW}{selector} {{ {rule} }}"
+                      for selector, rule in _CARD_RULES.items())
 
 
 
@@ -128,6 +182,20 @@ class ExtensionManagerDialog(QDialog):
         self._startup_state = (startup_state if startup_state is not None
                                else extension_startup_state())
         self._requested_images: set[str] = set()
+        # Screenshots already decoded and scaled, by extension id: a card
+        # built again (a filter, an install) is born with its image instead
+        # of «Preview unavailable» and then the picture (#555).
+        self._screenshots: dict[str, QPixmap] = {}
+        # Which cards are on screen is asked once the layout has placed
+        # them; asked right after building, every card still sat at the
+        # top-left and all the screenshots were decoded at once (#555).
+        self._images_timer = QTimer(self)
+        self._images_timer.setSingleShot(True)
+        self._images_timer.setInterval(0)
+        self._images_timer.timeout.connect(self._load_visible_images)
+        self._waiting_first_paint = _HIDE_UNTIL_PAINTED
+        if self._waiting_first_paint:
+            self.setWindowOpacity(0.0)
         self._network = QNetworkAccessManager(self)
         self._pages: dict[str, dict] = {}
 
@@ -193,7 +261,10 @@ class ExtensionManagerDialog(QDialog):
         filters.setContentsMargins(0, 0, 10, 0)
         filters.addWidget(search, 1)
         reviewed = QCheckBox(tr("Reviewed only"))
-        reviewed.setVisible(key == "browse")
+        if key != "browse":
+            # Hide only. setVisible(True) on a widget with no parent yet
+            # makes it a window of its own and shows it (#555).
+            reviewed.hide()
         reviewed.toggled.connect(
             lambda _checked, page_key=key: self._render_page(page_key))
         filters.addWidget(reviewed)
@@ -251,8 +322,9 @@ class ExtensionManagerDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.verticalScrollBar().valueChanged.connect(
-            self._load_visible_images)
+            self._images_timer.start)
         cards = QWidget()
+        cards.setStyleSheet(_CARD_STYLE)
         grid = QGridLayout(cards)
         grid.setContentsMargins(2, 2, 2, 12)
         grid.setHorizontalSpacing(24)
@@ -279,6 +351,8 @@ class ExtensionManagerDialog(QDialog):
             "cards": cards,
             "grid": grid,
             "image_labels": {},
+            "shown": 0,
+            "total": 0,
         }
         return page
 
@@ -298,7 +372,16 @@ class ExtensionManagerDialog(QDialog):
         QThreadPool.globalInstance().start(worker)
 
     def _apply_catalog(self, snapshot) -> None:
+        previous = self._catalog_snapshot
         self._catalog_snapshot = snapshot
+        if (previous is not None
+                and snapshot.extensions == previous.extensions
+                and snapshot.reviewed == previous.reviewed):
+            # The refresh brought the catalog already on screen (the usual
+            # case: the cached copy shows first): only the date changes.
+            # Rebuilding both pages repainted the whole window (#555).
+            self._show_count(self._active_page_key())
+            return
         self._extensions = self._with_bundled(snapshot.extensions)
         self._reviewed = snapshot.reviewed
         for key in self._pages:
@@ -413,6 +496,9 @@ class ExtensionManagerDialog(QDialog):
             item = grid.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # Out of the layout is not off the screen: until deleteLater
+                # runs, the old card would be painted under the new ones.
+                widget.hide()
                 widget.deleteLater()
         page["image_labels"].clear()
 
@@ -470,25 +556,37 @@ class ExtensionManagerDialog(QDialog):
 
     def _render_page(self, key: str, *_args) -> None:
         page = self._pages[key]
-        self._clear_cards(key)
-        extensions = self._filtered_extensions(key)
-        language = current_language()
-        rows = [self._make_row(extension, language, page["cards"], key)
-                for extension in extensions]
-        unknown = self._hand_only(key) if key == "installed" else []
-        rows += [self._make_hand_row(path, page["cards"]) for path in unknown]
-        self._place_cards(key, rows)
+        cards = page["cards"]
+        # One repaint for the whole swap, not one per card taken out and
+        # put in: on Windows the half-built page showed as a flash (#555).
+        cards.setUpdatesEnabled(False)
+        try:
+            self._clear_cards(key)
+            extensions = self._filtered_extensions(key)
+            language = current_language()
+            rows = [self._make_row(extension, language, cards, key)
+                    for extension in extensions]
+            unknown = self._hand_only(key) if key == "installed" else []
+            rows += [self._make_hand_row(path, cards) for path in unknown]
+            self._place_cards(key, rows)
+        finally:
+            cards.setUpdatesEnabled(True)
+        page["shown"] = len(extensions) + len(unknown)
+        page["total"] = (sum(installed_info(e.id) is not None
+                             or installation_conflict(e.id)
+                             for e in self._extensions)
+                         + len(self._hand_only(key, filtered=False))
+                         if key == "installed" else len(self._extensions))
         if key == self._active_page_key():
-            total = (sum(installed_info(e.id) is not None
-                         or installation_conflict(e.id)
-                         for e in self._extensions)
-                     + len(self._hand_only(key, filtered=False))
-                     if key == "installed" else len(self._extensions))
-            self._catalog_info.setText(
-                tr("{shown} of {total} extensions",
-                   shown=len(extensions) + len(unknown), total=total)
-                + self._catalog_status_suffix())
-            self._load_visible_images()
+            self._show_count(key)
+            self._images_timer.start()
+
+    def _show_count(self, key: str) -> None:
+        page = self._pages[key]
+        self._catalog_info.setText(
+            tr("{shown} of {total} extensions",
+               shown=page["shown"], total=page["total"])
+            + self._catalog_status_suffix())
 
     def _columns(self, key: str) -> int:
         """How many columns of cards fit the page's width."""
@@ -520,8 +618,31 @@ class ExtensionManagerDialog(QDialog):
                     self._place_cards(key, rows)
         return super().eventFilter(obj, event)
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._images_timer.start()
+        if self._waiting_first_paint:
+            # Never left invisible, whatever happens to the first paint.
+            QTimer.singleShot(600, self._reveal)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._waiting_first_paint:
+            # After this paint reaches the screen, not inside it.
+            self._waiting_first_paint = False
+            QTimer.singleShot(0, self._reveal)
+
+    def _reveal(self) -> None:
+        self.setWindowOpacity(1.0)
+
     def _on_tab_changed(self, _index: int) -> None:
-        self._render_page(self._active_page_key())
+        # Both pages are rebuilt whenever what they show changes (catalog,
+        # install, enable, their own filters), so a tab change only shows
+        # the other one. Rebuilding it here, on every switch, was the
+        # flash between the two tabs (#555).
+        key = self._active_page_key()
+        self._show_count(key)
+        self._images_timer.start()
 
     def _make_row(self, extension: Extension, language: str,
                   parent: QWidget, page_key: str) -> QWidget:
@@ -541,11 +662,6 @@ class ExtensionManagerDialog(QDialog):
         row.setMinimumWidth(400)
         row.setMaximumHeight(_ROW_MAX_HEIGHT)
         row.setMaximumWidth(_ROW_MAX_WIDTH)
-        row.setStyleSheet(
-            "QWidget#extensionRow { background: palette(base); "
-            "border: 1px solid palette(midlight); }"
-            "QWidget#extensionRow QLabel { background: transparent; "
-            "border: none; color: palette(text); }")
         row.setObjectName("extensionRow")
         row_layout = QVBoxLayout(row)
         row_layout.setContentsMargins(10, 10, 10, 8)
@@ -557,15 +673,17 @@ class ExtensionManagerDialog(QDialog):
         image = QLabel(tr("Preview unavailable"))
         image.setAlignment(Qt.AlignCenter)
         image.setFixedSize(*_IMAGE_SIZE)
-        image.setStyleSheet(
-            "background: palette(alternate-base); "
-            "color: palette(text); border: none;")
+        image.setObjectName("extImage")
         self._pages[page_key]["image_labels"][extension.id] = image
+        cached = self._screenshots.get(extension.id)
+        if cached is not None:
+            image.setPixmap(cached)
+            image.setText("")
 
         image_details = QWidget()
         image_details.setFixedWidth(_IMAGE_SIZE[0])
         image_details.setAutoFillBackground(False)
-        image_details.setStyleSheet("background: transparent;")
+        image_details.setObjectName("extImageDetails")
         image_column = QVBoxLayout(image_details)
         image_column.setContentsMargins(0, 0, 0, 0)
         image_column.setSpacing(6)
@@ -574,21 +692,20 @@ class ExtensionManagerDialog(QDialog):
         author_row.setSpacing(6)
         byline = QLabel(tr("by {author}", author=extension.author))
         byline.setWordWrap(True)
-        byline.setStyleSheet("color: palette(text); font-size: 13px")
+        byline.setObjectName("extByline")
         author_row.addWidget(byline, 1)
         repository = QPushButton(tr("Repository ↗"))
         repository.setCursor(Qt.PointingHandCursor)
-        repository.setStyleSheet(
-            "QPushButton { color: palette(link); background: palette(base); "
-            "border: 1px solid palette(midlight); border-radius: 4px; "
-            "padding: 3px 7px; font-size: 11px; }"
-            "QPushButton:hover { color: palette(link); "
-            "background: palette(alternate-base); "
-            "border-color: palette(mid); }")
+        repository.setObjectName("extRepository")
         # The catalog's check only admits https:// — enforced here too, so
         # a tampered cache cannot hand the browser a file:// or app link.
         repository.setEnabled(extension.repository.startswith("https://"))
-        repository.setVisible(not extension.bundled)
+        if extension.bundled:
+            # Hide only: setVisible(True) here, before the button is in the
+            # card, made it a window of its own and showed it — on Windows
+            # 43 little windows flashed while the manager was built, ~0.8 s
+            # of the 0.9 s it took (#555, measured on Marco's machine).
+            repository.hide()
         repository.clicked.connect(
             lambda _checked=False, url=extension.repository:
             QDesktopServices.openUrl(QUrl(url)))
@@ -599,17 +716,14 @@ class ExtensionManagerDialog(QDialog):
             chip = QLabel(_tag_label(tag))
             chip.setWordWrap(True)
             chip.setMaximumWidth(_IMAGE_SIZE[0])
-            chip.setStyleSheet(
-                "color: palette(link); background: palette(alternate-base); "
-                "border-radius: 8px; padding: 2px 6px; font-size: 10px")
+            chip.setObjectName("extChip")
             tags_row.addWidget(chip)
         image_column.addLayout(tags_row)
         license_label = QLabel(
             tr("Included with IngeTrazo") if extension.bundled
             else tr("License: {license}", license=extension.license))
         license_label.setWordWrap(True)
-        license_label.setStyleSheet(
-            "color: palette(text); font-weight: bold; font-size: 13px")
+        license_label.setObjectName("extLicense")
         image_column.addWidget(license_label)
         content.addWidget(image_details, 0, Qt.AlignTop)
 
@@ -622,25 +736,19 @@ class ExtensionManagerDialog(QDialog):
             if extension.bundled else
             tr("v{version} · Tested with IngeTrazo {tested}",
                version=extension.version, tested=extension.minimum_version))
-        versions.setStyleSheet(
-            "color: palette(text); font-size: 10px; font-weight: bold")
+        versions.setObjectName("extVersions")
         version_row.addWidget(versions, 0, Qt.AlignTop)
         if reviewed or extension.bundled:
             badge = QLabel(tr("INCLUDED") if extension.bundled
                            else tr("REVIEWED"))
-            badge.setStyleSheet(
-                "color: palette(link); border: 1px solid palette(link); "
-                "border-radius: 3px; padding: 2px 5px; font-size: 9px; "
-                "font-weight: bold")
+            badge.setObjectName("extBadge")
             version_row.addWidget(badge, 0, Qt.AlignTop)
         details.addLayout(version_row)
 
         title_row = QHBoxLayout()
         title = QLabel(display_name(extension, language))
         title.setWordWrap(False)
-        title.setStyleSheet(
-            "font-weight: bold; font-size: 15px; color: palette(text); "
-            "background: transparent;")
+        title.setObjectName("extTitle")
         title_row.addWidget(title)
         title_row.addStretch(1)
         details.addLayout(title_row)
@@ -655,12 +763,11 @@ class ExtensionManagerDialog(QDialog):
                 "Community extension — not reviewed by an IngeTrazo "
                 "maintainer."))
             community.setWordWrap(True)
-            community.setStyleSheet("color: palette(link); font-size: 11px")
+            community.setObjectName("extCommunity")
             details.addWidget(community)
         if restart_required(extension.id, self._startup_state):
             restart = QLabel(tr("Restart required to apply changes"))
-            restart.setStyleSheet(
-                "color: palette(link); font-weight: bold; font-size: 11px")
+            restart.setObjectName("extRestart")
             restart.setWordWrap(True)
             details.addWidget(restart)
         if not compatible:
@@ -674,12 +781,11 @@ class ExtensionManagerDialog(QDialog):
                 "IngeTrazo {version}.",
                 version=extension.minimum_version))
             warning.setWordWrap(True)
-            warning.setStyleSheet("color: palette(link);")
+            warning.setObjectName("extWarning")
             details.addWidget(warning)
         if load_error:
             error_label = QLabel(tr("Failed to load at startup"))
-            error_label.setStyleSheet(
-                "color: palette(bright-text); font-weight: bold;")
+            error_label.setObjectName("extError")
             details.addWidget(error_label)
             error_button = QPushButton(tr("View load error"))
             error_button.clicked.connect(
@@ -814,10 +920,16 @@ class ExtensionManagerDialog(QDialog):
 
     def _load_visible_images(self, *_args) -> None:
         page = self._active_page()
+        if not page["scroll"].isVisible():
+            return   # showEvent asks again once there is a screen to fill
+        # Place the cards first: before the layout has run they all sit at
+        # the top-left, every one looked visible and opening the manager
+        # decoded all the screenshots (#555; ~0.25 s of white on Windows).
+        page["cards"].layout().activate()
         visible = page["scroll"].viewport().rect()
         for extension in self._filtered_extensions():
             label = page["image_labels"].get(extension.id)
-            if label is None:
+            if label is None or extension.id in self._screenshots:
                 continue
             label_rect = label.geometry()
             label_rect.moveTopLeft(label.mapTo(
@@ -874,15 +986,18 @@ class ExtensionManagerDialog(QDialog):
             reply.deleteLater()
 
     def _set_screenshot(self, ident: str, data: bytes) -> None:
-        label = self._active_page()["image_labels"].get(ident)
-        if label is None:
-            return
         pixmap = QPixmap()
-        if pixmap.loadFromData(data):
-            label.setPixmap(pixmap.scaled(
-                label.size(), Qt.KeepAspectRatioByExpanding,
-                Qt.SmoothTransformation))
-            label.setText("")
+        if not pixmap.loadFromData(data):
+            return
+        scaled = pixmap.scaled(
+            *_IMAGE_SIZE, Qt.KeepAspectRatioByExpanding,
+            Qt.SmoothTransformation)
+        self._screenshots[ident] = scaled
+        for page in self._pages.values():
+            label = page["image_labels"].get(ident)
+            if label is not None:
+                label.setPixmap(scaled)
+                label.setText("")
 
     def _confirm_manual_copies(self, extension: Extension, paths) -> bool:
         answer = QMessageBox.question(
@@ -954,23 +1069,18 @@ class ExtensionManagerDialog(QDialog):
         row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         row.setMinimumWidth(400)
         row.setMaximumWidth(_ROW_MAX_WIDTH)
-        row.setStyleSheet(
-            "QWidget#extensionRow { background: palette(base); "
-            "border: 1px solid palette(midlight); }"
-            "QWidget#extensionRow QLabel { background: transparent; "
-            "border: none; color: palette(text); }")
         layout = QVBoxLayout(row)
         layout.setContentsMargins(10, 10, 10, 8)
         layout.setSpacing(6)
         title = QLabel(name)
-        title.setStyleSheet("font-weight: bold; font-size: 15px")
+        title.setObjectName("extHandTitle")
         layout.addWidget(title)
         note = QLabel(tr("Installed by hand · not in the catalog"))
         note.setWordWrap(True)
         layout.addWidget(note)
         where = QLabel(str(path))
         where.setWordWrap(True)
-        where.setStyleSheet("color: palette(mid); font-size: 11px")
+        where.setObjectName("extHandWhere")
         layout.addWidget(where)
         actions = QHBoxLayout()
         folder = QPushButton(tr("Open extension folder"))

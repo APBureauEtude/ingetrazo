@@ -291,3 +291,24 @@ class InferenceEngine:
         del self._encouraged[:-2]
         self._acquired_point = pt
         self.viewport.update()
+
+    def clear_references(self) -> None:
+        """Drop cursor-acquired and encouraged model references."""
+        self._dwell_timer.stop()
+        self._dwell_point = None
+        self._hover_edge = None
+        self._hover_center = None
+        self._center_ref = None
+        self._acquired_edge = None
+        self._acquired_face_normal = None
+        self._acquired_point = None
+        self._encouraged = []
+        self.last_snap = None
+
+    def reset(self) -> None:
+        """Forget every inference state tied to the current document."""
+        self.clear_references()
+        self.axis_lock = None
+        self.reference_edge = None
+        self.reference_mode = None
+        self._shift_lock = None

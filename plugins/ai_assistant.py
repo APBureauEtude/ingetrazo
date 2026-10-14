@@ -20,7 +20,6 @@ the recipes always execute on the Qt main thread.
 from __future__ import annotations
 
 import base64
-import os
 import threading
 
 from PySide6.QtCore import QBuffer, QIODevice, QSettings, Qt, Signal

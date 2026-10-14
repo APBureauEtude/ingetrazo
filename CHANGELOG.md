@@ -6,7 +6,57 @@ follow [SemVer](https://semver.org).
 
 ## [Sin publicar]
 
+### Añadido
+- **Color de acento de los iconos y las barras** (#393): en Ventana ▸
+  Preferencias ▸ General se elige el color de los detalles de los iconos y
+  del fondo de los botones bajo el ratón: naranja IngeTrazo (el de siempre,
+  por defecto), azul, verde, rojo, morado, amarillo o «Igual que el sistema»,
+  que toma el color de acento del escritorio. Se aplica al instante; la
+  selección en el visor 3D sigue en naranja.
+
 ### Corregido
+- **Abrir otro documento ya no arrastra los planos de sección del
+  anterior** (#602, ArchXQ IT): un archivo sin planos se abría con los del
+  documento que estaba abierto antes, y al guardarlo se quedaban grabados
+  en él. Lo mismo pasaba con los interruptores de planos y cortes, Objetos
+  y Geometría ocultos, las escalas propias, el color del dorso de las caras
+  y las capas que el archivo no tenía. Ahora cada documento se abre solo
+  con lo suyo. Y Archivo ▸ Nuevo borra también un documento que solo
+  tenía planos de sección.
+- **Borrar la diagonal de un rectángulo ya no le da la vuelta a la cara**
+  (#529, @GWydouw): al unir dos caras de un mismo plano, el contorno salía
+  en cualquiera de los dos sentidos, y casi la mitad de las veces la cara
+  unida quedaba del revés. Ahora conserva el lado de la cara original y su
+  pintura por delante y por detrás.
+- **Intersecar caras ya no falla con caras casi paralelas**: dos planos
+  separados por un ángulo minúsculo hacían una división por cero y la orden
+  no hacía nada. Además, la búsqueda de qué caras pueden cruzarse va mucho
+  más rápida en modelos grandes.
+- **«x5» tras copiar hace la matriz, igual que «5x»** (#542): después de
+  copiar con Mover o Rotar + Ctrl, teclear «x5» abría la herramienta Texto,
+  porque la X sola es su atajo. Justo después de una copia, mientras «3x» o
+  «/3» harían una matriz, la X va a la casilla de valores; en cualquier otro
+  momento sigue abriendo Texto. Esc justo después de copiar cierra esa
+  ventana (y la X vuelve a ser Texto) antes de quitar la selección.
+- **El Asistente IA vuelve a funcionar con OpenAI** (#517, @jb-dev-github):
+  los modelos nuevos de OpenAI rechazaban cada pedido con «HTTP 400:
+  Unsupported parameter: 'max_tokens'». Con OpenAI se manda ahora
+  `max_completion_tokens`, que aceptan todos sus modelos; Groq, Gemini,
+  OpenRouter, DeepSeek y Ollama siguen con el nombre de siempre.
+- **El STL exportado sale en milímetros** (#513, @toSvenson): un STL no
+  guarda la unidad y los programas de impresión 3D lo leen en milímetros,
+  pero IngeTrazo escribía los metros del modelo, así que una pieza de
+  15 × 25 mm entraba al laminador 1000 veces más chica. Ahora Archivo ▸
+  Exportar ▸ STL pregunta la unidad, con milímetros por defecto, y recuerda
+  la elección, igual que la importación.
+- **Un plano de sección ya no deja encajar en lo que oculta** (#384,
+  @jonson7777): solo se quitaban del snap las aristas con los dos extremos
+  en el lado cortado, así que la arista que cruza el corte —la vertical de
+  un muro cortado a media altura— seguía ahí entera, y el cursor encajaba en
+  su extremo y en su tramo ocultos. Ahora lo que el corte oculta cuenta como
+  oculto para todo punto: extremos, puntos medios, «en arista», cruces, y
+  también al pulsar aristas, vértices y grupos. Vale en todos los estilos,
+  también en Rayos X y alambre; con los cortes apagados no cambia nada.
 - **El gestor de extensiones ya no parpadea al cambiar de pestaña, instalar
   o descargar** (#555): cada cambio entre Explorar e Instaladas reconstruía
   todas las tarjetas, las viejas seguían pintadas un instante debajo de las
@@ -17,7 +67,14 @@ follow [SemVer](https://semver.org).
   las visibles, y el catálogo recién descargado, igual al guardado, volvía a
   reconstruir las dos páginas. En Windows, además, el gestor se abre
   transparente y aparece en cuanto está pintado, en vez de mostrarse en
-  blanco durante la animación de apertura.
+  blanco durante la animación de apertura, y abre mucho antes: cada tarjeta
+  llevaba una docena de hojas de estilo propias, que en Windows costaban
+  24 ms por tarjeta (más de un segundo con el programa congelado); ahora
+  comparten una sola, con el mismo aspecto píxel a píxel. La causa
+  principal estaba en el botón «Repositorio» de cada tarjeta: se mostraba
+  antes de entrar en la tarjeta, y en Windows eso lo convertía un instante en
+  una ventana propia; eran 43 ventanitas que aparecían y desaparecían al
+  abrir el gestor, unos 0,8 s de los 0,9 s que tardaba.
 
 ## [0.5.8] — 2026-10-12
 

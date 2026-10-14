@@ -1414,6 +1414,7 @@ class Mesh:
         loops_out.sort(key=lambda lp: _loop_area(lp), reverse=True)
         outer = loops_out[0]
         holes = loops_out[1:]
+        _orient_union_loops(outer, holes, face_a.normal())
         shared_edges = [self.find_edge(by_id[next(iter(k))],
                                        by_id[list(k)[-1]]) for k in shared]
         self.remove_face(face_a)
@@ -1476,6 +1477,7 @@ class Mesh:
             return faces[0]
         loops_out.sort(key=_loop_area, reverse=True)
         outer, holes = loops_out[0], loops_out[1:]
+        _orient_union_loops(outer, holes, n0)
         interior = [self.find_edge(by_id[tuple(k)[0]], by_id[tuple(k)[-1]])
                     for k, c in counts.items() if c >= 2]
         for f in faces:
@@ -1700,6 +1702,22 @@ def _trace_loops(outline: list[tuple[Vertex, Vertex]]) -> Optional[list[list[Ver
             prev, cur = cur, nxt
         loops.append(loop)
     return loops
+
+
+def _orient_union_loops(
+    outer: list[Vertex], holes: list[list[Vertex]], normal: QVector3D
+) -> None:
+    """Restore face winding after tracing an undirected union boundary.
+
+    The tracer may choose either direction independently for each loop.
+    Keep the source face's front side and wind holes opposite to the outer
+    boundary, without swapping front/back paint.
+    """
+    if QVector3D.dotProduct(Face(outer).normal(), normal) < 0:
+        outer.reverse()
+    for hole in holes:
+        if QVector3D.dotProduct(Face(hole).normal(), normal) > 0:
+            hole.reverse()
 
 
 def _loop_area(loop: list[Vertex]) -> float:

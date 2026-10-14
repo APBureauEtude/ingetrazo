@@ -77,6 +77,54 @@ _COLUMN_WIDTH = 560
 #: painted, dark and complete.
 _HIDE_UNTIL_PAINTED = sys.platform == "win32"
 
+#: Everything a card wears, set ONCE on each page's card area (below the
+#: page's own «background: palette(window)», which would win from above). Each card used to set
+#: about a dozen style sheets of its own, and on Windows every
+#: setStyleSheet builds and applies a style: 24 ms per card, over a second
+#: with the app frozen before the manager could appear (#555, Marco's
+#: measurement of 12-10). Each rule names the card, so it wins over the
+#: card's own QLabel rule exactly as the widget's own sheet did.
+_ROW = "QWidget#extensionRow"
+_CARD_RULES = {
+    "": "background: palette(base); border: 1px solid palette(midlight);",
+    " QLabel": "background: transparent; border: none; "
+               "color: palette(text);",
+    " QLabel#extImage": "background: palette(alternate-base); "
+                        "color: palette(text); border: none;",
+    " QWidget#extImageDetails": "background: transparent;",
+    " QLabel#extByline": "color: palette(text); font-size: 13px;",
+    " QPushButton#extRepository":
+        "color: palette(link); background: palette(base); "
+        "border: 1px solid palette(midlight); border-radius: 4px; "
+        "padding: 3px 7px; font-size: 11px;",
+    " QPushButton#extRepository:hover":
+        "color: palette(link); background: palette(alternate-base); "
+        "border-color: palette(mid);",
+    " QLabel#extChip": "color: palette(link); "
+                       "background: palette(alternate-base); "
+                       "border-radius: 8px; padding: 2px 6px; "
+                       "font-size: 10px;",
+    " QLabel#extLicense": "color: palette(text); font-weight: bold; "
+                          "font-size: 13px;",
+    " QLabel#extVersions": "color: palette(text); font-size: 10px; "
+                           "font-weight: bold;",
+    " QLabel#extBadge": "color: palette(link); "
+                        "border: 1px solid palette(link); "
+                        "border-radius: 3px; padding: 2px 5px; "
+                        "font-size: 9px; font-weight: bold;",
+    " QLabel#extTitle": "font-weight: bold; font-size: 15px; "
+                        "color: palette(text); background: transparent;",
+    " QLabel#extCommunity": "color: palette(link); font-size: 11px;",
+    " QLabel#extRestart": "color: palette(link); font-weight: bold; "
+                          "font-size: 11px;",
+    " QLabel#extWarning": "color: palette(link);",
+    " QLabel#extError": "color: palette(bright-text); font-weight: bold;",
+    " QLabel#extHandTitle": "font-weight: bold; font-size: 15px;",
+    " QLabel#extHandWhere": "color: palette(mid); font-size: 11px;",
+}
+_CARD_STYLE = "".join(f"{_ROW}{selector} {{ {rule} }}"
+                      for selector, rule in _CARD_RULES.items())
+
 
 
 #: The catalog's fixed tags (tools/catalog.py TAGS), named as the web page
@@ -213,7 +261,10 @@ class ExtensionManagerDialog(QDialog):
         filters.setContentsMargins(0, 0, 10, 0)
         filters.addWidget(search, 1)
         reviewed = QCheckBox(tr("Reviewed only"))
-        reviewed.setVisible(key == "browse")
+        if key != "browse":
+            # Hide only. setVisible(True) on a widget with no parent yet
+            # makes it a window of its own and shows it (#555).
+            reviewed.hide()
         reviewed.toggled.connect(
             lambda _checked, page_key=key: self._render_page(page_key))
         filters.addWidget(reviewed)
@@ -273,6 +324,7 @@ class ExtensionManagerDialog(QDialog):
         scroll.verticalScrollBar().valueChanged.connect(
             self._images_timer.start)
         cards = QWidget()
+        cards.setStyleSheet(_CARD_STYLE)
         grid = QGridLayout(cards)
         grid.setContentsMargins(2, 2, 2, 12)
         grid.setHorizontalSpacing(24)
@@ -610,11 +662,6 @@ class ExtensionManagerDialog(QDialog):
         row.setMinimumWidth(400)
         row.setMaximumHeight(_ROW_MAX_HEIGHT)
         row.setMaximumWidth(_ROW_MAX_WIDTH)
-        row.setStyleSheet(
-            "QWidget#extensionRow { background: palette(base); "
-            "border: 1px solid palette(midlight); }"
-            "QWidget#extensionRow QLabel { background: transparent; "
-            "border: none; color: palette(text); }")
         row.setObjectName("extensionRow")
         row_layout = QVBoxLayout(row)
         row_layout.setContentsMargins(10, 10, 10, 8)
@@ -626,9 +673,7 @@ class ExtensionManagerDialog(QDialog):
         image = QLabel(tr("Preview unavailable"))
         image.setAlignment(Qt.AlignCenter)
         image.setFixedSize(*_IMAGE_SIZE)
-        image.setStyleSheet(
-            "background: palette(alternate-base); "
-            "color: palette(text); border: none;")
+        image.setObjectName("extImage")
         self._pages[page_key]["image_labels"][extension.id] = image
         cached = self._screenshots.get(extension.id)
         if cached is not None:
@@ -638,7 +683,7 @@ class ExtensionManagerDialog(QDialog):
         image_details = QWidget()
         image_details.setFixedWidth(_IMAGE_SIZE[0])
         image_details.setAutoFillBackground(False)
-        image_details.setStyleSheet("background: transparent;")
+        image_details.setObjectName("extImageDetails")
         image_column = QVBoxLayout(image_details)
         image_column.setContentsMargins(0, 0, 0, 0)
         image_column.setSpacing(6)
@@ -647,21 +692,20 @@ class ExtensionManagerDialog(QDialog):
         author_row.setSpacing(6)
         byline = QLabel(tr("by {author}", author=extension.author))
         byline.setWordWrap(True)
-        byline.setStyleSheet("color: palette(text); font-size: 13px")
+        byline.setObjectName("extByline")
         author_row.addWidget(byline, 1)
         repository = QPushButton(tr("Repository ↗"))
         repository.setCursor(Qt.PointingHandCursor)
-        repository.setStyleSheet(
-            "QPushButton { color: palette(link); background: palette(base); "
-            "border: 1px solid palette(midlight); border-radius: 4px; "
-            "padding: 3px 7px; font-size: 11px; }"
-            "QPushButton:hover { color: palette(link); "
-            "background: palette(alternate-base); "
-            "border-color: palette(mid); }")
+        repository.setObjectName("extRepository")
         # The catalog's check only admits https:// — enforced here too, so
         # a tampered cache cannot hand the browser a file:// or app link.
         repository.setEnabled(extension.repository.startswith("https://"))
-        repository.setVisible(not extension.bundled)
+        if extension.bundled:
+            # Hide only: setVisible(True) here, before the button is in the
+            # card, made it a window of its own and showed it — on Windows
+            # 43 little windows flashed while the manager was built, ~0.8 s
+            # of the 0.9 s it took (#555, measured on Marco's machine).
+            repository.hide()
         repository.clicked.connect(
             lambda _checked=False, url=extension.repository:
             QDesktopServices.openUrl(QUrl(url)))
@@ -672,17 +716,14 @@ class ExtensionManagerDialog(QDialog):
             chip = QLabel(_tag_label(tag))
             chip.setWordWrap(True)
             chip.setMaximumWidth(_IMAGE_SIZE[0])
-            chip.setStyleSheet(
-                "color: palette(link); background: palette(alternate-base); "
-                "border-radius: 8px; padding: 2px 6px; font-size: 10px")
+            chip.setObjectName("extChip")
             tags_row.addWidget(chip)
         image_column.addLayout(tags_row)
         license_label = QLabel(
             tr("Included with IngeTrazo") if extension.bundled
             else tr("License: {license}", license=extension.license))
         license_label.setWordWrap(True)
-        license_label.setStyleSheet(
-            "color: palette(text); font-weight: bold; font-size: 13px")
+        license_label.setObjectName("extLicense")
         image_column.addWidget(license_label)
         content.addWidget(image_details, 0, Qt.AlignTop)
 
@@ -695,25 +736,19 @@ class ExtensionManagerDialog(QDialog):
             if extension.bundled else
             tr("v{version} · Tested with IngeTrazo {tested}",
                version=extension.version, tested=extension.minimum_version))
-        versions.setStyleSheet(
-            "color: palette(text); font-size: 10px; font-weight: bold")
+        versions.setObjectName("extVersions")
         version_row.addWidget(versions, 0, Qt.AlignTop)
         if reviewed or extension.bundled:
             badge = QLabel(tr("INCLUDED") if extension.bundled
                            else tr("REVIEWED"))
-            badge.setStyleSheet(
-                "color: palette(link); border: 1px solid palette(link); "
-                "border-radius: 3px; padding: 2px 5px; font-size: 9px; "
-                "font-weight: bold")
+            badge.setObjectName("extBadge")
             version_row.addWidget(badge, 0, Qt.AlignTop)
         details.addLayout(version_row)
 
         title_row = QHBoxLayout()
         title = QLabel(display_name(extension, language))
         title.setWordWrap(False)
-        title.setStyleSheet(
-            "font-weight: bold; font-size: 15px; color: palette(text); "
-            "background: transparent;")
+        title.setObjectName("extTitle")
         title_row.addWidget(title)
         title_row.addStretch(1)
         details.addLayout(title_row)
@@ -728,12 +763,11 @@ class ExtensionManagerDialog(QDialog):
                 "Community extension — not reviewed by an IngeTrazo "
                 "maintainer."))
             community.setWordWrap(True)
-            community.setStyleSheet("color: palette(link); font-size: 11px")
+            community.setObjectName("extCommunity")
             details.addWidget(community)
         if restart_required(extension.id, self._startup_state):
             restart = QLabel(tr("Restart required to apply changes"))
-            restart.setStyleSheet(
-                "color: palette(link); font-weight: bold; font-size: 11px")
+            restart.setObjectName("extRestart")
             restart.setWordWrap(True)
             details.addWidget(restart)
         if not compatible:
@@ -747,12 +781,11 @@ class ExtensionManagerDialog(QDialog):
                 "IngeTrazo {version}.",
                 version=extension.minimum_version))
             warning.setWordWrap(True)
-            warning.setStyleSheet("color: palette(link);")
+            warning.setObjectName("extWarning")
             details.addWidget(warning)
         if load_error:
             error_label = QLabel(tr("Failed to load at startup"))
-            error_label.setStyleSheet(
-                "color: palette(bright-text); font-weight: bold;")
+            error_label.setObjectName("extError")
             details.addWidget(error_label)
             error_button = QPushButton(tr("View load error"))
             error_button.clicked.connect(
@@ -1036,23 +1069,18 @@ class ExtensionManagerDialog(QDialog):
         row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         row.setMinimumWidth(400)
         row.setMaximumWidth(_ROW_MAX_WIDTH)
-        row.setStyleSheet(
-            "QWidget#extensionRow { background: palette(base); "
-            "border: 1px solid palette(midlight); }"
-            "QWidget#extensionRow QLabel { background: transparent; "
-            "border: none; color: palette(text); }")
         layout = QVBoxLayout(row)
         layout.setContentsMargins(10, 10, 10, 8)
         layout.setSpacing(6)
         title = QLabel(name)
-        title.setStyleSheet("font-weight: bold; font-size: 15px")
+        title.setObjectName("extHandTitle")
         layout.addWidget(title)
         note = QLabel(tr("Installed by hand · not in the catalog"))
         note.setWordWrap(True)
         layout.addWidget(note)
         where = QLabel(str(path))
         where.setWordWrap(True)
-        where.setStyleSheet("color: palette(mid); font-size: 11px")
+        where.setObjectName("extHandWhere")
         layout.addWidget(where)
         actions = QHBoxLayout()
         folder = QPushButton(tr("Open extension folder"))

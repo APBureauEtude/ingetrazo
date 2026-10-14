@@ -18,6 +18,7 @@ pattern); Cancel touches nothing.
 from __future__ import annotations
 
 from PySide6.QtCore import QSettings
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -83,6 +84,21 @@ class PreferencesDialog(QDialog):
             "switches along with the desktop's light or dark mode. The 3D "
             "view keeps its own style. Applies at once."))
         form.addRow(tr("Theme:"), self._theme)
+
+        from views.theme import ACCENTS, accent_color, saved_accent
+        self._accent = QComboBox()
+        for key, label, _rgb in ACCENTS:
+            swatch = QPixmap(14, 14)
+            swatch.fill(accent_color(key))
+            self._accent.addItem(QIcon(swatch), tr(label), key)
+        self._accent.setCurrentIndex(max(0, self._accent.findData(
+            saved_accent())))
+        self._accent.setToolTip(tr(
+            "Colour of the details of the icons and of the toolbar buttons "
+            "under the mouse. «Same as the system» uses the desktop's "
+            "accent colour. The selection in the 3D view stays orange. "
+            "Applies at once."))
+        form.addRow(tr("Accent colour:"), self._accent)
 
         self._rest = QComboBox()
         for key, label in _REST_MODES:
@@ -397,6 +413,13 @@ class PreferencesDialog(QDialog):
             save_theme(theme)
             from PySide6.QtWidgets import QApplication
             apply_theme(QApplication.instance(), theme)
+
+        from views.theme import apply_accent, save_accent, saved_accent
+        accent = self._accent.currentData()
+        if accent != saved_accent():
+            save_accent(accent)
+            from PySide6.QtWidgets import QApplication
+            apply_accent(QApplication.instance())
 
         # Rest-of-model mode: through the viewport (it persists the setting),
         # then the Camera menu checkmark follows.

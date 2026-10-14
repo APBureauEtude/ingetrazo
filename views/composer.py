@@ -13041,10 +13041,11 @@ class ComposerWindow(QMainWindow):
         btn.setToolTip(self._act_sidebar.toolTip())
         btn.setCursor(Qt.PointingHandCursor)
         btn.setAutoRaise(True)
-        btn.setStyleSheet(
-            "QToolButton { background: palette(mid); border: none;"
-            " border-radius: 4px; }"
-            "QToolButton:hover { background: rgb(243, 115, 41); }")
+        from views.theme import style as theme_style
+        theme_style(btn,             # {accent_rgb}: Preferences ▸ Accent colour
+            "QToolButton {{ background: palette(mid); border: none;"
+            " border-radius: 4px; }}"
+            "QToolButton:hover {{ background: rgb({accent_rgb}); }}")
         btn.clicked.connect(
             lambda: self._act_sidebar.setChecked(
                 not self._act_sidebar.isChecked()))
@@ -13139,11 +13140,12 @@ class ComposerWindow(QMainWindow):
         btn.setToolTip(tr("Back to the workspace (Ctrl+0)"))
         btn.setCursor(Qt.PointingHandCursor)
         btn.setAutoRaise(True)
-        btn.setStyleSheet(
-            "QToolButton { background: rgba(30, 36, 44, 170); color: white;"
+        from views.theme import style as theme_style
+        theme_style(btn,
+            "QToolButton {{ background: rgba(30, 36, 44, 170); color: white;"
             " border: 1px solid rgba(255, 255, 255, 90); border-radius: 6px;"
-            " padding: 4px 10px; font-weight: bold; }"
-            "QToolButton:hover { background: rgba(243, 115, 41, 220); }")
+            " padding: 4px 10px; font-weight: bold; }}"
+            "QToolButton:hover {{ background: rgba({accent_rgb}, 220); }}")
         btn.clicked.connect(lambda: self._act_clean_screen.setChecked(False))
         btn.hide()
         self._clean_exit_btn = btn

@@ -46,8 +46,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
-    QSplitter,
-    QSplitterHandle,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -157,17 +155,41 @@ class _SectionHeader(QToolButton):
         app = QApplication.instance()
         app.installEventFilter(router)
         try:
-            drag.exec(Qt.MoveAction)
+            done = drag.exec(Qt.MoveAction)
         finally:
             app.removeEventFilter(router)
             router.finish()
+        # Let go where no tray takes it — out of the window, on another
+        # screen: the section goes out into a window of its own. A drag
+        # called off with Esc leaves the button held: nothing then.
+        stack = _stack_of(self)
+        if done == Qt.IgnoreAction and stack is not None \
+                and not _left_button_down():
+            from PySide6.QtCore import QTimer
+            from PySide6.QtGui import QCursor
+            key, at = self._section.key, QCursor.pos() - hot
+            QTimer.singleShot(0, stack,
+                              lambda: stack.floatRequested.emit(key, at))
+
+
+def _left_button_down() -> bool:
+    """Whether the left button is held now — asked of the system on
+    Windows, where Qt's own record is stale after a drag."""
+    import sys
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            return bool(ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
+        except (AttributeError, OSError):
+            pass
+    from PySide6.QtGui import QGuiApplication
+    return bool(QGuiApplication.mouseButtons() & Qt.LeftButton)
 
 
 class _SectionBody(QScrollArea):
-    """A section's panel in a scroll area of its own: the separator under
-    the section can make it shorter than the panel, which then scrolls
-    inside it instead of pushing the sections below. Its natural size is
-    the panel's."""
+    """A section's panel in a scroll area of its own: the grip under the
+    section can make it shorter than the panel, which then scrolls inside
+    it. Its natural size is the panel's."""
 
     def __init__(self, content: QWidget) -> None:
         super().__init__()
@@ -188,17 +210,74 @@ class _SectionBody(QScrollArea):
                                 3 * self.fontMetrics().height())))
 
 
+class _SectionGrip(QWidget):
+    """The separator under a tray section: a line across the tray, lit
+    while the pointer is on it. Dragged, it sets the height of the section
+    above it and of no other — the sections below are pushed down or
+    pulled up, keeping theirs. Double-clicked, the section goes back to
+    its own height."""
+
+    HEIGHT = 6
+
+    def __init__(self, section) -> None:
+        super().__init__(section)
+        self._section = section
+        self._start = None
+        self.setFixedHeight(self.HEIGHT)
+        self.setCursor(Qt.SizeVerCursor)
+        self.setStatusTip(tr(
+            "Drag to make the section above taller or shorter; "
+            "double-click to give it back its own height."))
+
+    def paintEvent(self, event) -> None:  # noqa: N802 — Qt override
+        from PySide6.QtGui import QPainter
+        from views.theme import tokens
+        lit = self.underMouse() or self._start is not None
+        color = (self.palette().highlight().color() if lit
+                 else QColor(tokens()["frame"]))
+        QPainter(self).fillRect(0, self.height() // 2 - 1, self.width(), 2,
+                                color)
+
+    def enterEvent(self, event) -> None:  # noqa: N802 — Qt override
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 — Qt override
+        self.update()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 — Qt override
+        if event.button() == Qt.LeftButton:
+            self._start = (event.globalPosition().y(), self._section.height())
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 — Qt override
+        if self._start is not None:
+            y0, h0 = self._start
+            self._section.set_height(
+                round(h0 + event.globalPosition().y() - y0))
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 — Qt override
+        if self._start is not None:
+            self._start = None
+            self._section.keep_height(self._section.height())
+            self.update()
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 — Qt override
+        self._start = None
+        self._section.forget_height()
+
+
 class _Section(QWidget):
     """A collapsible section: a framed header that folds its content with
-    a click and moves the section with a drag; the separator under it, in
-    a :class:`SectionStack`, sets its height. ``key`` names it for the
+    a click and moves the section with a drag, and a grip under it that
+    sets its height (:class:`_SectionGrip`). ``key`` names it for the
     tray layout (core.tray_layout) and its remembered height; by default
     its panel's class.
 
     ``fill``: the panel takes the height the tray has left (the Browser's
-    tree, an extension's panel) and scrolls by itself; the others are put
-    in a :class:`_SectionBody`. ``fold_key`` is where its open/folded
-    state is remembered (by default, the panel's class)."""
+    tree, an extension's panel) and scrolls by itself — until the grip
+    gives it a height; the others are put in a :class:`_SectionBody` and
+    are as tall as their panel until then. ``fold_key`` is where its
+    open/folded state is remembered (by default, the panel's class)."""
 
     def __init__(self, title: str, content: QWidget,
                  key: str | None = None, fill: bool = False,
@@ -229,8 +308,11 @@ class _Section(QWidget):
             # keeps the minimum width it first measured.
             _let_narrow(content)
         self._body = content if fill else _SectionBody(content)
+        self._grip = _SectionGrip(self)
         lay.addWidget(self._btn)
         lay.addWidget(self._body)
+        lay.addWidget(self._grip)
+        self._kept = self._read_height()
         # Open or folded, as the user left it last time (a user in Brazil,
         # 25-09: «sempre que eu abro o software ele vem aberta… deve vir como
         # eu deixei»). Keyed by the panel's class, not its title: the title
@@ -248,17 +330,25 @@ class _Section(QWidget):
 
     def natural_height(self) -> int:
         """Its height with the whole panel showing."""
-        return self.header_height() + self._body.sizeHint().height()
+        return (self.header_height() + self._body.sizeHint().height()
+                + _SectionGrip.HEIGHT)
 
     def least_height(self) -> int:
-        """As short as the separator may make it while open."""
-        return self.header_height() + self._body.minimumSizeHint().height()
+        """As short as the grip may make it while open."""
+        return (self.header_height() + self._body.minimumSizeHint().height()
+                + _SectionGrip.HEIGHT)
 
+    def grows(self) -> bool:
+        """Takes the height the tray has left: open, filling, and never
+        given a height."""
+        return self.is_open() and self.fill and self._kept is None
+
+    # ---- its height ------------------------------------------------------------
     def _height_key(self) -> str:
-        """Where the height the separator gave it is remembered."""
+        """Where the height the grip gave it is remembered."""
         return f"tray/height/{self.key}"
 
-    def kept_height(self) -> int | None:
+    def _read_height(self) -> int | None:
         from PySide6.QtCore import QSettings
         try:
             h = int(QSettings().value(self._height_key(), 0) or 0)
@@ -266,16 +356,54 @@ class _Section(QWidget):
             return None
         return h if h > 0 else None
 
+    def kept_height(self) -> int | None:
+        return self._kept
+
+    def set_height(self, height: int) -> None:
+        """While the grip is dragged: this height, the others unmoved."""
+        self.setFixedHeight(max(self.least_height(), height))
+
     def keep_height(self, height: int) -> None:
         from PySide6.QtCore import QSettings
-        QSettings().setValue(self._height_key(), int(height))
+        self._kept = max(self.least_height(), int(height))
+        QSettings().setValue(self._height_key(), self._kept)
+        self._relayout()
+
+    def forget_height(self) -> None:
+        from PySide6.QtCore import QSettings
+        self._kept = None
+        QSettings().remove(self._height_key())
+        self._relayout()
+
+    def apply_height(self) -> None:
+        """Folded: its header. Open: the height the grip gave it, else its
+        panel's — or, filling, whatever the tray has left."""
+        open_ = self.is_open()
+        self._grip.setVisible(open_)
+        if not open_:
+            self.setFixedHeight(self.header_height())
+        elif self._kept is not None:
+            self.setFixedHeight(max(self.least_height(), self._kept))
+        elif self.fill:
+            self.setMinimumHeight(self.least_height())
+            self.setMaximumHeight(16777215)
+        else:
+            self.setFixedHeight(self.natural_height())
+
+    def _relayout(self) -> None:
+        stack = _stack_of(self)
+        if stack is not None:
+            stack.update_stretch()
+        else:
+            self.apply_height()
 
     def take_back_content(self) -> None:
         """The panel back under the header, shown as the section is open
         or folded — after it was the whole body of its own tray (a panel
         alone in its tray shows bare, without a header)."""
-        if self._body is self._content                 and self._content.parentWidget() is not self:
-            self.layout().addWidget(self._content)
+        if self._body is self._content \
+                and self._content.parentWidget() is not self:
+            self.layout().insertWidget(1, self._content)
         self._body.setVisible(self.is_open())
         self._content.setVisible(self.is_open())
 
@@ -287,9 +415,8 @@ class _Section(QWidget):
         if key is not None:
             from PySide6.QtCore import QSettings
             QSettings().setValue(key, "0" if on else "1")
-        stack = _stack_of(self)
-        if stack is not None:
-            stack.update_stretch()               # its height comes or goes
+        if hasattr(self, "_kept"):
+            self._relayout()                     # its height comes or goes
 
 
 def style_slider(slider) -> None:
@@ -3717,37 +3844,14 @@ class _SectionDropRouter(QObject):
             self._stack = None
 
 
-class _SectionHandle(QSplitterHandle):
-    """The separator under a tray section: a line across the tray, lit
-    while the pointer is on it; dragged, it gives height to one section
-    and takes it from the next."""
-
-    def __init__(self, orientation, splitter) -> None:
-        super().__init__(orientation, splitter)
-        self.setAttribute(Qt.WA_Hover, True)
-
-    def paintEvent(self, event) -> None:  # noqa: N802 — Qt override
-        from PySide6.QtGui import QPainter
-        from views.theme import tokens
-        p = QPainter(self)
-        color = (self.palette().highlight().color() if self.underMouse()
-                 else QColor(tokens()["frame"]))
-        p.fillRect(0, self.height() // 2 - 1, self.width(), 2, color)
-
-
-class _SectionSplitter(QSplitter):
-    def createHandle(self):  # noqa: N802 — Qt override
-        return _SectionHandle(self.orientation(), self)
-
-
 class SectionStack(QScrollArea):
-    """A tray's body: its sections top to bottom, a separator under each
-    that sets its height — the panel scrolls inside when it is made
-    shorter than itself. The heights are remembered per section; a section
-    the user never resized starts at its own height, and the tallest ones
-    give way when they do not all fit. An open filling section (the
+    """A tray's body: its sections top to bottom, in a scroll area. Each
+    section is as tall as its panel, or as its grip made it — dragging a
+    grip pushes the sections below, which keep their height, and the tray
+    scrolls when they do not all fit. An open filling section (the
     Browser, an extension's panel) takes the height left over; with none,
-    it stays empty under the last section. Folded, a section is its header.
+    the space stays empty under the last section. Folded, a section is its
+    header.
 
     A section is moved by dragging its header — a line shows where it
     will land, in this tray or another one — or from its header's
@@ -3759,30 +3863,26 @@ class SectionStack(QScrollArea):
 
     sectionMoved = Signal(str, int)
     manageRequested = Signal()
+    #: A section's header let go where no tray takes it: out into a window
+    #: of its own, its header's top-left at that screen point.
+    floatRequested = Signal(str, QPoint)
 
     #: How close to the top or bottom edge a dragged section scrolls the
     #: tray, and by how much per tick.
     _EDGE_PX = 28
     _SCROLL_STEP = 18
-    #: The separators' height: easy to grab, a thin line drawn in it.
-    _HANDLE_PX = 6
 
     def __init__(self, sections=()) -> None:
         super().__init__()
-        split = _SectionSplitter(Qt.Vertical)
-        split.setObjectName("tray_sections")
-        split.setChildrenCollapsible(False)
-        split.setHandleWidth(self._HANDLE_PX)
-        split.setAcceptDrops(True)
-        split.splitterMoved.connect(self._on_separator_moved)
-        split.installEventFilter(self)
-        self._split = split
-        # The empty space under the last section, when none fills it.
-        self._filler = QWidget()
-        split.addWidget(self._filler)
+        inner = QWidget()
+        inner.setAcceptDrops(True)
+        self._col = QVBoxLayout(inner)
+        # No side margins: they would widen the trays' 240 px floor.
+        self._col.setContentsMargins(0, 2, 0, 2)
+        self._col.setSpacing(1)
+        self._col.addStretch(1)
         self._sections: list[_Section] = []
-        self._sized = False                 # heights given since shown?
-        self._line = QFrame(self.viewport())
+        self._line = QFrame(inner)
         self._line.setFixedHeight(3)
         self._line.setStyleSheet("background: palette(highlight);")
         self._line.hide()
@@ -3793,8 +3893,10 @@ class SectionStack(QScrollArea):
         self._scroll_timer.timeout.connect(self._scroll_tick)
         self.set_sections(list(sections))
         self.setWidgetResizable(True)
-        self.setWidget(split)
+        self.setWidget(inner)
         self.setMinimumWidth(240)
+        # The panels' own heights are known once they are polished.
+        inner.installEventFilter(self)
 
     def sections(self) -> list:
         return list(self._sections)
@@ -3803,84 +3905,32 @@ class SectionStack(QScrollArea):
         """Show exactly ``sections``, in this order. One taken from
         another stack moves here; one left out is hidden here (its owner
         puts it somewhere else)."""
+        inner = self._col.parentWidget()
         for s in self._sections:
-            if s not in sections and s.parentWidget() is self._split:
+            self._col.removeWidget(s)
+            if s not in sections and s.parentWidget() is inner:
                 s.hide()
         for i, s in enumerate(sections):
-            self._split.insertWidget(i, s)
+            self._col.insertWidget(i, s)
             s.show()
-        self._split.insertWidget(len(sections), self._filler)
         self._sections = list(sections)
         self.update_stretch()
 
     def update_stretch(self) -> None:
-        """Heights again, after a section came, went or folded: a folded
-        one is its header; an open filling one takes what is left."""
+        """Every section its height again (one came, went, folded or was
+        given a height); an open filling one takes what is left."""
         filling = False
         for i, s in enumerate(self._sections):
-            grows = s.fill and s.is_open()
+            s.apply_height()
+            grows = s.grows()
+            self._col.setStretch(i, 1 if grows else 0)
             filling = filling or grows
-            self._split.setStretchFactor(i, 1 if grows else 0)
-            s.setMaximumHeight(16777215 if s.is_open() else s.header_height())
-        self._split.setStretchFactor(len(self._sections), 0 if filling else 1)
-        self._filler.setVisible(not filling)
-        self._sized = False
-        if self._split.isVisible() and self._split.height() > 0:
-            self._give_heights()
-
-    def _give_heights(self) -> None:
-        """Each section its height: the one the user gave it, else its
-        own. When they do not all fit, none is cut: the tray scrolls, as
-        it always did. What is left goes to the filling sections, or under
-        the last one."""
-        sections = self._sections
-        handles = max(0, len(self._visible_items()) - 1) * self._HANDLE_PX
-        sizes = []
-        for s in sections:
-            if not s.is_open():
-                sizes.append(s.header_height())
-            elif s.fill:
-                sizes.append(s.least_height())
-            else:
-                sizes.append(max(s.least_height(),
-                                 s.kept_height() or s.natural_height()))
-        total = sum(sizes) + handles
-        view = self.viewport().height()
-        # Taller than the tray: the sections' widget as tall as they are,
-        # and the tray scrolls; else as tall as the tray.
-        self._split.setMinimumHeight(total if total > view else 0)
-        self._split.resize(self._split.width(), max(total, view))
-        avail = max(0, self._split.height() - handles)
-        rest = max(0, avail - sum(sizes))
-        fills = [i for i, s in enumerate(sections) if s.fill and s.is_open()]
-        if fills:
-            share, extra = divmod(rest, len(fills))
-            for n, i in enumerate(fills):
-                sizes[i] += share + (1 if n < extra else 0)
-            rest = 0
-        self._split.setSizes(sizes + [rest])
-        self._sized = True
-
-    def _visible_items(self) -> list:
-        return [self._split.widget(i) for i in range(self._split.count())
-                if not self._split.widget(i).isHidden()]
-
-    def _on_separator_moved(self, _pos: int, index: int) -> None:
-        """The two sections either side of the separator keep the heights
-        it gave them."""
-        for i in (index - 1, index):
-            if 0 <= i < len(self._sections):
-                s = self._sections[i]
-                if s.is_open() and not s.fill:
-                    s.keep_height(s.height())
+        self._col.setStretch(len(self._sections), 0 if filling else 1)
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt override
         from PySide6.QtCore import QEvent
-        if obj is self._split \
-                and event.type() in (QEvent.Resize, QEvent.Show) \
-                and not self._sized and self._split.isVisible() \
-                and self._split.height() > 0:
-            self._give_heights()            # the first time it has a height
+        if obj is self.widget() and event.type() == QEvent.Show:
+            self.update_stretch()
         # QScrollArea watches its widget too (its scroll bars).
         return super().eventFilter(obj, event)
 
@@ -3911,9 +3961,8 @@ class SectionStack(QScrollArea):
         return len(self._sections)
 
     def drag_over(self, y: int) -> None:
-        from PySide6.QtCore import QPoint
         i = self._insert_index(y)
-        gap = self._HANDLE_PX
+        gap = self._col.spacing()
         if i < len(self._sections):
             at = self._sections[i].y() - (gap + self._line.height()) // 2
         elif self._sections:
@@ -3921,12 +3970,13 @@ class SectionStack(QScrollArea):
             at = last.y() + last.height() + (gap - self._line.height()) // 2
         else:
             at = 0
-        top = self._split.mapTo(self.viewport(), QPoint(0, max(0, at))).y()
-        self._line.setGeometry(0, top, self.viewport().width(),
+        inner = self.widget()
+        self._line.setGeometry(0, max(0, at), inner.width(),
                                self._line.height())
         self._line.show()
         self._line.raise_()
-        # Near the top or bottom edge, the tray scrolls on its own.
+        # Near the top or bottom edge, the tray scrolls on its own: a long
+        # Materials section stood between Parts and the top.
         in_view = y - self.verticalScrollBar().value()
         h = self.viewport().height()
         self._edge = (-1 if in_view < self._EDGE_PX

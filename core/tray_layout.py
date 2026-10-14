@@ -38,6 +38,10 @@ DEFAULT_SECTIONS: dict[str, tuple[str, ...]] = {
 #: a deleted tray's saved place or hidden state can't land on a new one.
 CUSTOM_PREFIX = "tray_user_"
 
+#: A dialog out in a window of its own is in a tray of its own, with no
+#: tab: ``tray_float_<hex>``, the window.
+FLOAT_PREFIX = "tray_float_"
+
 
 def all_sections() -> list[str]:
     """Every built-in section id, in the factory order."""
@@ -46,6 +50,10 @@ def all_sections() -> list[str]:
 
 def is_custom(tray: str) -> bool:
     return tray.startswith(CUSTOM_PREFIX)
+
+
+def is_float(tray) -> bool:
+    return isinstance(tray, str) and tray.startswith(FLOAT_PREFIX)
 
 
 class TrayLayout:
@@ -82,6 +90,10 @@ class TrayLayout:
     def custom_trays(self) -> list[str]:
         return [t for t in self.trays if is_custom(t)]
 
+    def float_trays(self) -> list[str]:
+        """The dialog windows: each a tray of its own, with no tab."""
+        return [t for t in self.trays if is_float(t)]
+
     # ---- an extension's panel ------------------------------------------------
     def register(self, tray: str, sections) -> None:
         """A tray that turned up after the layout was read — an extension's
@@ -109,6 +121,30 @@ class TrayLayout:
         if not is_custom(tray) or tray not in self.trays:
             raise KeyError(tray)
         self.names[tray] = name
+
+    def new_float(self) -> str:
+        """A new, empty dialog window; returns its id."""
+        tray = FLOAT_PREFIX + uuid.uuid4().hex[:8]
+        while tray in self.trays:                       # pragma: no cover
+            tray = FLOAT_PREFIX + uuid.uuid4().hex[:8]
+        self.trays[tray] = []
+        return tray
+
+    def put_back(self, tray: str, origins: dict | None = None) -> list[str]:
+        """A dialog window's sections back where they came from: the tray
+        ``origins`` names for each, when it is still there and not a window
+        itself, else at their factory place. The window goes. Returns
+        them."""
+        if not is_float(tray) or tray not in self.trays:
+            raise KeyError(tray)
+        sections = self.trays.pop(tray)
+        for s in sections:
+            origin = (origins or {}).get(s)
+            if origin in self.trays and not is_float(origin):
+                self.trays[origin].append(s)
+            else:
+                self._put_home(s)
+        return sections
 
     def delete(self, tray: str) -> list[str]:
         """Remove one of the user's trays; its sections go back to the

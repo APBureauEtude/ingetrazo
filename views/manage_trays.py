@@ -18,22 +18,22 @@ it gets a header like any section, and fills the height left.
 
 Export… / Import… write and read the whole arrangement — the trays, their
 sections, which side each tab is on, in what order, which are open, the
-tabs on top or at the bottom — as a JSON file, as the keyboard shortcuts
-are.
+trays out in windows of their own and where, the tabs on top or at the
+bottom — as a JSON file, as the keyboard shortcuts are.
 
 :class:`TrayManager` keeps the window's trays in step with the layout
 (core.tray_layout) and saves it; :class:`ManageTraysDialog` is the dialog.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Qt
+from PySide6.QtCore import QObject, QPoint, Qt
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDockWidget, QFrame,
                                QHBoxLayout, QLabel, QListWidget,
                                QListWidgetItem, QMessageBox, QPushButton,
                                QVBoxLayout, QWidget)
 
 from core.i18n import tr
-from core.tray_layout import TrayLayout, is_custom
+from core.tray_layout import TrayLayout, is_custom, is_float
 from views import prompts
 
 #: What an exported trays file says it is.
@@ -52,11 +52,18 @@ class TrayManager(QObject):
     section id."""
 
     KEY = "ui/tray_layout"
+    #: Where the dialog windows are (views/tray_window.DialogWindow).
+    WINDOWS_KEY = "ui/dialog_windows"
 
     def __init__(self, window, docks: dict, panels: dict | None = None) -> None:
         super().__init__(window)
         self._window = window
         self.docks: dict = dict(docks)
+        #: The dialogs out in windows of their own: tray id → the window,
+        #: and → the tray each of its dialogs came from.
+        self.floats: dict = {}
+        self._origins: dict = {}
+        self._windows_final = False
         self.stacks: dict = {}
         self.sections: dict = {}
         self.titles: dict = {}
@@ -80,6 +87,9 @@ class TrayManager(QObject):
         self.layout = TrayLayout.from_json(QSettings().value(self.KEY))
         for tray in self.layout.custom_trays():
             self.docks[tray] = self._make_dock(tray)
+        saved = self._read_windows()
+        for tray in self.layout.float_trays():
+            self._make_float(tray, saved.get(tray))
         self.apply()
 
     # ---- reading -------------------------------------------------------------
@@ -117,6 +127,14 @@ class TrayManager(QObject):
             w = w.parentWidget()
         return w
 
+    def host_of(self, key: str):
+        """The tray (a QDockWidget) or the dialog window showing ``key``."""
+        from views.tray_window import DialogWindow
+        w = self.panels.get(key) or self.sections.get(key)
+        while w is not None and not isinstance(w, (QDockWidget, DialogWindow)):
+            w = w.parentWidget()
+        return w
+
     # ---- an extension's panel ------------------------------------------------
     def adopt(self, dock) -> None:
         """An extension's panel: its tab is a tray, and the panel a dialog
@@ -139,30 +157,48 @@ class TrayManager(QObject):
     def show_dialog(self, key: str) -> bool:
         """Bring the tray showing ``key`` forward — back in its own tray
         first if it was in none. False when ``key`` is not a dialog."""
+        from views.tray_window import DialogWindow
         if key not in self.titles:
             return False
         if self.layout.tray_of(key) is None:
             self.set_section(self.layout.home_of(key), key, True)
-        dock = self.dock_showing(key)
-        if dock is None:
+        host = self.host_of(key)
+        if isinstance(host, DialogWindow):
+            host.show()
+            host.raise_()
+            host.activateWindow()
+            return True
+        if host is None:
             return False
-        self._window.set_tray_shown(dock, True)
+        self._window.set_tray_shown(host, True)
         return True
 
     # ---- changing ------------------------------------------------------------
     def apply(self) -> None:
-        """Every tray shows the sections the layout gives it."""
+        """Every tray — and every dialog window — shows the sections the
+        layout gives it."""
+        hosts = set(self.docks) | set(self.floats)
         shown = {t: [k for k in keys if k in self.titles]
-                 for t, keys in self.layout.trays.items() if t in self.docks}
+                 for t, keys in self.layout.trays.items() if t in hosts}
         # A section in a tray that has no tab this time (an extension not
         # loaded) shows in its own tray meanwhile; the layout keeps it there.
         for key in self.titles:
             tray = self.layout.tray_of(key)
             home = self.layout.home_of(key)
-            if tray is not None and tray not in self.docks and home in shown:
+            if tray is not None and tray not in hosts and home in shown:
                 shown[home].append(key)
         in_stacks = set()
         for tray, keys in shown.items():
+            win = self.floats.get(tray)
+            if win is not None:
+                sections = [self._section(k) for k in keys]
+                win.stack.set_sections(sections)
+                in_stacks.update(sections)
+                win.follow()
+                # Shown with the window; empty — its dialog's extension
+                # not loaded yet — it waits.
+                win.setVisible(bool(keys) and self._window.isVisible())
+                continue
             dock = self.docks[tray]
             own = self._own.get(tray)
             if own is not None and keys == [own]:
@@ -184,6 +220,10 @@ class TrayManager(QObject):
             if section not in in_stacks \
                     and section.parentWidget() is not self._parking:
                 section.setParent(self._parking)
+        # A dialog window whose last dialog left goes.
+        for tray in list(self.floats):
+            if not self.layout.trays.get(tray):
+                self._drop_float(tray)
 
     def save(self) -> None:
         from PySide6.QtCore import QSettings
@@ -217,21 +257,181 @@ class TrayManager(QObject):
     def place(self, key: str, tray: str, index: int) -> None:
         """A section dragged (or moved from its menu) to ``index`` of
         ``tray``."""
-        if key not in self.titles or tray not in self.docks:
+        if key not in self.titles or (tray not in self.docks
+                                      and tray not in self.floats):
             return                          # not one of these trays' own
+        self._carry_origin(key, tray)
+        joining = tray in self.floats and self.layout.tray_of(key) != tray
         self.layout.place(key, tray, index)
         self.apply()
+        if joining:
+            self._grow_for(self.floats[tray], key)
         self.save()
+        self.remember_windows()
 
-    def load(self, layout: TrayLayout) -> None:
-        """Another arrangement (an imported file): the user's trays it does
-        not have go, the ones it has are made or renamed."""
+    # ---- the dialogs out in windows of their own -----------------------------
+    def _grow_for(self, win, key: str) -> None:
+        """A dialog dropped into a dialog window: the window taller by it,
+        within its screen, so it shows instead of hiding under a scroll
+        bar."""
+        if win.is_max():
+            return
+        section = self.sections.get(key)
+        extra = section.natural_height() if section is not None else 200
+        screen = win.screen()
+        room = (screen.availableGeometry().bottom() - win.y()
+                if screen is not None else win.height() + extra)
+        win.resize(win.width(), max(win.height(),
+                                    min(win.height() + extra, room)))
+    def float_section(self, key: str, at=None):
+        """A dialog out of its tray into a window of its own, its header's
+        top-left at ``at`` (a screen point) — or, alone in its window
+        already, that window moved there. Returns the window."""
+        if key not in self.titles:
+            return None
+        origin = self.layout.tray_of(key)
+        if is_float(origin) and self.layout.trays[origin] == [key]:
+            win = self.floats.get(origin)
+            if win is not None and at is not None:
+                win.move(at - win.stack_offset())
+            return win
+        section = self._section(key)
+        tray = self.layout.new_float()
+        win = self._make_float(tray, None)
+        self._carry_origin(key, tray)
+        self.layout.place(key, tray, 0)
+        width = max(280, section.width() if section.isVisible() else 300)
+        height = (480 if section.fill
+                  else min(640, max(180, section.height() + 40)))
+        win.resize(width, height)
+        if at is not None:
+            win.move(at - win.stack_offset())
+        else:
+            win.move(self._window.mapToGlobal(self._window.rect().center()))
+        self.apply()
+        self.save()
+        self.remember_windows()
+        if self._window.isVisible():
+            win.raise_()
+        return win
+
+    def put_back(self, tray: str) -> None:
+        """A dialog window's dialogs back in the trays they came from (or
+        their own); the window goes."""
+        if tray not in self.layout.trays or not is_float(tray):
+            return
+        origins = self._origins.get(tray, {})
+        self.layout.put_back(tray, origins)
+        self.apply()
+        self.save()
+        self.remember_windows()
+
+    def _carry_origin(self, key: str, tray: str) -> None:
+        """Into a dialog window: remember the tray ``key`` came from — the
+        window it leaves passes on what it knew."""
+        if not is_float(tray):
+            return
+        here = self.layout.tray_of(key)
+        origin = (self._origins.get(here, {}).get(key) if is_float(here)
+                  else here)
+        if origin is not None:
+            self._origins.setdefault(tray, {})[key] = origin
+
+    def show_windows(self) -> None:
+        """The dialog windows on screen with the main one (those with a
+        dialog to show)."""
+        for tray, win in self.floats.items():
+            if any(k in self.titles for k in self.layout.trays.get(tray, ())):
+                win.show()
+
+    def hide_windows(self) -> list:
+        """Out of sight (the clean screen); returns the ones that showed."""
+        shown = [w for w in self.floats.values() if w.isVisible()]
+        for w in shown:
+            w.hide()
+        return shown
+
+    def window_entries(self) -> dict:
+        """Where each dialog window is, and where its dialogs came from."""
+        return {tray: {**win.frame_entry(),
+                       "from": dict(self._origins.get(tray, {}))}
+                for tray, win in self.floats.items()}
+
+    def remember_windows(self) -> None:
+        """Saved a moment after they stop moving."""
+        from PySide6.QtCore import QTimer
+        timer = getattr(self, "_windows_timer", None)
+        if timer is None:
+            timer = self._windows_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(300)
+            timer.timeout.connect(self.save_windows)
+        timer.start()
+
+    def save_windows(self, final: bool = False) -> None:
+        """``final``: the main window is closing — saved now and for good,
+        a save still waiting must not run after it."""
+        import json
+        from PySide6.QtCore import QSettings
+        if self._windows_final:
+            return
+        QSettings().setValue(self.WINDOWS_KEY,
+                             json.dumps(self.window_entries()))
+        if final:
+            self._windows_final = True
+            timer = getattr(self, "_windows_timer", None)
+            if timer is not None:
+                timer.stop()
+            for win in self.floats.values():
+                win._closing = True
+
+    def _read_windows(self) -> dict:
+        import json
+        from PySide6.QtCore import QSettings
+        try:
+            data = json.loads(QSettings().value(self.WINDOWS_KEY, "") or "{}")
+        except (TypeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _make_float(self, tray: str, entry):
+        from views.tray_window import DialogWindow
+        win = DialogWindow(self._window, self, tray)
+        self.floats[tray] = win
+        self._hook(tray, win.stack)
+        if isinstance(entry, dict):
+            win.resize(300, 360)
+            win.place(entry, self._window.mapToGlobal(QPoint(0, 0)))
+            origins = entry.get("from")
+            if isinstance(origins, dict):
+                self._origins[tray] = {k: v for k, v in origins.items()
+                                       if isinstance(k, str)
+                                       and isinstance(v, str)}
+        return win
+
+    def _drop_float(self, tray: str) -> None:
+        win = self.floats.pop(tray)
+        self.layout.trays.pop(tray, None)
+        self._origins.pop(tray, None)
+        for s in win.stack.sections():
+            s.setParent(self._parking)
+        win._closing = True
+        win.close()
+        win.deleteLater()
+
+    def load(self, layout: TrayLayout, windows=None) -> None:
+        """Another arrangement (an imported file): the user's trays and
+        dialog windows it does not have go, the ones it has are made or
+        renamed, placed where ``windows`` says."""
         for tray, keys in self.layout.homes.items():
             if tray not in layout.homes:
                 layout.register(tray, keys)     # the extensions loaded now
         for tray in self.layout.custom_trays():
             if tray not in layout.trays:
                 self._drop_dock(tray)
+        for tray in list(self.floats):
+            if tray not in layout.trays:
+                self._drop_float(tray)
         self.layout = layout
         for tray in layout.custom_trays():
             if tray in self.docks:
@@ -239,8 +439,15 @@ class TrayManager(QObject):
             else:
                 dock = self.docks[tray] = self._make_dock(tray)
                 self._window.add_tray_dock(dock)
+        entries = windows if isinstance(windows, dict) else {}
+        for tray in layout.float_trays():
+            if tray not in self.floats:
+                self._make_float(tray, entries.get(tray))
+            elif isinstance(entries.get(tray), dict):
+                self.floats[tray].place(entries[tray])
         self.apply()
         self.save()
+        self.save_windows()
 
     # ---- the docks -----------------------------------------------------------
     def _section(self, key: str):
@@ -299,6 +506,8 @@ class TrayManager(QObject):
             lambda key, index, t=tray: self.place(key, t, index))
         stack.manageRequested.connect(
             lambda t=tray: self._window.open_manage_trays(t))
+        stack.floatRequested.connect(
+            lambda key, at: self.float_section(key, at))
 
 
 # ---- Export… / Import… ---------------------------------------------------------
@@ -307,19 +516,8 @@ _SIDES = (("right", Qt.RightDockWidgetArea), ("left", Qt.LeftDockWidgetArea))
 
 
 def _tab_order(window, docks: list) -> list:
-    """``docks`` in the order their tabs show, then the closed ones."""
-    from PySide6.QtCore import QPoint
-    ordered = []
-    for bar in window._dock_tab_bars():
-        # Qt keeps spare tab bars around, out of sight.
-        if not bar.isVisible() or not window.rect().contains(
-                bar.mapTo(window, QPoint(0, 0))):
-            continue
-        for i in range(bar.count()):
-            d = window._dock_of_tab(bar, i)
-            if d in docks and d not in ordered:
-                ordered.append(d)
-    return ordered + [d for d in docks if d not in ordered]
+    from views.tray_window import tab_order
+    return tab_order(window, docks)
 
 
 def export_trays(window) -> dict:
@@ -340,6 +538,8 @@ def export_trays(window) -> dict:
         }
     return {"format": EXPORT_FORMAT, "version": 1,
             "layout": window.tray_manager.layout.to_dict(), "sides": sides,
+            "windows": window.tray_window_entries(),
+            "dialog_windows": window.tray_manager.window_entries(),
             "tabs_bottom": window.tray_tabs_bottom()}
 
 
@@ -351,9 +551,12 @@ def import_trays(window, data) -> None:
     if (not isinstance(data, dict) or data.get("format") != EXPORT_FORMAT
             or not isinstance(data.get("layout"), dict)):
         raise ValueError(tr("This is not an IngeTrazo trays file."))
-    window.tray_manager.load(TrayLayout.from_dict(data["layout"]))
+    window.tray_manager.load(TrayLayout.from_dict(data["layout"]),
+                             data.get("dialog_windows"))
     if isinstance(data.get("tabs_bottom"), bool):
         window.set_tray_tabs_bottom(data["tabs_bottom"])
+    for tw in list(window._tray_windows().values()):
+        window.dock_back(tw)                # the file says where they go
     by_id = {d.objectName(): d for d in window._sidebar_docks()}
     sides = data.get("sides") if isinstance(data.get("sides"), dict) else {}
     for name, area in _SIDES:
@@ -373,6 +576,7 @@ def import_trays(window, data) -> None:
             width = side.get("width")
             if isinstance(width, int) and width > 0:
                 window.resizeDocks([front], [width], Qt.Horizontal)
+    window.restore_tray_windows(data.get("windows") or [])
     from PySide6.QtCore import QTimer
     QTimer.singleShot(0, window, window._style_dock_tabs)
     QTimer.singleShot(0, window, window._place_sidebar_handle)
@@ -502,6 +706,9 @@ class ManageTraysDialog(QDialog):
             if where is None:
                 check.setToolTip(tr("In no tray: check it to show it in "
                                     "this one."))
+            elif is_float(where):
+                check.setToolTip(tr("Out in a window of its own: checking "
+                                    "it puts it here."))
             elif where != tray and where in self._manager.docks:
                 check.setToolTip(tr("Now in the tray “{tray}”: checking it "
                                     "moves it here.",

@@ -729,6 +729,20 @@ class MainWindow(QMainWindow):
             for key in keys:
                 self._add_tool_button(tb, key)
 
+        # Bridge (issue #614): a one-shot command, not a tool, so a plain
+        # button after Fillet; Tools ▸ Bridge is this same action. No key
+        # of its own: Repeat (Shift+R) does the next one, and Preferences
+        # can give it one.
+        from views.shortcuts import set_tooltip
+        self._act_bridge = QAction(tool_icon("bridge"), tr("Bridge"), self)
+        self._act_bridge.setStatusTip(tr(
+            "Join two faces, a face and a line, or two lines with the faces "
+            "between them."))
+        set_tooltip(self._act_bridge, tr("Bridge"))
+        self._act_bridge.triggered.connect(self._on_bridge)
+        self.toolbars["modify"].addAction(self._act_bridge)
+        self._icon_actions.append((self._act_bridge, "bridge"))
+
         # Save, first on the Main bar (the composer's Sheet bar has had it
         # since the start; Marco, 2026-09-14: «el icono de guardar también en
         # modelo, antes de la flechita»). The shortcut stays on the menu
@@ -1405,6 +1419,10 @@ class MainWindow(QMainWindow):
                      ("section",)):
             for key in keys:
                 tools_menu.addAction(self._tool_actions[key])
+            if "followme" in keys:
+                # Bridge (issue #614), with the tools that build faces
+                # out of others: the Modify toolbar's own action.
+                tools_menu.addAction(self._act_bridge)
             tools_menu.addSeparator()
         # Tools ▸ Outer Shell, and Tools ▸ Solid Tools ▸ the rest.
         tools_menu.addAction(self._tool_actions["outer_shell"])
@@ -3963,6 +3981,8 @@ class MainWindow(QMainWindow):
             # menu and Marco could not find it (2026-09-10).
             menu.addAction(tr("Reverse Faces"), self._on_reverse_faces)
             menu.addAction(tr("Orient Faces"), self._on_orient_faces)
+        if self._bridgeable(sel):
+            menu.addAction(tr("Bridge"), self._on_bridge)
             face = self._single_textured_face()
             if face is not None:
                 # The Texture submenu, on a face with an image.
@@ -4458,6 +4478,41 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             tr("Removed {n} intermediate points", n=joined) if joined
             else tr("No collinear segments to join."), 3000)
+
+    def _bridgeable(self, sel) -> bool:
+        """Whether the selection holds the two profiles Bridge needs (the
+        right-click menu offers it only then)."""
+        from core.bridge import BridgeError, profiles_from_selection
+        try:
+            profiles_from_selection(self.viewport.scene.mesh, sel)
+        except BridgeError:
+            return False
+        return True
+
+    @_repeatable("Bridge")
+    def _on_bridge(self) -> None:
+        """Bridge (issue #614): side faces between two selected faces, a
+        face and a line, or two lines (core/bridge.py), in one undo step.
+        The faces bridged stay, as caps; the new ones end up selected."""
+        from core.bridge import (BridgeError, bridge, plan,
+                                 profiles_from_selection)
+        from core.history import SnapshotMutation
+        scene = self.viewport.scene
+        try:
+            profiles = profiles_from_selection(scene.mesh, scene.selection)
+            plan(profiles)
+        except BridgeError as err:
+            self.viewport.flash_status(tr(str(err)), 4000)
+            return
+        result: list = []
+        self.viewport.history.execute(SnapshotMutation(
+            lambda sc: result.extend(bridge(sc.mesh, profiles))))
+        scene.selection.clear()
+        scene.selection.update(f for f in result if f in scene.mesh.faces)
+        scene.version += 1
+        self.viewport.update()
+        self.viewport.flash_status(
+            tr("Bridge: {n} faces added", n=len(result)), 3000)
 
     def _on_flip_along(self, axis: str) -> None:
         """Right-click ▸ Flip Along ▸ Red / Green / Blue (issue #178)."""

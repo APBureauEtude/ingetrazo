@@ -2947,5 +2947,7 @@
  "Before": "Antes",
  "After": "Después",
  "Rename (F2): several selected rows at once — a name and a number, find and replace, a prefix or a suffix; one row in place; nothing selected: every row the filter shows": "Renombrar (F2): varias filas seleccionadas a la vez — nombre y número, buscar y reemplazar, prefijo o sufijo; una fila en su celda; sin selección: todas las filas que muestra el filtro",
- "Click a swatch to apply it": "Clic en una muestra para aplicarla"
+ "Click a swatch to apply it": "Clic en una muestra para aplicarla",
+ "Axes": "Ejes",
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Muestra los ejes de dibujo rojo, verde y azul del modelo. La inferencia sobre ellos sigue funcionando aunque estén ocultos."
 }

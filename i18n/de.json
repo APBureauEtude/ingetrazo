@@ -2940,5 +2940,7 @@
  "Before": "Vorher",
  "After": "Nachher",
  "Rename (F2): several selected rows at once — a name and a number, find and replace, a prefix or a suffix; one row in place; nothing selected: every row the filter shows": "Umbenennen (F2): mehrere ausgewählte Zeilen auf einmal — Name und Nummer, Suchen und Ersetzen, Präfix oder Suffix; eine Zeile direkt; ohne Auswahl: alle Zeilen, die der Filter zeigt",
- "Click a swatch to apply it": "Auf ein Muster klicken, um es anzuwenden"
+ "Click a swatch to apply it": "Auf ein Muster klicken, um es anzuwenden",
+ "Axes": "Achsen",
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Zeigt die roten, grünen und blauen Zeichenachsen des Modells. Die Inferenz entlang der Achsen funktioniert auch, wenn sie ausgeblendet sind."
 }

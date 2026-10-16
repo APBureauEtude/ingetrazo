@@ -2950,5 +2950,7 @@
  "Before": "Sebelum",
  "After": "Sesudah",
  "Rename (F2): several selected rows at once — a name and a number, find and replace, a prefix or a suffix; one row in place; nothing selected: every row the filter shows": "Ganti nama (F2): beberapa baris terpilih sekaligus — nama dan nomor, cari dan ganti, awalan atau akhiran; satu baris di tempat; tanpa pilihan: semua baris yang ditampilkan filter",
- "Click a swatch to apply it": "Klik contoh untuk menerapkannya"
+ "Click a swatch to apply it": "Klik contoh untuk menerapkannya",
+ "Axes": "Sumbu",
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Menampilkan sumbu gambar merah, hijau, dan biru pada model. Inferensi di sepanjang sumbu tetap berfungsi saat sumbu disembunyikan."
 }

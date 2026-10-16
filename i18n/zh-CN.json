@@ -2948,5 +2948,7 @@
  "Before": "之前",
  "After": "之后",
  "Rename (F2): several selected rows at once — a name and a number, find and replace, a prefix or a suffix; one row in place; nothing selected: every row the filter shows": "重命名 (F2)：多行一次性重命名 — 名称加编号、查找替换、前缀或后缀；单行就地编辑；未选择时：筛选所显示的全部行",
- "Click a swatch to apply it": "单击色样即可应用"
+ "Click a swatch to apply it": "单击色样即可应用",
+ "Axes": "坐标轴",
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "显示模型的红、绿、蓝绘图轴。隐藏后，沿坐标轴的推断仍然有效。"
 }

@@ -11753,17 +11753,37 @@ class Viewport(QOpenGLWidget):
         _c, px, py, ok = cat
         d = np.where(ok, np.hypot(px - screen_x, py - screen_y), np.inf)
         cand = np.where(d < self.pick_threshold_px)[0]
-        for i in cand[np.argsort(d[cand])]:
+
+        def vertex_of(i):
             if i < 2 * n:
                 e = idx.edges[int(i) % n]
-                vertex = e.a if i < n else e.b
-            else:
-                j = int(i) - 2 * n
-                arr = idx.gedge_a if j < m else idx.gedge_b
-                p = arr[j % m]
-                vertex = QVector3D(p[0], p[1], p[2])
-            if not self._is_occluded(vertex):
-                return vertex
+                return e.a if i < n else e.b
+            j = int(i) - 2 * n
+            arr = idx.gedge_a if j < m else idx.gedge_b
+            p = arr[j % m]
+            return QVector3D(p[0], p[1], p[2])
+        order = cand[np.argsort(d[cand])]
+        if not len(order):
+            return None
+        # The nearest one, alone first (usually the answer); then the
+        # rest in batches of 8, 16, 32… sharing one occlusion pass, as the
+        # snap engine reads its candidates. One ray per candidate, in turn,
+        # took minutes a pointer move over a dense mesh whose hundreds of
+        # nearby corners were nearly all hidden (a 128 788-face STL in #158).
+        first = vertex_of(order[0])
+        if not self._is_occluded(first):
+            return first
+        many = getattr(self, "_occluded_many", None)
+        k, size = 1, 8
+        while k < len(order):
+            batch = [vertex_of(i) for i in order[k:k + size]]
+            hidden = (many(batch) if many is not None
+                      else [self._is_occluded(v) for v in batch])
+            for v, h in zip(batch, hidden):
+                if not h:
+                    return v
+            k += size
+            size *= 2
         return None
 
     def hlr_geometry(self):

@@ -20,6 +20,24 @@ follow [SemVer](https://semver.org).
   Windows, macOS, AppImage y Snap; el Flatpak sigue con el motor de siempre
   en esta versión. Es una prueba: guarda copia de tus archivos y reporta lo
   raro con la etiqueta `rust-engine`.
+  Con el motor encendido, además, los modelos grandes se abren como
+  **mallas ligeras**: cada grupo se queda en arreglos compactos y solo se
+  construye cuando lo editas o haces clic en una de sus caras; el dibujo,
+  la selección, el panel de Materiales y el guardado leen esos arreglos.
+  En una planta industrial de 14 millones de caras (#158) abrir en ventana
+  pasa de 110 s a 16 s, la memoria de 7,5 GB a 4,8 GB y guardar de 15 s a
+  9 s, con el archivo guardado idéntico byte a byte. Si una vez el programa
+  no llega a abrirse con el motor encendido, el siguiente arranque vuelve
+  solo al motor de siempre y lo avisa; `--python-engine` en la línea de
+  órdenes hace lo mismo para un arranque.
+- **Modelos grandes más fluidos** (#158), con los dos motores: orbitar,
+  desplazar y hacer zoom en esa planta pasa de 86 ms a 34 ms por cuadro (de
+  12 a 30 imágenes por segundo en una gráfica integrada); mover un objeto,
+  de 1 s a 0,25 s por movimiento del ratón; deshacer, de 4,6 s a unos
+  2,5 s; entrar a un grupo, de 5,2 s a 3,1 s. Las miniaturas del panel de
+  Componentes se dibujan solo para las filas visibles y el panel de
+  Materiales ya no relee las texturas del disco tras cada cambio. La
+  imagen es la misma, comprobada píxel a píxel.
 - **Color de acento de los iconos y las barras** (#393): en Ventana ▸
   Preferencias ▸ General se elige el color de los detalles de los iconos y
   del fondo de los botones bajo el ratón: naranja IngeTrazo (el de siempre,

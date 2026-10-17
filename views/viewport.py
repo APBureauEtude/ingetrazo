@@ -376,6 +376,116 @@ def _ray_aabb(o, d, lo, hi, reach=float("inf")) -> bool:
 _chunk_uid = itertools.count(1)
 
 
+#: The recorded, state-tracking instanced passes: ``None`` follows the
+#: experimental engine (on with it, off without — they change how the GPU
+#: is fed, and drivers differ); True/False force them (tests draw both).
+_LEAN_INSTANCED = None
+
+
+def _lean_instanced() -> bool:
+    if _LEAN_INSTANCED is not None:
+        return _LEAN_INSTANCED
+    from core import _native
+    return _native.native is not None
+#: Span lists this long are culled with NumPy (_visible_spans_np).
+_SPAN_VECTOR_MIN = 64
+#: Recorded instanced passes replayed by the native engine when it is on.
+_LEAN_NATIVE_REPLAY = True
+
+
+class _GlTape:
+    """A recorded run of GL calls: each one is made at once (through the
+    PySide wrapper, as ever) and kept twice — as the wrapper call, and as
+    the raw GL call that wrapper makes, for core._native's GlReplay. A
+    replay runs the raw list natively when the engine is there, else the
+    wrapper calls."""
+
+    DRAW, VAO, U1I, U1F, U4F, ENABLE, DISABLE, CULL, FRONT, ACTIVE, TEX = \
+        range(11)
+
+    def __init__(self):
+        self.calls: list = []
+        self.ops: list = []
+        self.vals: list = []
+        self.arrays = None
+
+    def _op(self, code, ints=(), floats=()):
+        self.ops.append((code, *ints, *(0,) * (4 - len(ints))))
+        self.vals.append((*floats, *(0.0,) * (4 - len(floats))))
+
+    def call(self, fn, *args):
+        self.calls.append((fn, args))
+        fn(*args)
+
+    def draw(self, fn, mode, first, count, n):
+        self.call(fn, mode, first, count, n)
+        self._op(self.DRAW, (mode, first, count, n))
+
+    def bind_vao(self, vao):
+        self.call(vao.bind)
+        self._op(self.VAO, (vao.objectId(),))
+
+    def release_vao(self, vao):
+        self.call(vao.release)
+        self._op(self.VAO, (0,))
+
+    def uniform_i(self, prog, loc, v):
+        self.call(prog.setUniformValue, loc, v)
+        self._op(self.U1I, (loc, int(v)))
+
+    def uniform_f(self, prog, loc, v):
+        self.call(prog.setUniformValue1f, loc, v)
+        self._op(self.U1F, (loc,), (float(v),))
+
+    def uniform_4f(self, prog, loc, vec):
+        self.call(prog.setUniformValue, loc, vec)
+        self._op(self.U4F, (loc,), (vec.x(), vec.y(), vec.z(), vec.w()))
+
+    def gl(self, fn, code, value):
+        self.call(fn, value)
+        self._op(code, (value,))
+
+    def tex_bind(self, tex, unit):
+        # QOpenGLTexture::bind(unit): active unit, then bind (not reset).
+        self.call(tex.bind, unit)
+        self._op(self.ACTIVE, (GL_TEXTURE0 + unit,))
+        self._op(self.TEX, (tex.target().value, tex.textureId()))
+
+    def tex_release(self, tex, unit):
+        self.call(tex.release, unit)
+        self._op(self.ACTIVE, (GL_TEXTURE0 + unit,))
+        self._op(self.TEX, (tex.target().value, 0))
+
+    def replay(self, native) -> None:
+        if native is not None:
+            if self.arrays is None:
+                import numpy as np
+                self.arrays = (np.asarray(self.ops, dtype=np.int64)
+                               .reshape(-1, 5),
+                               np.asarray(self.vals, dtype=np.float32)
+                               .reshape(-1, 4))
+            native.run(*self.arrays)
+            return
+        for fn, args in self.calls:
+            fn(*args)
+
+
+#: The GL entry points GlReplay calls, in _GlTape's opcode order.
+_TAPE_FUNCS = (b"glDrawArraysInstanced", b"glBindVertexArray",
+               b"glUniform1i", b"glUniform1f", b"glUniform4f", b"glEnable",
+               b"glDisable", b"glCullFace", b"glFrontFace",
+               b"glActiveTexture", b"glBindTexture")
+
+
+class _InstanceBatch(list):
+    """One frame's placements of an instanced pool (a plain list of them)
+    with their indices in the pool and the pool's matrix rows, so the
+    matrix buffer is filled by one NumPy take instead of sixteen floats
+    read per placement."""
+
+    __slots__ = ("idx", "mats")
+
+
 def _proto_wrapper(vp, mesh, paint=None):
     """The stable stand-in a prototype mesh is baked through, one per
     (mesh, container paint): ``_group_chunk`` caches by the wrapper's id,
@@ -2431,13 +2541,34 @@ class Viewport(QOpenGLWidget):
         # now, in batches of its own under a clockwise front face
         # (``_front_face``).
         from core.group import effective_material
-        base = self._proto_base_chunk(g.mesh, effective_material(g))
+        paint = effective_material(g)
+        # The answer is the prototype's (and its paint's), which the
+        # placements epoch covers: once per prototype, not per placement
+        # (64 000 calls per rebuild on the plant of #158, ~1.5 s an undo).
+        epoch_of = getattr(self, "_placements_epoch", None)
+        memo = None
+        # Not the mesh open for editing: the epoch leaves its changes out
+        # (they are the per-frame half), and a paint inside could turn it
+        # translucent under the same epoch.
+        if epoch_of is not None and g.mesh is not self.scene.mesh:
+            epoch = epoch_of()
+            memo = getattr(self, "_elig_memo", None)
+            if memo is None or memo[0] != epoch:
+                memo = self._elig_memo = (epoch, {})
+            mkey = (id(g.mesh), _material_sig(paint))
+            hit = memo[1].get(mkey)
+            if hit is not None and hit[0] is g.mesh:
+                return hit[1]
+        base = self._proto_base_chunk(g.mesh, paint)
         # Translucent / back-side / glass content still rides the
         # consolidated passes (they need global draw ordering).
-        return not (base.get("tcol") or base.get("ttex")
-                    or base.get("back_vcol") or base.get("back_tex")
-                    or base.get("back_tcol") or base.get("back_ttex")
-                    or base.get("fvcol"))
+        ok = not (base.get("tcol") or base.get("ttex")
+                  or base.get("back_vcol") or base.get("back_tex")
+                  or base.get("back_tcol") or base.get("back_ttex")
+                  or base.get("fvcol"))
+        if memo is not None:
+            memo[1][mkey] = (g.mesh, ok)
+        return ok
 
     def _proto_base_chunk(self, mesh, paint=None):
         """The prototype's chunk in LOCAL coordinates (the same wrapper
@@ -2658,6 +2789,8 @@ class Viewport(QOpenGLWidget):
         from core.group import effective_material
         groups = self._placements()
         n = max(1, len(groups))
+        from views import array_bake
+        array_bake.prefetch(g.mesh for g in groups)
         last = time.monotonic()
         done: set = set()
         for i, g in enumerate(groups):
@@ -2749,8 +2882,12 @@ class Viewport(QOpenGLWidget):
                getattr(self, "_frozen_cache_version", None))
         pool = getattr(self, "_inst_pool", None)
         if pool is None or pool[0] != key:
+            from core.group import effective_material
             groups: list = []
             boxes: list = []
+            codes: list = []
+            protos: list = []             # code → (mesh, paint, mirrored)
+            code_of: dict = {}
             for g in self._placements():
                 if id(g) in pv or not self.scene.entity_visible(g):
                     continue
@@ -2758,14 +2895,30 @@ class Viewport(QOpenGLWidget):
                     continue
                 groups.append(g)
                 boxes.append(self._placement_bbox(g))
+                # Which pool (prototype, container paint, mirror) it draws
+                # in, and its matrix: fixed while the placements are, so
+                # not worked out again per frame (#158: 21 406 placements).
+                paint = effective_material(g)
+                mirrored = g.xform.determinant() < 0.0
+                pk = (id(g.mesh), _material_sig(paint), mirrored)
+                c = code_of.get(pk)
+                if c is None:
+                    c = code_of[pk] = len(protos)
+                    protos.append((g.mesh, paint, mirrored))
+                codes.append(c)
             # Boxless chunks (unknown extents) always draw: give them an
             # infinite box so the vectorised test keeps them.
             lo = np.array([b[0] if b else (-np.inf,) * 3 for b in boxes],
                           dtype=np.float64).reshape(-1, 3)
             hi = np.array([b[1] if b else (np.inf,) * 3 for b in boxes],
                           dtype=np.float64).reshape(-1, 3)
-            pool = self._inst_pool = (key, groups, lo, hi)
-        _k, groups, lo, hi = pool
+            codes_a = np.asarray(codes, dtype=np.int64)
+            mats = np.array([g.xform.data() for g in groups],
+                            dtype=np.float32).reshape(-1, 16)
+            by_code = np.argsort(codes_a, kind="stable")
+            pool = self._inst_pool = (key, groups, lo, hi, codes_a, protos,
+                                      mats, by_code)
+        _k, groups, lo, hi, codes_a, protos, mats, by_code = pool
         out: dict = {}
         if not groups:
             self._frame_instanced = out
@@ -2773,25 +2926,53 @@ class Viewport(QOpenGLWidget):
         if planes is None:
             keep = np.ones(len(groups), dtype=bool)
         else:
-            # Same p-vertex test as ``_aabb_visible``, all boxes at once.
-            pl = np.asarray(planes, dtype=np.float64)
-            n = pl[:, :3]
-            pick = np.where(n[:, None, :] >= 0.0, hi[None, :, :],
-                            lo[None, :, :])
-            keep = ((pick * n[:, None, :]).sum(axis=2)
-                    + pl[:, 3][:, None] >= 0.0).all(axis=0)
+            # Same p-vertex test as ``_aabb_visible``, all boxes at once —
+            # a plane at a time on the box columns (the (planes, boxes, 3)
+            # array it used to build was most of a frame's gather, #158);
+            # the same products and sums, in the same order.
+            keep = np.ones(len(groups), dtype=bool)
+            for pl in planes:
+                nx, ny, nz, d = (float(c) for c in pl)
+                px = hi[:, 0] if nx >= 0.0 else lo[:, 0]
+                py = hi[:, 1] if ny >= 0.0 else lo[:, 1]
+                pz = hi[:, 2] if nz >= 0.0 else lo[:, 2]
+                keep &= ((px * nx + py * ny) + pz * nz) + d >= 0.0
         # One pool per (prototype, container paint): a painted instance
         # (issue #47) draws its own bake of the prototype, not the plain
         # one its siblings share — pooled by mesh alone it kept showing
         # unpainted from outside while its inside (the loose bake) was
         # painted (Marco, 2026-09-21, bench test 21).
-        from core.group import effective_material
-        for i in np.flatnonzero(keep):
-            g = groups[i]
-            paint = effective_material(g)
-            mirrored = g.xform.determinant() < 0.0
-            out.setdefault((id(g.mesh), _material_sig(paint), mirrored),
-                           (g.mesh, paint, [], mirrored))[2].append(g)
+        # The same placements in view as last frame (an orbit mostly keeps
+        # them): the same batches, so the matrix buffers need no look.
+        memos = getattr(self, "_inst_frame_memo", None)
+        if memos is None:
+            memos = self._inst_frame_memo = {}
+        last = memos.get(planes is None)       # the camera's, the shadows'
+        if (last is not None and last[0] is pool
+                and np.array_equal(last[1], keep)):
+            self._frame_instanced = last[2]
+            return last[2]
+        # The kept placements of each pool, in placement order, the pools
+        # in the order their first kept placement comes (the face-by-face
+        # dict this replaces filled them so).
+        kept = by_code[keep[by_code]]
+        if not len(kept):
+            self._frame_instanced = out
+            return out
+        kc = codes_a[kept]
+        cuts = np.flatnonzero(np.diff(kc)) + 1
+        starts = np.concatenate([[0], cuts])
+        ends = np.concatenate([cuts, [len(kept)]])
+        firsts = kept[starts]
+        for j in np.argsort(firsts, kind="stable").tolist():
+            idx = kept[starts[j]:ends[j]]
+            mesh, paint, mirrored = protos[int(kc[starts[j]])]
+            batch = _InstanceBatch(groups[i] for i in idx.tolist())
+            batch.idx = idx
+            batch.mats = mats
+            out[(id(mesh), _material_sig(paint), mirrored)] = (
+                mesh, paint, batch, mirrored)
+        memos[planes is None] = (pool, keep, out)
         self._frame_instanced = out
         return out
 
@@ -2831,7 +3012,6 @@ class Viewport(QOpenGLWidget):
             # Replacing the entry alone kept 4 VAOs and 5 buffers alive per
             # edit of a component, for the whole session.
             self._destroy_proto_draw_entry(entry)
-        extra = self.context().extraFunctions()
 
         def static_vbo(raw):
             vbo = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
@@ -2842,6 +3022,47 @@ class Viewport(QOpenGLWidget):
             vbo.release()
             return vbo
 
+        self._program.bind()
+        vcol_raw = base["vcol"]
+        edges_raw = base["edges"]
+        dback_raw = base.get("dback", b"")
+        # textures: pos(3)+uv(2), one run per (path, shade)
+        tex_parts = []
+        tex_runs = []
+        start = 0
+        for tkey, raw in base["by_texture"].items():
+            tex_parts.append(raw)
+            n = len(raw) // 20
+            tex_runs.append((tkey, start, n))
+            start += n
+        entry = {"key": key,
+                 "vcol_vbo": static_vbo(vcol_raw),
+                 "vcol_count": len(vcol_raw) // 24,
+                 "edges_vbo": static_vbo(edges_raw),
+                 "edge_count": len(edges_raw) // 12,
+                 "dback_vbo": static_vbo(dback_raw),
+                 "dback_count": len(dback_raw) // 12,
+                 "tex_vbo": static_vbo(b"".join(tex_parts)),
+                 "tex_runs": tex_runs}
+        entry.update(self._wire_proto_vaos(entry))
+        # The main program stays BOUND. This is built mid-frame, from a pass
+        # that is drawing with it, and releasing it here left every draw
+        # call after this point without a shader: the first frame after a
+        # prototype changed showed nothing from here on — the edited group,
+        # its instanced neighbours, the axes, the figure. Inside a nested
+        # group every edit changes a prototype, so every edit blanked the
+        # group for a frame («por un segundo el grupo desaparece, pensé que
+        # se había eliminado», Marco, 2026-09-11). With shadows on it never
+        # showed: the shadow pass builds the entry first and rebinds its own
+        # depth program afterwards.
+        cache[ckey] = entry
+        return entry
+
+    def _wire_proto_vaos(self, statics) -> dict:
+        """A per-instance matrix buffer and the four VAOs that draw the
+        prototype's static buffers (``statics``: vcol/edges/dback/tex
+        ``_vbo``) with it, divisor 1 — ``mat_sig`` empty. Program bound."""
+        extra = self.context().extraFunctions()
         mat_vbo = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
         mat_vbo.setUsagePattern(QOpenGLBuffer.DynamicDraw)
         mat_vbo.create()
@@ -2858,93 +3079,65 @@ class Viewport(QOpenGLWidget):
                 extra.glVertexAttribDivisor(loc, 1)
             mat_vbo.release()
 
-        self._program.bind()
-        # vcol: pos(3)+rgb(3)
-        vcol_raw = base["vcol"]
-        vcol_vbo = static_vbo(vcol_raw)
-        vcol_vao = QOpenGLVertexArrayObject(self)
-        vcol_vao.create()
-        vcol_vao.bind()
-        vcol_vbo.bind()
-        self._program.enableAttributeArray(self._loc_pos)
-        self._program.setAttributeBuffer(self._loc_pos, GL_FLOAT, 0, 3, 24)
-        self._program.enableAttributeArray(self._loc_vcolor)
-        self._program.setAttributeBuffer(self._loc_vcolor, GL_FLOAT, 12, 3, 24)
-        vcol_vbo.release()
-        wire_matrix()
-        vcol_vao.release()
-        # edges: pos(3)
-        edges_raw = base["edges"]
-        edges_vbo = static_vbo(edges_raw)
-        edges_vao = QOpenGLVertexArrayObject(self)
-        edges_vao.create()
-        edges_vao.bind()
-        edges_vbo.bind()
-        self._program.enableAttributeArray(self._loc_pos)
-        self._program.setAttributeBuffer(self._loc_pos, GL_FLOAT, 0, 3, 12)
-        edges_vbo.release()
-        wire_matrix()
-        edges_vao.release()
-        # default-back tint: pos(3), drawn with front culling
-        dback_raw = base.get("dback", b"")
-        dback_vbo = static_vbo(dback_raw)
-        dback_vao = QOpenGLVertexArrayObject(self)
-        dback_vao.create()
-        dback_vao.bind()
-        dback_vbo.bind()
-        self._program.enableAttributeArray(self._loc_pos)
-        self._program.setAttributeBuffer(self._loc_pos, GL_FLOAT, 0, 3, 12)
-        dback_vbo.release()
-        wire_matrix()
-        dback_vao.release()
-        # textures: pos(3)+uv(2), one run per (path, shade)
-        tex_parts = []
-        tex_runs = []
-        start = 0
-        for tkey, raw in base["by_texture"].items():
-            tex_parts.append(raw)
-            n = len(raw) // 20
-            tex_runs.append((tkey, start, n))
-            start += n
-        tex_raw = b"".join(tex_parts)
-        tex_vbo = static_vbo(tex_raw)
-        tex_vao = QOpenGLVertexArrayObject(self)
-        tex_vao.create()
-        tex_vao.bind()
-        tex_vbo.bind()
-        self._program.enableAttributeArray(self._loc_pos)
-        self._program.setAttributeBuffer(self._loc_pos, GL_FLOAT, 0, 3, 20)
-        self._program.enableAttributeArray(self._loc_uv)
-        self._program.setAttributeBuffer(self._loc_uv, GL_FLOAT, 12, 2, 20)
-        tex_vbo.release()
-        wire_matrix()
-        tex_vao.release()
-        # The main program stays BOUND. This is built mid-frame, from a pass
-        # that is drawing with it, and releasing it here left every draw
-        # call after this point without a shader: the first frame after a
-        # prototype changed showed nothing from here on — the edited group,
-        # its instanced neighbours, the axes, the figure. Inside a nested
-        # group every edit changes a prototype, so every edit blanked the
-        # group for a frame («por un segundo el grupo desaparece, pensé que
-        # se había eliminado», Marco, 2026-09-11). With shadows on it never
-        # showed: the shadow pass builds the entry first and rebinds its own
-        # depth program afterwards.
-        entry = {"key": key, "mat_sig": None, "mat_vbo": mat_vbo,
-                 "vcol_vao": vcol_vao, "vcol_vbo": vcol_vbo,
-                 "vcol_count": len(vcol_raw) // 24,
-                 "edges_vao": edges_vao, "edges_vbo": edges_vbo,
-                 "edge_count": len(edges_raw) // 12,
-                 "dback_vao": dback_vao, "dback_vbo": dback_vbo,
-                 "dback_count": len(dback_raw) // 12,
-                 "tex_vao": tex_vao, "tex_vbo": tex_vbo,
-                 "tex_runs": tex_runs}
-        cache[ckey] = entry
-        return entry
+        def vao(vbo, attrs, stride):
+            v = QOpenGLVertexArrayObject(self)
+            v.create()
+            v.bind()
+            vbo.bind()
+            for loc, offset, size in attrs:
+                self._program.enableAttributeArray(loc)
+                self._program.setAttributeBuffer(loc, GL_FLOAT, offset, size,
+                                                 stride)
+            vbo.release()
+            wire_matrix()
+            v.release()
+            return v
+        pos = (self._loc_pos, 0, 3)
+        return {"mat_vbo": mat_vbo, "mat_sig": None,
+                # vcol: pos(3)+rgb(3); edges, default-back tint: pos(3);
+                # textures: pos(3)+uv(2)
+                "vcol_vao": vao(statics["vcol_vbo"],
+                                (pos, (self._loc_vcolor, 12, 3)), 24),
+                "edges_vao": vao(statics["edges_vbo"], (pos,), 12),
+                "dback_vao": vao(statics["dback_vbo"], (pos,), 12),
+                "tex_vao": vao(statics["tex_vbo"],
+                               (pos, (self._loc_uv, 12, 2)), 20)}
+
+    def _proto_view(self, entry, mirrored: bool) -> dict:
+        """The draw entry a batch of ``mirrored`` placements uses: the
+        prototype's own, or its mirror view — the same static buffers with
+        a matrix buffer and VAOs of its own, so a prototype placed both
+        ways no longer refills one matrix buffer twice per pass, every
+        frame (6 203 mirrored copies in #158)."""
+        if not mirrored:
+            return entry
+        view = entry.get("mirror")
+        if view is None:
+            self._program.bind()
+            view = dict(entry)
+            view.pop("mirror", None)
+            view.update(self._wire_proto_vaos(entry))
+            view["mat_batch"] = None
+            view["shared"] = True
+            entry["mirror"] = view
+        return view
 
     @staticmethod
     def _destroy_proto_draw_entry(entry) -> None:
         """Free one prototype draw entry's VAOs and buffers (GL context
-        current)."""
+        current) — and its mirror view's own (the static buffers are the
+        entry's)."""
+        mirror = entry.pop("mirror", None)
+        if mirror is not None:
+            for k in ("mat_vbo", "vcol_vao", "edges_vao", "dback_vao",
+                      "tex_vao"):
+                obj = mirror.get(k)
+                try:
+                    obj.destroy()
+                    if k.endswith("_vao"):
+                        obj.deleteLater()
+                except (RuntimeError, AttributeError):
+                    pass
         for k, obj in entry.items():
             if k.endswith("_vao") or k.endswith("_vbo"):
                 try:
@@ -2961,6 +3154,25 @@ class Viewport(QOpenGLWidget):
         # preview moves matrices under a frozen version; the epoch is
         # walked every tick then, so it still sees them.
         epoch_of = getattr(self, "_placements_epoch", None)
+        if isinstance(groups, _InstanceBatch) and epoch_of is not None:
+            # A frame's pool: its pool indices say which placements, and
+            # the pool holds their matrices already.
+            if entry.get("mat_batch") is groups:
+                return len(groups)          # this very batch is in
+            import numpy as np
+            sig = (epoch_of(), id(groups.mats), len(groups.idx))
+            old = entry["mat_sig"]
+            if (old is not None and old[0] == sig
+                    and np.array_equal(old[1], groups.idx)):
+                entry["mat_batch"] = groups
+                return len(groups)
+            raw = groups.mats[groups.idx].tobytes()
+            entry["mat_vbo"].bind()
+            entry["mat_vbo"].allocate(raw, len(raw))
+            entry["mat_vbo"].release()
+            entry["mat_sig"] = (sig, groups.idx)
+            entry["mat_batch"] = groups
+            return len(groups)
         if epoch_of is not None:
             sig = (epoch_of(), tuple(map(id, groups)))
         else:
@@ -2973,6 +3185,7 @@ class Viewport(QOpenGLWidget):
             entry["mat_vbo"].allocate(raw, len(raw))
             entry["mat_vbo"].release()
             entry["mat_sig"] = sig
+            entry["mat_batch"] = None
         return len(groups)
 
     def _instanced_batches(self, groups):
@@ -2997,6 +3210,146 @@ class Viewport(QOpenGLWidget):
             return [(groups, 0.0)]
         return [(fuera, EDIT_REST_FADE), (dentro, 0.0)]
 
+    def _draw_instanced_faces_lean(self, by_proto, mode, extra) -> None:
+        """The instanced faces pass of the shaded and textured styles: the
+        very draws of the general loop below, in the same order, but each
+        piece of GL state set only when it changes — on a plant of 2 000
+        prototypes the per-batch uniform/cull/bind churn WAS the frame
+        (#158). The calls are recorded; the next frame with the same
+        batches (an orbit mostly keeps them) replays the list as is."""
+        prog = self._program
+        gl = self._gl
+        # Hand the frame's work so far to the driver first. Fed thousands
+        # of draws back to back, Mesa's Intel driver let an edge pixel
+        # beside a face come out either way from one frame to the next
+        # (1 pixel in ~7 frames on the plant of #158); the general loop's
+        # pace hid it, and a flush here — which does not wait for the GPU —
+        # makes every frame the same as that loop's.
+        gl.glFlush()
+        back_rgb = effective_back_color(
+            getattr(self.scene, "display_style", None), self.scene)
+        key = (mode, tuple(back_rgb), id(getattr(self, "_tex_cache", None)),
+               id(self._program))
+        rec = getattr(self, "_lean_faces_rec", None)
+        if (rec is not None and rec[0] == key and rec[1] is by_proto
+                and all(e.get("mat_batch") is b for e, b in rec[2])):
+            rec[3].replay(self._gl_replay())
+            return
+        tape = _GlTape()
+        pairs: list = []
+        back_vec = QVector4D(back_rgb[0], back_rgb[1], back_rgb[2], 1.0)
+        # What the general loop never relies on is unknown on entry (None:
+        # the first use sets it); the cull and textures switches are off
+        # between passes, as that loop assumes too.
+        state = {"fade": None, "vcol": None, "back": False, "cull": False,
+                 "front": None, "tex": 0, "shade": None, "cut": None}
+
+        def need(key_, value, apply):
+            if state[key_] != value:
+                apply(value)
+                state[key_] = value
+
+        def set_vcol(v):
+            tape.uniform_i(prog, self._loc_use_vcolor, v)
+
+        def set_cull(on):
+            if on:
+                tape.gl(gl.glEnable, tape.ENABLE, GL_CULL_FACE)
+                tape.gl(gl.glCullFace, tape.CULL, GL_FRONT)
+            else:
+                tape.gl(gl.glDisable, tape.DISABLE, GL_CULL_FACE)
+
+        def set_shade(v):
+            tape.uniform_f(prog, self._loc_shade, float(v))
+
+        def set_tex(v):
+            tape.uniform_i(prog, self._loc_use_tex, v)
+
+        def set_cut(v):
+            tape.uniform_i(prog, self._loc_hard_cutout, v)
+
+        def set_front(mirrored):
+            tape.gl(gl.glFrontFace, tape.FRONT, GL_CW if mirrored else GL_CCW)
+
+        def set_fade(v):
+            tape.uniform_f(prog, self._loc_fade, v)
+
+        def set_color(r, g, b):
+            # _set_color: the colour, and the back kept in step.
+            v = QVector4D(r, g, b, 1.0)
+            tape.uniform_4f(prog, self._loc_color, v)
+            tape.uniform_4f(prog, self._loc_back_color, v)
+        bound = None
+        back_tint = not _NO_BACK_TINT
+        cacheable = True
+        draw = extra.glDrawArraysInstanced
+        for mesh, paint, groups, mirrored in by_proto.values():
+            entry = self._proto_view(self._ensure_proto_draw(mesh, paint),
+                                     mirrored)
+            need("front", mirrored, set_front)
+            for lote, fade in self._instanced_batches(groups):
+                if not lote:
+                    continue
+                n = self._update_inst_matrices(entry, lote)
+                if entry.get("mat_batch") is lote:
+                    pairs.append((entry, lote))
+                else:
+                    cacheable = False          # an edit-context split
+                need("fade", fade, set_fade)
+                if entry["vcol_count"]:
+                    need("cull", False, set_cull)
+                    need("vcol", 1, set_vcol)
+                    if not state["back"]:
+                        tape.uniform_4f(prog, self._loc_back_color, back_vec)
+                        state["back"] = True
+                    bound = entry["vcol_vao"]
+                    tape.bind_vao(bound)
+                    tape.draw(draw, GL_TRIANGLES, 0, entry["vcol_count"], n)
+                if entry["tex_runs"]:
+                    need("cull", False, set_cull)
+                    need("vcol", 0, set_vcol)
+                    bound = entry["tex_vao"]
+                    tape.bind_vao(bound)
+                    if mode == "shaded":
+                        for (path, shade), s0, cnt in entry["tex_runs"]:
+                            r, g, b = self._texture_avg_color(path)
+                            need("shade", float(shade), set_shade)
+                            set_color(r, g, b)
+                            state["back"] = False
+                            tape.draw(draw, GL_TRIANGLES, s0, cnt, n)
+                    else:
+                        need("tex", 1, set_tex)
+                        for (path, shade), s0, cnt in entry["tex_runs"]:
+                            tex = self._get_texture(path)
+                            if tex is None:
+                                continue
+                            need("shade", float(shade), set_shade)
+                            need("cut", 1 if getattr(tex, "_cutout", False)
+                                 else 0, set_cut)
+                            tape.tex_bind(tex, 0)
+                            tape.draw(draw, GL_TRIANGLES, s0, cnt, n)
+                            tape.tex_release(tex, 0)
+                        need("cut", 0, set_cut)
+                        need("tex", 0, set_tex)
+                    need("shade", 1.0, set_shade)
+                if entry.get("dback_count") and back_tint:
+                    need("cull", True, set_cull)
+                    need("vcol", 0, set_vcol)
+                    bound = entry["dback_vao"]
+                    tape.bind_vao(bound)
+                    tape.draw(draw, GL_TRIANGLES, 0, entry["dback_count"], n)
+        if bound is not None:
+            tape.release_vao(bound)
+        need("cull", False, set_cull)
+        if state["vcol"] is not None:
+            need("vcol", 0, set_vcol)
+        if state["shade"] is not None:
+            need("shade", 1.0, set_shade)
+        if state["front"] is not None:
+            need("front", False, set_front)
+        self._lean_faces_rec = ((key, by_proto, pairs, tape) if cacheable
+                                else None)
+
     def _draw_instanced_faces(self, mode, style) -> None:
         by_proto = self._gather_instanced()
         if not by_proto or mode == "wireframe":
@@ -3008,8 +3361,12 @@ class Viewport(QOpenGLWidget):
             self._program.setUniformValue1f(self._loc_opacity,
                                             XRAY_FACE_OPACITY)
             self._gl.glDepthMask(GL_FALSE)
+        if mode in ("shaded", "textures") and _lean_instanced():
+            self._draw_instanced_faces_lean(by_proto, mode, extra)
+            by_proto = {}
         for mesh, paint, groups, mirrored in by_proto.values():
-            entry = self._ensure_proto_draw(mesh, paint)
+            entry = self._proto_view(self._ensure_proto_draw(mesh, paint),
+                                     mirrored)
             self._front_face(mirrored)
             for lote, fade in self._instanced_batches(groups):
                 if not lote:
@@ -3096,8 +3453,9 @@ class Viewport(QOpenGLWidget):
         if not by_proto:
             return
         extra = self.context().extraFunctions()
-        for mesh, paint, groups, _mirrored in by_proto.values():
-            entry = self._ensure_proto_draw(mesh, paint)
+        for mesh, paint, groups, mirrored in by_proto.values():
+            entry = self._proto_view(self._ensure_proto_draw(mesh, paint),
+                                     mirrored)
             n = self._update_inst_matrices(entry, groups)
             if entry["vcol_count"]:
                 entry["vcol_vao"].bind()
@@ -3155,13 +3513,81 @@ class Viewport(QOpenGLWidget):
         self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
         self._gl.glColorMask(True, True, True, True)
 
+    def _draw_instanced_edges_lean(self, by_proto, extra) -> None:
+        """:meth:`_draw_instanced_edges`'s draws, the fade set only when it
+        changes, recorded and replayed while the batches stay (see
+        :meth:`_draw_instanced_faces_lean`)."""
+        prog = self._program
+        key = id(self._program)
+        rec = getattr(self, "_lean_edges_rec", None)
+        if (rec is not None and rec[0] == key and rec[1] is by_proto
+                and all(e.get("mat_batch") is b for e, b in rec[2])):
+            rec[3].replay(self._gl_replay())
+            return
+        tape = _GlTape()
+        pairs: list = []
+        cacheable = True
+        fade_now = None
+        bound = None
+        draw = extra.glDrawArraysInstanced
+        for mesh, paint, groups, mirrored in by_proto.values():
+            entry = self._proto_view(self._ensure_proto_draw(mesh, paint),
+                                     mirrored)
+            if not entry["edge_count"]:
+                continue
+            for lote, fade in self._instanced_batches(groups):
+                if not lote:
+                    continue
+                n = self._update_inst_matrices(entry, lote)
+                if entry.get("mat_batch") is lote:
+                    pairs.append((entry, lote))
+                else:
+                    cacheable = False
+                if fade != fade_now:
+                    tape.uniform_f(prog, self._loc_fade, fade)
+                    fade_now = fade
+                bound = entry["edges_vao"]
+                tape.bind_vao(bound)
+                tape.draw(draw, GL_LINES, 0, entry["edge_count"], n)
+        if bound is not None:
+            tape.release_vao(bound)
+        tape.uniform_f(prog, self._loc_fade, 0.0)
+        self._lean_edges_rec = ((key, by_proto, pairs, tape) if cacheable
+                                else None)
+
+    def _gl_replay(self):
+        """core._native's GlReplay for this viewport's GL context (the
+        experimental engine), or ``None``: tapes then replay through the
+        PySide wrappers."""
+        if not _LEAN_NATIVE_REPLAY:
+            return None
+        ctx = self.context()
+        memo = getattr(self, "_gl_replay_memo", None)
+        if memo is not None and memo[0] is ctx:
+            return memo[1]
+        replay = None
+        from core import _native
+        mod = _native.native
+        if mod is not None and hasattr(mod, "GlReplay") and ctx is not None:
+            try:
+                replay = mod.GlReplay([int(ctx.getProcAddress(n) or 0)
+                                       for n in _TAPE_FUNCS])
+            except Exception:  # noqa: BLE001 — a missing entry: Python
+                replay = None
+        self._gl_replay_memo = (ctx, replay)
+        return replay
+
     def _draw_instanced_edges(self) -> None:
         by_proto = getattr(self, "_frame_instanced", None)
         if not by_proto:
             return
         extra = self.context().extraFunctions()
-        for mesh, paint, groups, _mirrored in by_proto.values():
-            entry = self._ensure_proto_draw(mesh, paint)
+        if _lean_instanced():
+            self._draw_instanced_edges_lean(by_proto, extra)
+            return
+        for mesh, paint, groups, mirrored in by_proto.values():
+            entry = self._proto_view(self._ensure_proto_draw(mesh, paint),
+                                     mirrored)
             if not entry["edge_count"]:
                 continue
             for lote, fade in self._instanced_batches(groups):
@@ -3697,6 +4123,20 @@ class Viewport(QOpenGLWidget):
         self._fbo_size = (0, 0)
         if getattr(self, "_proto_draw", None):
             self._proto_draw = {}
+        self._forget_frame_records()
+
+    def _forget_frame_records(self) -> None:
+        """Drop the recorded instanced passes, the native replayer and the
+        frame's batches. A tape holds the context's own function tables
+        (``extraFunctions()``): kept past the context, PySide handed that
+        stale wrapper back for a NEW object made at the same address — a
+        later viewport's ``context()`` came back as a QOpenGLExtraFunctions
+        and initializeGL failed (1 test run in ~10)."""
+        for name in ("_lean_faces_rec", "_lean_edges_rec",
+                     "_gl_replay_memo", "_inst_frame_memo",
+                     "_frame_instanced"):
+            if getattr(self, name, None) is not None:
+                setattr(self, name, None)
 
     def release_gl_textures(self) -> None:
         """Free every GL texture while the context can still take them back.
@@ -3706,6 +4146,7 @@ class Viewport(QOpenGLWidget):
         leaked with a "Texture has not been destroyed" warning each (harmless
         at process exit, real if the context is ever torn down and recreated
         mid-session, e.g. on reparenting)."""
+        self._forget_frame_records()
         self.makeCurrent()
         try:
             cache = getattr(self, "_tex_cache", None)
@@ -4308,8 +4749,9 @@ class Viewport(QOpenGLWidget):
         finally:
             self._frame_planes = saved
         extra = self.context().extraFunctions()
-        for mesh, paint, groups, _mirrored in by_proto.values():
-            entry = self._ensure_proto_draw(mesh, paint)
+        for mesh, paint, groups, mirrored in by_proto.values():
+            entry = self._proto_view(self._ensure_proto_draw(mesh, paint),
+                                     mirrored)
             n = self._update_inst_matrices(entry, groups)
             prog.bind()                # entry building binds the main program
             if entry["vcol_count"]:
@@ -5773,6 +6215,14 @@ class Viewport(QOpenGLWidget):
         self._hover_faces_vbo.release()
         return len(data) // 3
 
+    def _sil_inputs(self, key, cam) -> tuple:
+        """Everything the outline pass reads: the scene (``key``), the
+        camera, the placements, the groups previewed and the edit context."""
+        sc = self.scene
+        return (key, cam, self._placements_epoch(),
+                getattr(self, "_preview_epoch", 0),
+                id(sc.edit_group), getattr(self, "_edit_rest_mode", None))
+
     def _upload_silhouette_edges(self) -> int:
         """Upload the *profile* edges into the silhouette VBO and return the
         vertex count. A soft (hidden) edge is drawn when it lies on the
@@ -5803,6 +6253,14 @@ class Viewport(QOpenGLWidget):
         self._sil_cam = cam
         if moving:
             self._sil_cam_t = now
+        # Nothing an outline depends on moved since the VBO was filled —
+        # the scene (version), the camera, the groups being previewed — so
+        # the VBO holds this very outline: no need to wait out the throttle
+        # and derive it again. A drag beside a plant of 21 406 placements
+        # re-derived them (~340 ms) on every move of the pointer (#158).
+        same_view = self._sil_inputs(key, cam)
+        if last is not None and len(last) > 3 and last[3] == same_view:
+            return last[2]
         # «Stopped» means 600 ms without a camera change: a run of wheel
         # notches is a string of short pauses, and re-deriving after each
         # one blocked the next notch (live profile, #158).
@@ -5935,7 +6393,7 @@ class Viewport(QOpenGLWidget):
             self._silhouette_vbo.allocate(24)
         self._silhouette_vbo.release()
         count = len(raw) // 12
-        self._sil_last = (key, now, count)
+        self._sil_last = (key, now, count, self._sil_inputs(key, cam))
         self._sil_cost = _time.monotonic() - now
         return count
 
@@ -8656,6 +9114,18 @@ class Viewport(QOpenGLWidget):
         # its selection box showed where it is (issue #134, @fafecm).
         if entry is not None and entry.get("mesh") is not mesh:
             entry = None
+        from views import array_bake
+        if array_bake.can_bake(mesh):
+            # A lazy mesh (experimental engine) is baked from its arrays,
+            # and stays unbuilt; while it is, it cannot have changed.
+            if entry is None:
+                entry = array_bake.bake(self, mesh, paint, msig, vkey,
+                                        next(_chunk_uid))
+                if msig is not None:
+                    entry["fp"] = entry["fp"] + (("paint",) + msig,)
+                cache[id(group)] = entry
+            entry["vkey"] = vkey
+            return entry
         if entry is not None:
             if entry.get("vkey") == vkey:
                 return entry
@@ -9159,6 +9629,8 @@ class Viewport(QOpenGLWidget):
         ``split`` (a vertex offset) is a boundary merging never crosses, so
         the caller can still tell the two sides apart — the faded context
         before it, the group being edited from it on."""
+        if len(spans) >= _SPAN_VECTOR_MIN and planes:
+            return self._visible_spans_np(spans, planes, split)
         out: list = []
         culled = 0
         for bbox, start, count in spans:
@@ -9175,6 +9647,55 @@ class Viewport(QOpenGLWidget):
             else:
                 out.append((start, count))
         return out, culled
+
+    def _visible_spans_np(self, spans, planes, split=None):
+        """:meth:`_visible_spans` over many spans at once: the same p-vertex
+        test, float op for float op, on arrays kept per span list (a model
+        of 21 406 placements tested ~4 800 boxes one by one per frame)."""
+        import numpy as np
+        memo = getattr(self, "_span_arrays", None)
+        if memo is None:
+            memo = self._span_arrays = {}
+        hit = memo.get(id(spans))
+        if hit is None or hit[0] is not spans:
+            if len(memo) > 16:
+                memo.clear()
+            n = len(spans)
+            has = np.zeros(n, dtype=bool)
+            lo = np.zeros((n, 3))
+            hi = np.zeros((n, 3))
+            start = np.empty(n, dtype=np.int64)
+            count = np.empty(n, dtype=np.int64)
+            for i, (bbox, s0, c0) in enumerate(spans):
+                start[i] = s0
+                count[i] = c0
+                if bbox is not None:
+                    has[i] = True
+                    lo[i], hi[i] = bbox[0], bbox[1]
+            hit = memo[id(spans)] = (spans, has, lo, hi, start, count)
+        _s, has, lo, hi, start, count = hit
+        vis = np.ones(len(start), dtype=bool)
+        for nx, ny, nz, d in planes:
+            px = hi[:, 0] if nx >= 0.0 else lo[:, 0]
+            py = hi[:, 1] if ny >= 0.0 else lo[:, 1]
+            pz = hi[:, 2] if nz >= 0.0 else lo[:, 2]
+            vis &= ~(((nx * px + ny * py) + nz * pz) + d < 0.0)
+        live = count > 0
+        drawn = live & (vis | ~has)
+        culled = int(count[live & ~drawn].sum())
+        idx = np.flatnonzero(drawn)
+        if not len(idx):
+            return [], culled
+        st = start[idx]
+        ct = count[idx]
+        brk = np.ones(len(idx), dtype=bool)
+        brk[1:] = st[1:] != st[:-1] + ct[:-1]
+        if split is not None:
+            # A run never crosses the split (see _visible_spans).
+            brk[1:] |= (st[:-1] < split) & (split <= st[1:])
+        heads = np.flatnonzero(brk)
+        sums = np.add.reduceat(ct, heads)
+        return list(zip(st[heads].tolist(), sums.tolist())), culled
 
     def _tex_run_spans(self, parts, planes, fading: bool):
         """Frustum-culled draw spans of one texture run, split into
@@ -9218,7 +9739,8 @@ class Viewport(QOpenGLWidget):
         groups = [g for g in self._placements()
                   if getattr(g, "xform", None) is not None
                   and not getattr(g, "billboard", False)]
-        nf = np.fromiter((len(g.mesh.faces) for g in groups), np.int64,
+        from core.mesh import face_count
+        nf = np.fromiter((face_count(g.mesh) for g in groups), np.int64,
                          count=len(groups))
         table = None
         if int(nf.sum()) >= self._PICK_LAZY_MIN_FACES:
@@ -9612,8 +10134,18 @@ class Viewport(QOpenGLWidget):
                     # in it cost ~250 ms a hover on 14 million faces.
                     ents = chunk.get("_pick_ents")
                     if ents is None or ents[0] is not owner:
-                        ents = chunk["_pick_ents"] = (
-                            owner, [(f, owner) for f in chunk["faces"]])
+                        from views import array_bake
+                        if isinstance(chunk["faces"], array_bake.DeferredFaces):
+                            # A lazy mesh (experimental engine): its faces
+                            # are built when a pick lands on one.
+                            pairs = array_bake.LazyPairs(chunk["faces"], owner)
+                        else:
+                            pairs = [(f, owner) for f in chunk["faces"]]
+                        ents = chunk["_pick_ents"] = (owner, pairs)
+                    if not isinstance(ents[1], list) and \
+                            isinstance(b_entities, list):
+                        from views.array_bake import PickEntities
+                        b_entities = PickEntities(b_entities)
                     b_entities.extend(ents[1])
                     b_pidx.append(np.full(n, len(b_plist), dtype=np.int32))
                     b_plist.append(g)
@@ -9680,6 +10212,9 @@ class Viewport(QOpenGLWidget):
             if block["entities"]:
                 offset = len(entities)
                 loose_count = len(entities)
+                if not isinstance(block["entities"], list):
+                    from views.array_bake import PickEntities
+                    entities = PickEntities(entities)
                 entities.extend(block["entities"])
                 place_idx = np.concatenate([
                     np.full(loose_count, -1, dtype=np.int32),
@@ -10475,16 +11010,32 @@ class Viewport(QOpenGLWidget):
         """The sweep midpoint of every open curve chain of ``mesh`` (in the
         mesh's own space)."""
         from core.snap import fit_circle
+        from core.lazy_mesh import plan_of
+        plan = plan_of(mesh)
         by_curve: dict = {}
-        for e in mesh.edges:
-            cid = getattr(e, "curve", None)
-            if cid is not None:
-                by_curve.setdefault(cid, []).append(e)
+        if plan is not None:
+            # A lazy mesh: its curves from the planned edges, the same
+            # chains in the same order, nothing built.
+            ab = plan.edges.tolist()
+            for i, cid in enumerate(plan.curve):
+                if cid is not None:
+                    by_curve.setdefault(cid, []).append(ab[i])
+        else:
+            for e in mesh.edges:
+                cid = getattr(e, "curve", None)
+                if cid is not None:
+                    by_curve.setdefault(cid, []).append(e)
         mids = []
         for edges in by_curve.values():
             degree: dict = {}
             pos: dict = {}
             for e in edges:
+                if plan is not None:
+                    for v in e:
+                        degree[v] = degree.get(v, 0) + 1
+                        if v not in pos:
+                            pos[v] = QVector3D(*plan.pos[v])
+                    continue
                 for v in (e.v0, e.v1):
                     degree[id(v)] = degree.get(id(v), 0) + 1
                     pos[id(v)] = v.position

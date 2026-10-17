@@ -2974,5 +2974,6 @@
  "Each line to bridge must be one chain of edges, without branches": "Каждая линия моста должна быть одной цепочкой ребер, без ответвлений",
  "A face with holes can only be bridged to another face with as many holes": "Грань с отверстиями можно соединить только с гранью с тем же числом отверстий",
  "Both lie on one plane: nothing to bridge": "Обе лежат в одной плоскости: соединять нечего",
- "The two to bridge must not touch": "Соединяемые части не должны касаться друг друга"
+ "The two to bridge must not touch": "Соединяемые части не должны касаться друг друга",
+ "IngeTrazo did not open the last time with the experimental Rust engine on, so it is back on the normal engine. You can turn it on again in Preferences ▸ General.": "В прошлый раз IngeTrazo не открылся с включённым экспериментальным движком Rust, поэтому он вернулся к обычному движку. Включить его снова можно в разделе Настройки ▸ Общие."
 }

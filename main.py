@@ -443,6 +443,11 @@ def main() -> int:
     from views.tooltips import WrappingToolTips
     tooltips = WrappingToolTips(app)
     app.installEventFilter(tooltips)
+    # The experimental Rust engine: if the last start with it on never
+    # drew its first frame, this one goes back to the normal engine (and
+    # says so below); --python-engine does it for one run.
+    from core import _native
+    engine_fell_back = _native.start_guard(sys.argv[1:])
     # The extensions' setup waits until the window is on screen (#440).
     window = MainWindow(defer_extensions=True)
     # From here on, a FileOpen Apple Event (macOS double-click / Open With,
@@ -463,7 +468,8 @@ def main() -> int:
     # NOT hand over to the running one like a double-click does, or the
     # new window never appears (issue #76).
     new_window = "--new-window" in sys.argv[1:]
-    args = [a for a in sys.argv[1:] if a != "--new-window"]
+    args = [a for a in sys.argv[1:]
+            if a not in ("--new-window", _native.FLAG)]
     arg = args[0] if args else ""
     if not arg and app.pending_open_path is not None:
         # A cold macOS launch by double-click: no argv, the path arrived as
@@ -482,7 +488,10 @@ def main() -> int:
         # the 'it does not open' failure). No ack in 1.5s → launch anyway.
         if probe.waitForReadyRead(1500) and bytes(probe.readAll()).startswith(b"ok"):
             probe.disconnectFromServer()
-            return 0                   # the running instance took over
+            # The running instance took over: this start ends here, with
+            # nothing wrong (the engine guard must not count it as failed).
+            _native.start_ok()
+            return 0
         probe.disconnectFromServer()
     # No responsive server — become one. A stale socket (crash / unresponsive
     # peer) is cleared by removeServer before listen; if even that fails we
@@ -521,6 +530,23 @@ def main() -> int:
 
     window.show()
     from PySide6.QtCore import QTimer
+
+    def _first_frame_drawn():
+        # This start reached the screen: the engine guard is satisfied.
+        try:
+            window.viewport.frameSwapped.disconnect(_first_frame_drawn)
+        except (RuntimeError, TypeError):
+            pass
+        _native.start_ok()
+    window.viewport.frameSwapped.connect(_first_frame_drawn)
+    if engine_fell_back:
+        from PySide6.QtWidgets import QMessageBox
+        from core.i18n import tr
+        QTimer.singleShot(0, lambda: QMessageBox.information(
+            window, tr("Rust engine (experimental)"),
+            tr("IngeTrazo did not open the last time with the experimental "
+               "Rust engine on, so it is back on the normal engine. You can "
+               "turn it on again in Preferences ▸ General.")))
 
     def _after_first_frame():
         # The plugins' setup, now that the window is up (#440) — and only

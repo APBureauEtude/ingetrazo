@@ -372,6 +372,7 @@ class RectangleTool(PlaneLock, Tool):
             segments,
             detect_faces=False,
             extra=[AddFaceCommand(list(corners))],
+            plane_rebuild=True,     # on a populated plane (#538)
         )
         viewport.history.execute(cmd)
         self._reset()

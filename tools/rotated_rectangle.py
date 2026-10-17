@@ -406,7 +406,8 @@ class RotatedRectangleTool(AxisMagnet, PlaneLock, Tool):
         segments = [(corners[i], corners[(i + 1) % 4]) for i in range(4)]
         cmd = build_add_edges(
             viewport.scene, segments, detect_faces=False,
-            extra=[AddFaceCommand(list(corners))])
+            extra=[AddFaceCommand(list(corners))],
+            plane_rebuild=True)     # on a populated plane (#538)
         viewport.history.execute(cmd)
         self._reset()
         viewport.update()

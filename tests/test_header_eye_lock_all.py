@@ -117,6 +117,13 @@ def test_other_headers_do_nothing_of_the_kind():
         _close(win)
 
 
+def _shows(button, key):
+    """The button wears the drawn ``key`` icon and no character (#658)."""
+    from views.outliner import node_icon
+    return (button.text() == ""
+            and button.icon().cacheKey() == node_icon(key).cacheKey())
+
+
 # --- Isolate and Show all: one button -----------------------------------------
 
 def test_one_button_isolates_then_shows_it_all():
@@ -124,19 +131,19 @@ def test_one_button_isolates_then_shows_it_all():
     win, scene, panel, (edificio, inner, casa, muro) = _setup()
     try:
         b = panel._isolate_btn
-        assert not b.isChecked() and b.text() == "◎"
+        assert not b.isChecked() and _shows(b, "isolate")
         assert b.toolTip() == tr(
             "Isolate: hide everything but the selected groups")
         root = panel.tree.topLevelItem(0)
         panel.tree.setCurrentItem(root.child(1))           # «Casa»
         b.click()                                          # isolate
         assert not casa.hidden and edificio.hidden and muro.hidden
-        assert b.isChecked() and b.text() == "◉"
+        assert b.isChecked() and _shows(b, "isolate_on")
         assert b.toolTip() == tr("Exit isolation: show again what Isolate "
                                  "hid")
         b.click()                                          # exit isolation
         assert not any(g.hidden for g in (edificio, casa, muro))
-        assert not b.isChecked() and b.text() == "◎"
+        assert not b.isChecked() and _shows(b, "isolate")
     finally:
         _close(win)
 
@@ -149,7 +156,7 @@ def test_something_hidden_by_hand_is_not_the_buttons_business():
         scene.version += 1
         panel.refresh()
         assert not panel._isolate_btn.isChecked()
-        assert panel._isolate_btn.text() == "◎"
+        assert _shows(panel._isolate_btn, "isolate")
     finally:
         _close(win)
 
@@ -245,14 +252,14 @@ def test_one_button_expands_everything_then_collapses_it():
         b = panel._expand_btn
         item = panel._items[id(edificio)]
         item.setExpanded(False)
-        assert b.text() == "⊞" and b.toolTip() == tr("Expand all")
+        assert _shows(b, "expand_all") and b.toolTip() == tr("Expand all")
         b.click()
         assert item.isExpanded()
-        assert b.text() == "⊟" and b.toolTip() == tr("Collapse all")
+        assert _shows(b, "collapse_all") and b.toolTip() == tr("Collapse all")
         b.click()
         assert not item.isExpanded()
         assert panel.tree.topLevelItem(0).isExpanded()   # the document row
-        assert b.text() == "⊞"
+        assert _shows(b, "expand_all")
     finally:
         _close(win)
 
@@ -262,8 +269,8 @@ def test_unfolding_by_hand_turns_it_into_collapse_all():
     try:
         item = panel._items[id(edificio)]
         item.setExpanded(False)
-        assert panel._expand_btn.text() == "⊞"
+        assert _shows(panel._expand_btn, "expand_all")
         item.setExpanded(True)                  # the arrow, by hand
-        assert panel._expand_btn.text() == "⊟"
+        assert _shows(panel._expand_btn, "collapse_all")
     finally:
         _close(win)

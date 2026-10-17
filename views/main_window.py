@@ -112,6 +112,11 @@ _STYLE_TIPS = {
 }
 _SAVE_TIP = ("Save the document — the model and every sheet — to its .igz "
              "file.")
+_RESET_TOOLBARS_TIP = ("Every toolbar back in its factory place and order, "
+                       "the hidden ones shown again. The panels stay as "
+                       "they are.")
+# The mesh welds points closer than this (core/mesh.py, 4 decimals).
+_WELD_LENGTH = 1e-4
 _TEXT3D_TIP = ("Build a text as an extruded solid, in the font and height "
                "you choose.")
 
@@ -232,6 +237,10 @@ class MainWindow(QMainWindow):
         # (see load_extensions). Set first — the menu bar is built below.
         self._defer_extensions = bool(defer_extensions)
         self.resize(1280, 800)
+        # Every toolbar — ours, a later one, a plugin's — floats as a
+        # small window with its name and a × to close it.
+        from views.floating_toolbar import watch_toolbars
+        watch_toolbars(self)
 
         self._tools = {
             "select": SelectTool(),
@@ -464,6 +473,83 @@ class MainWindow(QMainWindow):
                     self.addToolBarBreak(area)
                 self.addToolBar(area, tb)
                 tb.setVisible(shown)
+
+    def restore_default_toolbars(self) -> None:
+        """Window ▸ Restore default toolbars (and the right-click menu over
+        a toolbar): every toolbar back where the factory layout has it —
+        area, row, order — and shown. The panels are not touched:
+        ``restoreState`` lays out every dock the blob names, so the docks
+        go by another name meanwhile and the blob finds none of them.
+
+        First the window's own bars go back to where a new window builds
+        them, along the top in build order: a bar younger than the blob
+        (Solid Tools) is not in it, and that is its factory place. A
+        plugin's toolbar stays where it is."""
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QDockWidget
+        from core.paths import app_root
+        factory = app_root() / "resources" / "ui" / "default_layout.state"
+        if not factory.is_file():
+            return
+        own = list(self.toolbars.values())
+        panels_tb = self.findChild(QToolBar, "panels_toolbar")
+        if panels_tb is not None:
+            own.append(panels_tb)
+        for tb in own:
+            self.removeToolBar(tb)
+            self.addToolBar(Qt.TopToolBarArea, tb)
+            tb.show()
+        docks = {d: d.objectName() for d in self.findChildren(QDockWidget)}
+        rows = self._dock_tab_rows(docks)
+        size = self.size()
+        for d, name in docks.items():
+            d.setObjectName(f"_keep_{name}")
+        try:
+            self.restoreState(factory.read_bytes())
+        finally:
+            for d, name in docks.items():
+                d.setObjectName(name)
+        # Even unnamed, the docks are laid out again: their tabs come back
+        # reordered, another in front. Put each row of tabs back as it was.
+        for row, front in rows:
+            for d in row[1:]:
+                self.tabifyDockWidget(row[0], d)
+            front.raise_()
+        # Meanwhile they were docked one under the other: their heights
+        # added up past the window, which grew to hold them and slid the
+        # sidebar's handle down with the view. Back in their tabs, the
+        # window goes back to its size.
+        if self.size() != size:
+            self.layout().activate()
+            self.resize(size)
+        QTimer.singleShot(0, self, self._pack_toolbars)
+
+    def _dock_tab_rows(self, docks) -> list:
+        """Each row of tabbed docks on screen, in tab order, and the dock
+        in front."""
+        from PySide6.QtWidgets import QTabBar
+        by_title = {d.windowTitle(): d for d in docks if d.isVisible()}
+        rows = []
+        for bar in self.findChildren(QTabBar):
+            if bar.parent() is not self or not bar.isVisible():
+                continue
+            row = [by_title.get(bar.tabText(i)) for i in range(bar.count())]
+            front = by_title.get(bar.tabText(bar.currentIndex()))
+            if len(row) > 1 and None not in row and front is not None:
+                rows.append((row, front))
+        return rows
+
+    def createPopupMenu(self):  # noqa: N802 — Qt override
+        """Right-click over a toolbar: Qt's list of toolbars and panels,
+        and under it the way back to the factory toolbars."""
+        menu = super().createPopupMenu()
+        if menu is None:
+            menu = QMenu(self)
+        act = getattr(self, "_act_reset_toolbars", None)
+        if act is not None:
+            menu.addSeparator()
+            menu.addAction(act)
+        return menu
 
     def _place_new_toolbars(self, st) -> None:
         """A toolbar born after a profile saved its layout is unknown to
@@ -765,9 +851,11 @@ class MainWindow(QMainWindow):
         self._act_eyedropper = QAction(
             tool_icon("eyedropper"), tr("Sample material"), self)
         self._act_eyedropper.setCheckable(True)
-        self._act_eyedropper.setToolTip(tr(
-            "Sample material — click a face to pick up its paint or texture "
-            "(or hold Alt with the Paint tool)"))
+        from views.shortcuts import set_tooltip
+        self._act_eyedropper.setStatusTip(tr(
+            "Click a face to pick up its paint or texture "
+            "(or hold Alt with the Paint tool)."))
+        set_tooltip(self._act_eyedropper, tr("Sample material"))
         self._act_eyedropper.toggled.connect(self._on_toggle_eyedropper)
         main_tb.addAction(self._act_eyedropper)
         self._icon_actions.append((self._act_eyedropper, "eyedropper"))
@@ -823,17 +911,18 @@ class MainWindow(QMainWindow):
         self.toolbars["view"] = view_tb
         self._nav_actions: dict[str, QAction] = {}
         for key, label, short, tip in [
-            ("orbit", "Orbit", "O", "Orbit (O) — left-drag to rotate the view"),
-            ("pan", "Pan", "H", "Pan (H) — left-drag to slide the view"),
-            ("zoom", "Zoom", "Z", "Zoom (Z) — drag up/down to zoom in/out"),
+            ("orbit", "Orbit", "O", "Left-drag to rotate the view."),
+            ("pan", "Pan", "H", "Left-drag to slide the view."),
+            ("zoom", "Zoom", "Z", "Drag up or down to zoom in or out."),
             ("zoom_window", "Zoom Window", "",
-             "Zoom Window — drag a box to zoom to that region"),
+             "Drag a box to zoom to that region."),
         ]:
             action = QAction(tool_icon(key), tr(label), self)
             action.setCheckable(True)
             if short:
                 action.setShortcut(QKeySequence(short))
-            action.setToolTip(tr(tip))
+            action.setStatusTip(tr(tip))
+            set_tooltip(action, tr(label))  # names the keys, as tools do
             action.triggered.connect(lambda _c, k=key: self._activate_nav(k))
             self._tool_group.addAction(action)
             view_tb.addAction(action)
@@ -1467,6 +1556,12 @@ class MainWindow(QMainWindow):
             lambda m=panels_menu: self._fill_panels_menu(m))
         window_menu.addMenu(panels_menu)
         self._panels_menu = panels_menu
+        # The same entry closes the right-click menu over a toolbar.
+        self._act_reset_toolbars = window_menu.addAction(
+            tr("Restore default toolbars"))
+        self._act_reset_toolbars.setStatusTip(tr(_RESET_TOOLBARS_TIP))
+        self._act_reset_toolbars.triggered.connect(
+            self.restore_default_toolbars)
 
         toggle_profile = self.profile_dock.toggleViewAction()
         toggle_profile.setText(tr("Terrain profile"))
@@ -1491,8 +1586,10 @@ class MainWindow(QMainWindow):
         window_menu.addAction(clean_action)
         self._act_clean_screen = clean_action
         # LibreOffice's Ctrl+F5: the whole sidebar (the three trays) folds
-        # away and comes back; the strip at the right edge stays.
+        # away and comes back; the strip at the right edge stays. Ctrl+F6
+        # does the same on the left, next to it so the key can be found.
         window_menu.addAction(self._act_sidebar)
+        window_menu.addAction(self._act_left_sidebar)
 
         window_menu.addSeparator()
         # Ctrl+U: the units panel straight away (the Preferences page).
@@ -1678,8 +1775,9 @@ class MainWindow(QMainWindow):
         order = self._default_tray_order()
         order += [d for d in getattr(self, "_extension_docks", ())
                   if d not in order]
-        for d in order:
-            self.addDockWidget(Qt.RightDockWidgetArea, d)
+        # Each one straight into the tabs: docked one under the other first,
+        # their heights added up past the window, which grew to hold them.
+        self.addDockWidget(Qt.RightDockWidgetArea, order[0])
         for first, nxt in zip(order, order[1:]):
             self.tabifyDockWidget(first, nxt)
 
@@ -1985,8 +2083,12 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):  # noqa: N802 — Qt override
         from PySide6.QtCore import QEvent
+        # ZOrderChange: a tab dragged along a tray's bar restacks the
+        # window's children, the view comes out above the handles and its
+        # OpenGL hides the half of them that lies over it.
         if obj is getattr(self, "viewport", None) and event.type() in (
-                QEvent.Resize, QEvent.Move, QEvent.Show):
+                QEvent.Resize, QEvent.Move, QEvent.Show,
+                QEvent.ZOrderChange):
             self._place_clean_screen_exit()
             self._place_sidebar_handle()
         if self._side_dock_event(obj, event):
@@ -3467,12 +3569,21 @@ class MainWindow(QMainWindow):
         if not scene.selection:
             self.viewport.flash_status(tr("Select faces or groups first"))
             return
-        segs = segments_for(scene, mode)
+        # A crossing shorter than the weld tolerance is a point: its two
+        # ends weld into one vertex, and that degenerate edge refused the
+        # whole step -- a sphere through a cube left nothing while the
+        # status said «178 intersection edges added» (tutorial hunt 2, A12).
+        segs = [(a, b) for a, b in segments_for(scene, mode)
+                if (b - a).length() >= _WELD_LENGTH]
         if not segs:
             self.viewport.flash_status(tr("No faces cross the selection"))
             return
-        self.viewport.history.execute(
-            build_add_edges(scene, segs, detect_faces=True))
+        history = self.viewport.history
+        history.execute(build_add_edges(scene, segs, detect_faces=True))
+        if history.last_error:
+            QMessageBox.warning(self, tr("Intersect Faces failed"),
+                                history.last_error)
+            return
         self.viewport.flash_status(
             tr("{n} intersection edges added", n=len(segs)), 3000)
 
@@ -4005,6 +4116,11 @@ class MainWindow(QMainWindow):
             # Divide: a line or an arc into N equal pieces
             # (issue #63, @pacaeiro: «It's a needed command»).
             menu.addAction(tr("Divide…"), self._on_divide)
+            if any(getattr(e, "curve", None) is not None
+                   for e in loose_edges):
+                # Explode Curve: a circle or an arc back to plain
+                # segments, each picked on its own.
+                menu.addAction(tr("Explode Curve"), self._on_explode_curve)
             if len(loose_edges) > 1:
                 # Join Segments, its inverse: a line drawn in pieces
                 # back to one line.
@@ -4416,6 +4532,22 @@ class MainWindow(QMainWindow):
             tr("Divided into {n} segments", n=n), 3000)
 
     @_repeatable("Join Segments")
+    def _on_explode_curve(self) -> None:
+        """Explode Curve: the selected curves become plain segments, in one
+        undo step; the geometry does not move."""
+        from core.history import ExplodeCurvesCommand
+        scene = self.viewport.scene
+        edges = [e for e in scene.selection if isinstance(e, Edge)
+                 and e in scene.mesh.edges]
+        if not any(getattr(e, "curve", None) is not None for e in edges):
+            self.statusBar().showMessage(tr("No curve selected."), 3000)
+            return
+        cmd = ExplodeCurvesCommand(edges)
+        self.viewport.history.execute(cmd)
+        self.statusBar().showMessage(
+            tr("{n} curves exploded into segments", n=cmd.curves), 3000)
+        self.viewport.update()
+
     def _on_join_segments(self) -> None:
         """Join the selected collinear segments into single lines; with
         no edge selected, every one of the model being edited. First a

@@ -294,6 +294,9 @@ class Mesh:
 
     def __init__(self) -> None:
         self._registry: dict[tuple, Vertex] = {}
+        # Moved vertices waiting for a key another vertex still holds (see
+        # _rekey).
+        self._displaced: dict[tuple, list[Vertex]] = {}
         #: Set by every mutation primitive; the viewport's cached group chunk
         #: clears it after (re)validating — an O(1) dirty signal so render
         #: caches never content-hash a 131k-vertex mesh per scene change.
@@ -1016,6 +1019,7 @@ class Mesh:
         self.faces[:] = snap["faces"]
         self._registry.clear()
         self._registry.update(snap["registry"])
+        self._displaced.clear()
         for v, p in snap["vpos"].items():
             v.position = QVector3D(p)
         for v, es in snap["vedges"].items():
@@ -1044,6 +1048,7 @@ class Mesh:
         self._chunk_dirty = True
         self._mut_serial += 1
         self._registry.clear()
+        self._displaced.clear()
         self.vertices.clear()
         self.edges.clear()
         self.faces.clear()
@@ -1072,9 +1077,12 @@ class Mesh:
         new = _key(v.position)
         if old == new:
             return
-        if self._registry.get(old) is v:
-            del self._registry[old]
-        self._registry.setdefault(new, v)
+        reg = self._registry
+        if not self._displaced and reg.get(old) is v and new not in reg:
+            del reg[old]               # the common case, kept inline
+            reg[new] = v
+            return
+        self._rekey(v, old, new)
 
     def place_vertex(self, v: Vertex, position: QVector3D) -> None:
         """Put a vertex AT ``position`` -- :meth:`move_vertex` with an
@@ -1088,9 +1096,40 @@ class Mesh:
         new = _key(v.position)
         if old == new:
             return
+        reg = self._registry
+        if not self._displaced and reg.get(old) is v and new not in reg:
+            del reg[old]               # the common case, kept inline
+            reg[new] = v
+            return
+        self._rekey(v, old, new)
+
+    def _rekey(self, v: Vertex, old: tuple, new: tuple) -> None:
+        """File a moved vertex under its new key.
+
+        A selection moved along itself -- two chained lines shifted one
+        length down their own axis -- moves each vertex onto the spot the
+        next one still holds. The newcomer cannot take that key yet, so it
+        waits in ``_displaced``; when the holder moves on, the first waiter
+        still standing there takes the key. Without the queue the moved
+        vertex was never filed again: Delete missed its edges and a new line
+        to it welded a duplicate."""
         if self._registry.get(old) is v:
             del self._registry[old]
-        self._registry.setdefault(new, v)
+            for w in self._displaced.pop(old, ()):
+                if w is not v and w.edges and _key(w.position) == old:
+                    self._registry[old] = w
+                    break
+        else:
+            waiting = self._displaced.get(old)
+            if waiting is not None:
+                waiting[:] = [w for w in waiting if w is not v]
+                if not waiting:
+                    del self._displaced[old]
+        holder = self._registry.get(new)
+        if holder is None:
+            self._registry[new] = v
+        elif holder is not v:
+            self._displaced.setdefault(new, []).append(v)
 
     def split_edge(self, edge: Edge, position: QVector3D) -> tuple[Edge, Edge]:
         """Split ``edge`` at ``position``, inserting a shared vertex, and return

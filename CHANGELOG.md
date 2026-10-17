@@ -7,6 +7,19 @@ follow [SemVer](https://semver.org).
 ## [Sin publicar]
 
 ### Añadido
+- **Motor Rust experimental** (apagado por defecto): en Ventana ▸
+  Preferencias ▸ General, «Motor Rust (experimental)» calcula las partes
+  más pesadas con un módulo nativo nuevo, y se aplica al volver a abrir el
+  programa. En la Plaza de Yanque (115 883 caras): las líneas ocultas de
+  una lámina vectorial pasan de 150 s a 5 s, Intersecar caras con todo
+  seleccionado de 266 s a 9 s, y Orientar caras de 34 s a 9 s; empujar y
+  tirar sobre un terreno grande va unas cuatro veces más rápido. El
+  resultado es el mismo que con el motor de siempre, comprobado cara por
+  cara. Si el módulo no carga, IngeTrazo sigue con el motor de siempre sin
+  avisar de error; Ayuda ▸ Acerca de dice qué motor está en uso. Viene en
+  Windows, macOS, AppImage y Snap; el Flatpak sigue con el motor de siempre
+  en esta versión. Es una prueba: guarda copia de tus archivos y reporta lo
+  raro con la etiqueta `rust-engine`.
 - **Color de acento de los iconos y las barras** (#393): en Ventana ▸
   Preferencias ▸ General se elige el color de los detalles de los iconos y
   del fondo de los botones bajo el ratón: naranja IngeTrazo (el de siempre,

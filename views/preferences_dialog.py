@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core import _native
 from core import general_settings as _gs
 from core.i18n import LANGUAGE_NAMES as _LANGUAGE_NAMES
 from core.i18n import available_languages, current_language, tr
@@ -211,6 +212,23 @@ class PreferencesDialog(QDialog):
             "(XWayland) draws smoothly and stays crisp. Takes effect at the "
             "next start."))
         form.addRow(tr("Graphics server:"), self._platform)
+
+        # The experimental Rust engine (core._native): off by default, read
+        # once at start. Greyed out in a build that does not carry it.
+        self._rust = QCheckBox(tr("Rust engine (experimental)"))
+        self._rust.setChecked(str(_gs.value(_native.SETTING, "0", st)) == "1")
+        if _native.available() is None:
+            self._rust.setEnabled(False)
+            self._rust.setToolTip(tr("This build of IngeTrazo does not carry "
+                                     "the Rust engine."))
+        else:
+            self._rust.setToolTip(tr(
+                "Computes the heavy parts (hidden lines of the sheets and "
+                "more) with the new native engine, much faster on big "
+                "models. It is a test: keep a copy of your files and "
+                "report anything odd with the label rust-engine. Takes "
+                "effect at the next start."))
+        form.addRow("", self._rust)
         tabs.addTab(general, tr("General"))
 
         # ---- 3D mouse (issue #108) -------------------------------------------
@@ -576,6 +594,13 @@ class PreferencesDialog(QDialog):
         if history is not None:
             history.max_steps = int(self._undo_steps.value())
         _gs.set_value("platform", self._platform.currentData(), st)
+        rust = "1" if self._rust.isChecked() else "0"
+        if self._rust.isEnabled() and rust != str(
+                _gs.value(_native.SETTING, "0", st)):
+            _gs.set_value(_native.SETTING, rust, st)
+            QMessageBox.information(
+                self, tr("Rust engine (experimental)"),
+                tr("Restart IngeTrazo to switch the engine."))
         setup = getattr(self._window, "_setup_autosave", None)
         if callable(setup):
             setup()                     # re-arm the timer with the new pace

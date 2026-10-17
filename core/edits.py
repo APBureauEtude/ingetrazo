@@ -478,16 +478,24 @@ def build_add_edges(
     detect_faces: bool = True,
     extra: Iterable[Command] = (),
     eye=None,
+    plane_rebuild: bool = False,
 ) -> Command:
     """Batch convenience: many drawn edges (+ optional ``extra`` commands such
     as a tool-managed face) → one atomic command. ``eye`` (the camera's
-    position) decides which way a new vertical face looks."""
+    position) decides which way a new vertical face looks.
+
+    ``plane_rebuild``: a tool that owns its face (the Rectangle) asks for
+    the plane it lands on to be rebuilt, as a drawn Line has been since
+    July — drawn over a ring on walls it stacked a full face on the ring
+    instead of filling the hole (#538)."""
     commands = plan_edge_commands(scene, segments, detect_faces=detect_faces,
                                   eye=eye)
     commands.extend(extra)
     _append_active_tag(scene, commands)
-    _append_flat_curve_rebuild(
-        scene, commands, [p for seg in segments for p in seg])
+    points = [p for seg in segments for p in seg]
+    _append_flat_curve_rebuild(scene, commands, points)
+    if plane_rebuild:
+        _append_face_plane_rebuild(scene, commands, points)
     if len(commands) == 1 and not _scene_has_curves(scene):
         return commands[0]
     return SnapshotCompound(commands)

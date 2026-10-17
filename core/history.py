@@ -21,6 +21,7 @@ from __future__ import annotations
 import os as _os
 import time as _time_mod
 from abc import ABC, abstractmethod
+from collections import Counter
 from pathlib import Path as _Path
 from typing import Iterable, Optional
 
@@ -1633,6 +1634,58 @@ class CreatePlanCommand(Command):
         scene.set_active_section(
             prev if prev in scene.section_planes else None)
         scene.selection.discard(self.plane)
+        scene.version += 1
+
+
+class ExplodeCurvesCommand(Command):
+    """Explode Curve: the curves the given edges belong to become plain
+    segments, each one picked on its own. A circle or an arc selects whole
+    because its edges share a curve id; this drops the id, the geometry
+    stays exactly as it is. Undo gives every edge its id back."""
+
+    def __init__(self, edges) -> None:
+        self.edges = list(edges)
+        self._ids: list = []
+        self.curves = 0
+
+    def do(self, scene) -> None:
+        ids = {e.curve for e in self.edges
+               if getattr(e, "curve", None) is not None}
+        self.curves = len(ids)
+        self._ids = [(e, e.curve) for e in scene.mesh.edges
+                     if e.curve in ids]
+        for e, _cid in self._ids:
+            e.curve = None
+        scene.mesh._chunk_dirty = True
+        scene.mesh._mut_serial += 1
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        for e, cid in self._ids:
+            e.curve = cid
+        scene.mesh._chunk_dirty = True
+        scene.mesh._mut_serial += 1
+        scene.version += 1
+
+
+class DeleteScenesCommand(Command):
+    """Delete saved scenes, several at once (#280); undo puts each back in
+    its place in the list."""
+
+    def __init__(self, views) -> None:
+        self.views = list(views)
+        self._at: list = []
+
+    def do(self, scene) -> None:
+        self._at = [(scene.saved_views.index(v), v) for v in self.views
+                    if v in scene.saved_views]
+        for _i, v in self._at:
+            scene.saved_views.remove(v)
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        for i, v in sorted(self._at, key=lambda t: t[0]):
+            scene.saved_views.insert(i, v)
         scene.version += 1
 
 
@@ -4368,15 +4421,31 @@ class HealOverlapsCommand(Command):
             scene.version += 1
 
 
+_IN_TRI_SLACK = 1e-7
+
+
 def _point_in_tri(p: QVector3D, t0: QVector3D, t1: QVector3D,
                   t2: QVector3D) -> bool:
-    """Coplanar point-in-triangle via consistent cross-product orientation."""
+    """Coplanar point-in-triangle via consistent cross-product orientation.
+
+    Measured as distances (``_IN_TRI_SLACK`` metres outside an edge still
+    counts), and a sliver -- three nearly collinear corners, as a face whose
+    side was split on a straight border triangulates -- contains nothing.
+    The raw ``c·n > -1e-9`` test scaled with the triangle's area squared: a
+    sliver's tiny normal let every point through, and a 3 mm disc on the
+    border of a courtyard "covered" the 548 m² courtyard 8 m away.
+    """
     n = QVector3D.crossProduct(t1 - t0, t2 - t0)
-    if n.length() < 1e-12:
+    nl = n.length()
+    longest = max((t1 - t0).lengthSquared(), (t2 - t1).lengthSquared(),
+                  (t0 - t2).lengthSquared())
+    if nl < 1e-12 or nl < 1e-9 * longest:
         return False
     for a, b in ((t0, t1), (t1, t2), (t2, t0)):
         c = QVector3D.crossProduct(b - a, p - a)
-        if QVector3D.dotProduct(c, n) < -1e-9:
+        side = (b - a).length()
+        if side > 0 and QVector3D.dotProduct(c, n) / (nl * side) \
+                < -_IN_TRI_SLACK:
             return False
     return True
 
@@ -4517,11 +4586,39 @@ class RebuildPlaneFacesCommand(Command):
         segments = [(QVector3D(e.a), QVector3D(e.b)) for e in plane_edges]
         _, regions = planar_rebuild(segments, self.origin, self.normal)
 
+        def ring(loop):
+            return frozenset(_key(p) for p in loop)
+
+        # The openings the plane's faces already have, and the outlines a
+        # face was drawn exactly along. A region that is one of those
+        # openings stays open unless a face traces it (capping a hole on
+        # purpose) or traces the whole face around it (redrawing that face
+        # fills it, #538): a rectangle or an offset drawn AROUND a through
+        # hole covered it and the fresh face filled the hole (tutorial hunt
+        # 2, A15).
+        outlines = Counter(ring(f.vertices) for f in plane_faces)
+        openings: dict = {}
+        for f in plane_faces:
+            for h in f.holes:
+                openings.setdefault(ring(h), set()).add(ring(f.vertices))
+
+        def stays_open(outer) -> bool:
+            owners = openings.get(ring(outer))
+            if owners is None or outlines[ring(outer)]:
+                return False
+            return not any(outlines[o] > 1 for o in owners)
+
         def covering(outer, holes):
             tris = triangulate(outer, holes, self.normal)
             if not tris:
                 return None
-            probe = (tris[0][0] + tris[0][1] + tris[0][2]) / 3.0
+            # The centroid of the largest triangle, not the first: the first
+            # of a circle's fan is a sliver at the rim, and on a centimetre
+            # part its centroid sat within rounding of the face around the
+            # hole -- the hole read as covered and was capped (A15).
+            big = max(tris, key=lambda t: QVector3D.crossProduct(
+                t[1] - t[0], t[2] - t[0]).lengthSquared())
+            probe = (big[0] + big[1] + big[2]) / 3.0
             for old_tris, nrm, attrs in old:
                 if any(_point_in_tri(probe, t0, t1, t2)
                        for t0, t1, t2 in old_tris):
@@ -4530,6 +4627,8 @@ class RebuildPlaneFacesCommand(Command):
 
         keep = []
         for outer, holes in regions:
+            if not holes and stays_open(outer):
+                continue                      # an existing opening
             cov = covering(outer, holes or [])
             if cov is None:
                 continue                      # uncovered region: stays empty

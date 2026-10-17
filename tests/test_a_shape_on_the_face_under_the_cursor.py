@@ -57,17 +57,25 @@ def _cube(scene):
          V(lo, lo, hi), V(hi, lo, hi), V(hi, hi, hi), V(lo, hi, hi)]
     for loop in ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
                  (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)):
-        scene.mesh.add_face([p[i] for i in loop])
+        mesh = getattr(scene, "mesh", scene)
+        mesh.add_face([p[i] for i in loop])
 
 
-def _scene():
+def _scene(grouped=False):
     from views.main_window import MainWindow
     win = MainWindow()
     win.show()
     win.resize(1200, 800)
     _app.processEvents()
     vp = win.viewport
-    _cube(vp.scene)
+    if grouped:
+        from core.group import Group
+        from core.mesh import Mesh
+        mesh = Mesh()
+        _cube(mesh)
+        vp.scene.groups.append(Group(mesh, "cubo"))
+    else:
+        _cube(vp.scene)
     vp.camera.set_view("iso")
     vp.scene.version += 1
     _app.processEvents()
@@ -133,6 +141,33 @@ def test_the_rectangle_lands_on_the_face_it_is_drawn_over(start, hover, normal):
                  if f.area() > 0.05
                  and all(_off_plane(v, plano) < 1e-6 for v in f.vertices)]
         assert built, "nothing was built on the face"
+    finally:
+        win._saved_version = vp.scene.version
+        win.close()
+
+
+@pytest.mark.parametrize("grouped", [False, True], ids=["loose-face", "group"])
+def test_a_selected_object_still_supplies_the_planar_tool_plane(grouped):
+    win, vp = _scene(grouped=grouped)
+    try:
+        win._activate_tool("rectangle")
+        _app.processEvents()
+        _press(vp, *_pixel(vp, V(1.0, 1.0, 2.0)))
+        _app.processEvents()
+
+        px, py = vp._world_to_pixel(V(2.0, 1.0, 1.0))
+        face, group = vp.pick_face_placement(px, py)
+        assert face is not None
+        vp.scene.selection.add(group if grouped else face)
+
+        vp._last_mouse_pos = QPointF(px, py)
+        vp._refresh_snap()
+        plane = vp.active_tool.drawing_plane()
+        assert abs(QVector3D.dotProduct(
+            QVector3D(plane[1]).normalized(), V(1.0, 0.0, 0.0))) > 0.999
+        assert abs(QVector3D.dotProduct(
+            QVector3D(plane[0]) - V(2.0, 1.0, 1.0),
+            V(1.0, 0.0, 0.0))) < 1e-3
     finally:
         win._saved_version = vp.scene.version
         win.close()
@@ -307,5 +342,3 @@ def test_shift_marks_the_plane_the_shape_is_on_and_gives_it_back():
     finally:
         win._saved_version = vp.scene.version
         win.close()
-
-

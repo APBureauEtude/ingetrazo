@@ -7514,8 +7514,10 @@ class Viewport(QOpenGLWidget):
         # The same colours and words as the snap markers: a corner is the
         # endpoint green, an edge the on-edge red, a face the on-face blue
         # — the classic cue says "On edge" while you push level with one.
-        from core.snap import COLOR_ENDPOINT, COLOR_ON_EDGE, COLOR_ON_FACE
+        from core.snap import (COLOR_ENDPOINT, COLOR_ON_EDGE, COLOR_ON_FACE,
+                               COLOR_ORIGIN)
         palette = {
+            "origin": (COLOR_ORIGIN, "origin"),
             "edge": (COLOR_ON_EDGE, "on_edge"),
             "face": (COLOR_ON_FACE, "on_face"),
             "guide_line": (COLOR_ON_EDGE, "on_line"),
@@ -8025,13 +8027,20 @@ class Viewport(QOpenGLWidget):
         return not (grp is None and callable(moving) and id(face) in moving())
 
     def _hover_face_plane(self, cursor):
-        """World plane of an unselected face under the cursor, or None."""
+        """World plane of the face under the cursor, or None.
+
+        Selected geometry remains a valid plane target for planar drawing
+        tools; other tools must not land on geometry they are moving.
+        """
         face, grp = self.pick_face_placement(cursor[0], cursor[1])
         if face is None:
             return None
         sel = self.scene.selection
         owner = self._owner_of(grp) if grp is not None else None
-        if (owner is not None and owner in sel) or (grp is None and face in sel):
+        from tools.base import PlaneLock
+        if (not isinstance(self.active_tool, PlaneLock)
+                and ((owner is not None and owner in sel)
+                     or (grp is None and face in sel))):
             return None
         if grp is None:
             # A face the drag is bending (one corner on a grabbed vertex)
@@ -13610,9 +13619,20 @@ class Viewport(QOpenGLWidget):
             # typed length must drop the lock exactly like the second click.
             history = getattr(self, "history", None)
             _before = len(history.undo_stack) if history is not None else 0
+            typed = self._value_buffer
             self.active_tool.on_value(self, value)
             _drew = history is not None and len(history.undo_stack) > _before
             self._set_value_buffer("")
+            # The box falls back to the live reading, which only refreshes on
+            # a mouse move: it went on showing the preview from BEFORE the
+            # Enter, as if the typed size had been ignored (#607). What was
+            # drawn is what was typed, read as the canvas showed it. Nothing
+            # drawn: the preview the box shows is still the live one.
+            if _drew:
+                unitless = getattr(self.active_tool, "value_is_unitless", None)
+                self.measurementChanged.emit(
+                    typed if callable(unitless) and unitless()
+                    else _typed_value_text(typed))
             self._release_axis_lock_after_operation(committed=_drew)
             return True
 
@@ -13689,11 +13709,23 @@ class Viewport(QOpenGLWidget):
                 tail = self._current_token_tail()
                 if not tail or ":" in self._value_buffer:
                     return True
-            # Forbid two decimal separators in the current numeric token.
+            # A second decimal separator in the current numeric token: a
+            # "." is dropped, a "," starts the next value (#598) — dropping
+            # it turned «0.9,2.1» into 0.921.
             if text in (".", ","):
                 tail = self._current_token_tail()
+                comma_fields = (
+                    getattr(self.active_tool, "vcb_comma_lists", False)
+                    and ";" not in self._value_buffer
+                    and " " not in self._value_buffer)
+                if comma_fields:
+                    # Every comma separates a field here (#152).
+                    tail = tail.rsplit(",", 1)[-1]
                 if "." in tail or "," in tail:
-                    return True
+                    if text == ".":
+                        return True
+                    if not comma_fields:
+                        text = ";"
             self._set_value_buffer(self._value_buffer + text)
             return True
 

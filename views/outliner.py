@@ -162,6 +162,25 @@ def _draw(key: str):
                        QPointF(2.6, 15.4)])
         p.drawLine(QPointF(11.1, 4.6), QPointF(13.4, 6.9))
         p.drawLine(QPointF(9.5, 16.2), QPointF(16.2, 16.2))
+    elif key in ("isolate", "isolate_on"):
+        # Drawn, not the ◎ / ◉ characters: few interface fonts have them,
+        # and looking for one that does is where the 0.5.8 Flatpak died at
+        # start-up on a machine with a broken user font (#658).
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QRectF(2.5, 2.5, 13, 13))
+        if key == "isolate_on":
+            p.setPen(Qt.NoPen)
+            p.setBrush(_accent())
+            p.drawEllipse(QRectF(5.5, 5.5, 7, 7))
+        else:
+            p.drawEllipse(QRectF(6, 6, 6, 6))
+    elif key in ("expand_all", "collapse_all"):
+        # ⊞ / ⊟, drawn for the same reason as Isolate's (#658).
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(QRectF(2.5, 2.5, 13, 13))
+        p.drawLine(QPointF(5.5, 9), QPointF(12.5, 9))
+        if key == "expand_all":
+            p.drawLine(QPointF(9, 5.5), QPointF(9, 12.5))
     elif key == "document":
         p.drawPolygon([QPointF(2, 9), QPointF(9, 3), QPointF(16, 9)])
         p.drawRect(QRectF(4, 9, 10, 7))
@@ -1071,14 +1090,15 @@ class OutlinerPanel(QWidget):
             self._rename_picked)
         self._rename_btn.setIcon(node_icon("rename"))
         bar.addWidget(self._rename_btn)
-        self._isolate_btn = _tool_button("◎", "", self._isolate_or_show)
+        self._isolate_btn = _tool_button("", "", self._isolate_or_show)
         self._isolate_btn.setCheckable(True)
         bar.addWidget(self._isolate_btn)
         self._update_isolate_button()
         # Expand all and Collapse all in one button too: ⊞ while a branch
         # is folded, ⊟ once everything is open.
-        self._expand_btn = _tool_button("⊞", tr("Expand all"),
+        self._expand_btn = _tool_button("", tr("Expand all"),
                                         self._expand_or_collapse)
+        self._expand_btn.setIcon(node_icon("expand_all"))
         bar.addWidget(self._expand_btn)
         lay.addLayout(bar)
         self.tree = _Tree(self)
@@ -1578,7 +1598,7 @@ class OutlinerPanel(QWidget):
         if b is None or getattr(self, "tree", None) is None:
             return
         open_ = self._all_expanded()
-        b.setText("⊟" if open_ else "⊞")
+        b.setIcon(node_icon("collapse_all" if open_ else "expand_all"))
         b.setToolTip(tr("Collapse all") if open_ else tr("Expand all"))
 
     def _expand_or_collapse(self) -> None:
@@ -3125,7 +3145,7 @@ class OutlinerPanel(QWidget):
             return
         isolated = bool(self._isolated_now())
         b.setChecked(isolated)
-        b.setText("◉" if isolated else "◎")
+        b.setIcon(node_icon("isolate_on" if isolated else "isolate"))
         b.setToolTip(tr("Exit isolation: show again what Isolate hid")
                      if isolated else
                      tr("Isolate: hide everything but the selected groups"))

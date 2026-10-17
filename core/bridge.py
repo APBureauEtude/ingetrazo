@@ -80,7 +80,11 @@ def profiles_from_selection(mesh, selection) -> list[Profile]:
              if isinstance(e, Edge) and id(e) in mesh_edges
              and not any(id(f) in face_ids for f in e.faces)]
     profiles = [Profile([f.vertices] + f.holes, True, f) for f in faces]
-    for chain in _connected(edges):
+    chains = _connected(edges, most=2 - len(faces))
+    if chains is None:
+        raise BridgeError("Select two faces, a face and a line, or two "
+                          "lines to bridge")
+    for chain in chains:
         got = order_path_edges(chain)
         if got is None:
             raise BridgeError("Each line to bridge must be one chain "
@@ -96,8 +100,11 @@ def profiles_from_selection(mesh, selection) -> list[Profile]:
     return profiles
 
 
-def _connected(edges) -> list[list]:
-    """The selected edges split into the pieces they form."""
+def _connected(edges, most: int | None = None) -> list[list] | None:
+    """The selected edges split into the pieces they form; ``None`` as soon
+    as there are more than ``most`` of them (the right-click menu asks on
+    every click, and a selection of thousands of loose edges must not be
+    walked and sorted only to say no)."""
     left = set(edges)
     by_vertex: dict = {}
     for e in edges:
@@ -116,6 +123,8 @@ def _connected(edges) -> list[list]:
                         piece.append(n)
                         stack.append(n)
         pieces.append(piece)
+        if most is not None and len(pieces) > most:
+            return None
     # Stable order: the order the user's selection set happens to give
     # must not decide which profile is "first".
     pieces.sort(key=lambda p: min(_key(v.position) for e in p

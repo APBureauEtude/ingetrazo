@@ -671,18 +671,23 @@ class Scene:
         when nothing selected has a place in space.
 
         Loose edges and faces, whole groups (nested placements included,
-        vectorized per mesh like ``bounds()``), dimensions and reference
-        images. Not cached: it runs once per command, over the selection
-        only."""
+        vectorized per mesh like ``bounds()``), dimensions, reference
+        images and construction guides — by their point only: a guide line
+        is infinite, and its ±10 km segment made Ctrl+A then Zoom Selection
+        frame a dot (#627). Not cached: it runs once per command, over the
+        selection only."""
         import numpy as np
         from core.group import iter_placements
+        from core.guide import Guide
         pts: list = []
 
         def add(p: QVector3D) -> None:
             pts.append((p.x(), p.y(), p.z()))
 
         for ent in self.selection:
-            if hasattr(ent, "mesh"):          # Group / component instance
+            if isinstance(ent, Guide):        # before Edge: it has .a / .b
+                add(ent.point)
+            elif hasattr(ent, "mesh"):        # Group / component instance
                 for g, m in iter_placements(ent):
                     verts = g.mesh.vertices
                     if not verts:

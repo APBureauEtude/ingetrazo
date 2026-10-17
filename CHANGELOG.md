@@ -7,8 +7,19 @@ follow [SemVer](https://semver.org).
 ## [Sin publicar]
 
 ### Añadido
-- Japanese UI translations, selectable as **日本語** in Preferences, with
-  coverage for Qt standard buttons and stable shortcut action identifiers.
+- **Motor Rust experimental** (apagado por defecto): en Ventana ▸
+  Preferencias ▸ General, «Motor Rust (experimental)» calcula las partes
+  más pesadas con un módulo nativo nuevo, y se aplica al volver a abrir el
+  programa. En la Plaza de Yanque (115 883 caras): las líneas ocultas de
+  una lámina vectorial pasan de 150 s a 5 s, Intersecar caras con todo
+  seleccionado de 266 s a 9 s, y Orientar caras de 34 s a 9 s; empujar y
+  tirar sobre un terreno grande va unas cuatro veces más rápido. El
+  resultado es el mismo que con el motor de siempre, comprobado cara por
+  cara. Si el módulo no carga, IngeTrazo sigue con el motor de siempre sin
+  avisar de error; Ayuda ▸ Acerca de dice qué motor está en uso. Viene en
+  Windows, macOS, AppImage y Snap; el Flatpak sigue con el motor de siempre
+  en esta versión. Es una prueba: guarda copia de tus archivos y reporta lo
+  raro con la etiqueta `rust-engine`.
 - **Color de acento de los iconos y las barras** (#393): en Ventana ▸
   Preferencias ▸ General se elige el color de los detalles de los iconos y
   del fondo de los botones bajo el ratón: naranja IngeTrazo (el de siempre,
@@ -17,6 +28,23 @@ follow [SemVer](https://semver.org).
   selección en el visor 3D sigue en naranja.
 
 ### Corregido
+- **Abrir otro documento ya no arrastra los planos de sección del
+  anterior** (#602, ArchXQ IT): un archivo sin planos se abría con los del
+  documento que estaba abierto antes, y al guardarlo se quedaban grabados
+  en él. Lo mismo pasaba con los interruptores de planos y cortes, Objetos
+  y Geometría ocultos, las escalas propias, el color del dorso de las caras
+  y las capas que el archivo no tenía. Ahora cada documento se abre solo
+  con lo suyo. Y Archivo ▸ Nuevo borra también un documento que solo
+  tenía planos de sección.
+- **Borrar la diagonal de un rectángulo ya no le da la vuelta a la cara**
+  (#529, @GWydouw): al unir dos caras de un mismo plano, el contorno salía
+  en cualquiera de los dos sentidos, y casi la mitad de las veces la cara
+  unida quedaba del revés. Ahora conserva el lado de la cara original y su
+  pintura por delante y por detrás.
+- **Intersecar caras ya no falla con caras casi paralelas**: dos planos
+  separados por un ángulo minúsculo hacían una división por cero y la orden
+  no hacía nada. Además, la búsqueda de qué caras pueden cruzarse va mucho
+  más rápida en modelos grandes.
 - **«x5» tras copiar hace la matriz, igual que «5x»** (#542): después de
   copiar con Mover o Rotar + Ctrl, teclear «x5» abría la herramienta Texto,
   porque la X sola es su atajo. Justo después de una copia, mientras «3x» o

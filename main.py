@@ -232,6 +232,18 @@ def _self_check() -> int:
     if dwg is None and is_frozen() and sys.platform != "darwin":
         problems.append("DWG converter")
 
+    # The optional native kernels (rust/ingetrazo_core): without them the
+    # Python code runs, so a missing module is not a fault — except in a
+    # build that promises them, which sets INGETRAZO_REQUIRE_RUST. The
+    # engine is off by default (Preferences), so the check asks whether
+    # the module is there and loads, not whether it is on.
+    from core._native import available, engine
+    mod = available()
+    print(f"  engine         : {engine()}"
+          + (f" (Rust {mod.__version__} available)" if mod else ""))
+    if mod is None and os.environ.get("INGETRAZO_REQUIRE_RUST") == "1":
+        problems.append("native engine")
+
     # ``ingetrazo --mcp`` runs scripts/ingetrazo_mcp.py by path, and that
     # server reads its recipe book from core.ai_recipes. The Flatpak of
     # 0.4.9 shipped without scripts/ at all: the app ran, and the MCP door
@@ -520,11 +532,15 @@ def main() -> int:
             doc = Path(arg)
             if doc.exists():
                 _open_document_in(window, doc)
+        # Which units to work in, once the window is up and the document in
+        # (off for good with «Don't show this at startup»; Preferences ▸
+        # Units turns it back on). Offered after the opening, not beside
+        # it: the load lets events through to move its bar, the question
+        # came up in the middle of it, and the document stayed frozen at
+        # 5 % behind it, the view blank, until it was answered.
+        QTimer.singleShot(0, window.offer_units_at_start)
 
     QTimer.singleShot(0, _after_first_frame)
-    # Which units to work in, once the window is up (off for good with
-    # «Don't show this at startup»; Preferences ▸ Units turns it back on).
-    QTimer.singleShot(0, window.offer_units_at_start)
     _offer_appimage_integration(window)
     return app.exec()
 

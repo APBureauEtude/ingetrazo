@@ -21,6 +21,10 @@ on:
 permissions:
   contents: write
 
+# The bundle's --check fails if the Rust engine is missing (core._native).
+env:
+  INGETRAZO_REQUIRE_RUST: "1"
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -70,6 +74,20 @@ jobs:
           # que necesitemos.
           pip install "openskp @ git+https://github.com/iamahsanmehmood/openskp@291700bc213655a00461838de71e5f206311e619#subdirectory=packages/python"
           python -c "import openskp, openskp.legacy; print('openskp OK:', openskp.__name__)" 
+
+      # El motor Rust EXPERIMENTAL (rust/ingetrazo_core, Preferencias ▸
+      # General; apagado por defecto). Si no compila, falla aquí: nunca
+      # publicar un instalador que lo promete y no lo trae.
+      - name: Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Motor Rust (experimental)
+        shell: bash
+        run: |
+          pip install maturin
+          maturin build --release -m rust/ingetrazo_core/Cargo.toml -o "$RUNNER_TEMP/wheels"
+          pip install "$RUNNER_TEMP"/wheels/ingetrazo_core-*.whl
+          INGETRAZO_RUST=1 python -c "import core._native as n; assert n.native is not None; print('motor:', n.engine())"
 
       # DWG en Windows (#101): el dwg2dxf.exe OFICIAL de LibreDWG (su
       # release win64, mingw), con las dos DLL que carga — nada más del zip.

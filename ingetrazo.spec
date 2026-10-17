@@ -140,6 +140,13 @@ hiddenimports += ['manifold3d', 'core.solids', 'tools.solid_tools']
 # Copy/Paste between windows (#76): imported lazily by the viewport and
 # the main window.
 hiddenimports += ['formats.clip']
+# The optional native kernels (rust/ingetrazo_core, built with maturin):
+# shipped when the build environment has them installed, and simply
+# absent otherwise (core._native falls back to Python).
+import importlib.util as _ilu
+hiddenimports += ['core._native']
+if _ilu.find_spec('ingetrazo_core') is not None:
+    hiddenimports += ['ingetrazo_core']
 hiddenimports += [
     # The bundled plugins import these at RUN time, so static analysis never
     # sees them and they were left out: the AI assistant died on load with

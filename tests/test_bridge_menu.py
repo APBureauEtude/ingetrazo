@@ -123,3 +123,26 @@ def test_right_click_offers_bridge_only_when_it_can(win, monkeypatch):
     a, b = _two_squares(win.viewport.scene)
     assert "Bridge" in _context_entries(win, monkeypatch, [a, b])
     assert "Bridge" not in _context_entries(win, monkeypatch, [a])
+
+
+def test_right_click_keeps_texture_on_one_textured_face(win, monkeypatch):
+    # The Bridge check went in above the Texture submenu once and took it
+    # along: one textured face (never bridgeable) lost Texture ▸ Position.
+    a, _b = _two_squares(win.viewport.scene)
+    monkeypatch.setattr(win, "_single_textured_face", lambda: (a, "front"))
+    entries = _context_entries(win, monkeypatch, [a])
+    assert "Texture" in entries and "Bridge" not in entries
+
+
+def test_a_big_selection_is_not_walked(win, monkeypatch):
+    # Every right-click asks; with Ctrl+A on thousands of faces walking the
+    # selection took seconds. A third face is enough to say no.
+    import core.bridge
+
+    def walked(*_args):
+        raise AssertionError("profiles_from_selection walked the selection")
+    monkeypatch.setattr(core.bridge, "profiles_from_selection", walked)
+    mesh = win.viewport.scene.mesh
+    faces = [mesh.add_face([V(i * 2, 0), V(i * 2 + 1, 0), V(i * 2 + 1, 1),
+                            V(i * 2, 1)]) for i in range(3)]
+    assert not win._bridgeable(faces)

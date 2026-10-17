@@ -339,3 +339,11 @@ def test_align_loop_finds_the_matching_start():
     b = _square(2, start=2, reverse=True)
     got = align_loop(a, b)
     assert [(p.x(), p.y()) for p in got] == [(p.x(), p.y()) for p in a]
+
+
+def test_more_than_two_faces_is_refused_at_once():
+    mesh = Mesh()
+    faces = [mesh.add_face([V(i * 2, 0), V(i * 2 + 1, 0), V(i * 2 + 1, 1),
+                            V(i * 2, 1)]) for i in range(3)]
+    with pytest.raises(BridgeError):
+        profiles_from_selection(mesh, faces)

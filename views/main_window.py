@@ -3981,14 +3981,14 @@ class MainWindow(QMainWindow):
             # menu and Marco could not find it (2026-09-10).
             menu.addAction(tr("Reverse Faces"), self._on_reverse_faces)
             menu.addAction(tr("Orient Faces"), self._on_orient_faces)
-        if self._bridgeable(sel):
-            menu.addAction(tr("Bridge"), self._on_bridge)
             face = self._single_textured_face()
             if face is not None:
                 # The Texture submenu, on a face with an image.
                 texm = menu.addMenu(tr("Texture"))
                 texm.addAction(tr("Position"), self._on_texture_position)
                 texm.addAction(tr("Reset Position"), self._on_texture_reset)
+        if self._bridgeable(sel):
+            menu.addAction(tr("Bridge"), self._on_bridge)
         if has_mesh or has_group:
             # Flip Along ▸ Red / Green / Blue: a mirror in place about the
             # selection's centre in one click, the way modelling tutorials
@@ -4483,6 +4483,14 @@ class MainWindow(QMainWindow):
         """Whether the selection holds the two profiles Bridge needs (the
         right-click menu offers it only then)."""
         from core.bridge import BridgeError, profiles_from_selection
+        # Every right-click asks, so a big selection (Ctrl+A) must not be
+        # walked: a third face already rules Bridge out.
+        faces = 0
+        for e in sel:
+            if isinstance(e, Face):
+                faces += 1
+                if faces > 2:
+                    return False
         try:
             profiles_from_selection(self.viewport.scene.mesh, sel)
         except BridgeError:

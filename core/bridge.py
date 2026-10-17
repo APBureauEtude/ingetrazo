@@ -66,9 +66,18 @@ def profiles_from_selection(mesh, selection) -> list[Profile]:
     Selected faces count as faces; the selected edges that are not the
     outline of a selected face (picking a face by double click selects its
     edges too) are chained into lines or closed loops."""
-    faces = [e for e in selection if isinstance(e, Face) and e in mesh.faces]
+    # Sets of ids, not ``in mesh.faces``: those are lists, and checking each
+    # selected element against them made a big selection quadratic.
+    mesh_faces = {id(f) for f in mesh.faces}
+    mesh_edges = {id(e) for e in mesh.edges}
+    faces = [e for e in selection
+             if isinstance(e, Face) and id(e) in mesh_faces]
+    if len(faces) > 2:
+        raise BridgeError("Select two faces, a face and a line, or two "
+                          "lines to bridge")
     face_ids = {id(f) for f in faces}
-    edges = [e for e in selection if isinstance(e, Edge) and e in mesh.edges
+    edges = [e for e in selection
+             if isinstance(e, Edge) and id(e) in mesh_edges
              and not any(id(f) in face_ids for f in e.faces)]
     profiles = [Profile([f.vertices] + f.holes, True, f) for f in faces]
     for chain in _connected(edges):

@@ -389,7 +389,7 @@ def _lean_instanced() -> bool:
     return _native.native is not None
 #: Lazy placements are filtered by core._native's spatial index before
 #: being baked for a pick (the experimental engine; tests compare both).
-_INSTANCE_FILTER = False
+_INSTANCE_FILTER = True
 #: Span lists this long are culled with NumPy (_visible_spans_np).
 _SPAN_VECTOR_MIN = 64
 #: Recorded instanced passes replayed by the native engine when it is on.

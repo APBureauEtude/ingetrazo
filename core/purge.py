@@ -73,6 +73,22 @@ def _annotations(scene):
         yield from (getattr(scene, coll, None) or ())
 
 
+def layer_carriers(scene):
+    """Every entity in the document that can carry a layer label: faces and
+    edges of every mesh, every group (nested placements and kept definitions
+    included), the annotations and the photogrammetric survey. What renaming
+    or deleting a layer has to relabel — missing one leaves it tagged with a
+    name that no longer exists."""
+    for mesh in iter_meshes(scene):
+        yield from mesh.faces
+        yield from mesh.edges
+    yield from iter_groups(_document_groups(scene))
+    yield from _annotations(scene)
+    photo = getattr(scene, "photo_mesh", None)
+    if photo is not None:
+        yield photo
+
+
 def used_layers(scene) -> set[str]:
     """Every layer name something in the document carries."""
     used = {DEFAULT_LAYER}

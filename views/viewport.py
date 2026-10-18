@@ -510,6 +510,55 @@ def _proto_wrapper(vp, mesh, paint=None):
     return w
 
 
+#: The face modes Colour by layer applies to: the ones that draw the
+#: per-vertex colour. Hidden line, monochrome and wireframe keep their own
+#: flat look.
+_BY_LAYER_MODES = ("textures", "shaded", "xray")
+
+
+def _layer_look_sig(scene) -> tuple:
+    """What of the layers changes the paint objects are drawn in: Colour by
+    layer, and each layer's colour and transparency."""
+    style = getattr(scene, "display_style", None)
+    by_layer = bool(getattr(style, "color_by_layer", False))
+    return (by_layer, getattr(style, "face_mode", None) if by_layer else None,
+            tuple((ly.name, ly.color, ly.opacity)
+                  for ly in getattr(scene, "layers", ())))
+
+
+def _paint_of(vp, group):
+    """The container paint faces are baked with: the object's own paint
+    (issue #47), or — with Colour by layer on — the layer colours
+    (core.layers.layer_paint). ``group`` None is the loose model; a
+    prototype stand-in (``_proto_wrapper``) already carries its paint.
+    Module-level, like ``_proto_wrapper``, so stub viewports reach it."""
+    from core.group import Group, effective_material
+    if group is not None and not isinstance(group, Group):
+        return effective_material(group)
+    scene = getattr(vp, "scene", None)
+    if scene is None or getattr(vp, "plano_style", None) is not None:
+        return effective_material(group)       # a sheet's technical look
+    style = (getattr(vp, "style_override", None)
+             or getattr(scene, "display_style", None))
+    by_layer = bool(getattr(style, "color_by_layer", False)
+                    and style.face_mode in _BY_LAYER_MODES)
+    from core.layers import layer_fx, layer_look, layer_paint, object_layer
+    from core.materials import material_sig
+    memo = getattr(vp, "_layer_paints", None)
+    if memo is None or memo[0] != scene.version:
+        memo = vp._layer_paints = (scene.version, {}, layer_fx(scene))
+    fx = memo[2]
+    if not by_layer and not fx:
+        return effective_material(group)
+    own = None if by_layer else effective_material(group)
+    key = (by_layer, object_layer(group), material_sig(own))
+    paint = memo[1].get(key)
+    if paint is None:
+        base = layer_paint(scene, group) if by_layer else own
+        paint = memo[1][key] = layer_look(scene, group, base, fx)
+    return paint
+
+
 def _cache_ver(vp):
     """The scene version the per-version caches key on — frozen during a
     groups-only transform preview (see Viewport.begin_groups_preview).
@@ -2544,8 +2593,7 @@ class Viewport(QOpenGLWidget):
         # million faces baked one by one (issue #158). It draws instanced
         # now, in batches of its own under a clockwise front face
         # (``_front_face``).
-        from core.group import effective_material
-        paint = effective_material(g)
+        paint = _paint_of(self, g)
         # The answer is the prototype's (and its paint's), which the
         # placements epoch covers: once per prototype, not per placement
         # (64 000 calls per rebuild on the plant of #158, ~1.5 s an undo).
@@ -2609,6 +2657,7 @@ class Viewport(QOpenGLWidget):
                  bool(getattr(sc, "show_hidden_objects", False)),
                  bool(getattr(sc, "show_hidden_geometry", False)),
                  tuple((ly.name, ly.visible, ly.locked) for ly in sc.layers),
+                 _layer_look_sig(sc),
                  len(sc.groups))
         live = getattr(self, "_frozen_cache_version", None) is None
         same = getattr(self, "_epoch_same", None)
@@ -2631,7 +2680,10 @@ class Viewport(QOpenGLWidget):
                        bool(getattr(sc, "show_hidden_geometry", False)),
                        # Hide Similar Components drops placements too.
                        bool(getattr(sc, "hide_similar_components", False)),
-                       tuple((ly.name, ly.visible, ly.locked) for ly in sc.layers)]
+                       tuple((ly.name, ly.visible, ly.locked) for ly in sc.layers),
+                       # Colour by layer and each layer's colour and
+                       # transparency change the paint a placement draws in.
+                       _layer_look_sig(sc)]
 
         loose = sc.mesh
 
@@ -2817,7 +2869,6 @@ class Viewport(QOpenGLWidget):
         placements, long enough for the desktop to call IngeTrazo «not
         responding» (Marco, 01-10, #158). Pure NumPy, no GL needed."""
         import time
-        from core.group import effective_material
         groups = self._placements()
         n = max(1, len(groups))
         from views import array_bake
@@ -2829,10 +2880,10 @@ class Viewport(QOpenGLWidget):
                 continue
             try:
                 if getattr(g, "xform", None) is not None:
-                    key = (id(g.mesh), _material_sig(effective_material(g)))
+                    key = (id(g.mesh), _material_sig(_paint_of(self, g)))
                     if key not in done:
                         done.add(key)
-                        self._proto_base_chunk(g.mesh, effective_material(g))
+                        self._proto_base_chunk(g.mesh, _paint_of(self, g))
                     if not self._instanced_eligible(g):
                         self._group_chunk(g)
                 else:
@@ -2858,8 +2909,7 @@ class Viewport(QOpenGLWidget):
         bake: the silhouette pass asks for both for every placement at up
         to 12 Hz, and working them out in Python each time cost ~7 ms a
         pass on the plaza's 1 359 placements (release check, 30-09)."""
-        from core.group import effective_material
-        base = self._proto_base_chunk(g.mesh, effective_material(g))
+        base = self._proto_base_chunk(g.mesh, _paint_of(self, g))
         m = g.xform
         key = (base.get("uid"), tuple(m.data()))
         cache = getattr(self, "_placement_frames", None)
@@ -2913,7 +2963,6 @@ class Viewport(QOpenGLWidget):
                getattr(self, "_frozen_cache_version", None))
         pool = getattr(self, "_inst_pool", None)
         if pool is None or pool[0] != key:
-            from core.group import effective_material
             groups: list = []
             boxes: list = []
             codes: list = []
@@ -2929,7 +2978,9 @@ class Viewport(QOpenGLWidget):
                 # Which pool (prototype, container paint, mirror) it draws
                 # in, and its matrix: fixed while the placements are, so
                 # not worked out again per frame (#158: 21 406 placements).
-                paint = effective_material(g)
+                # The paint as drawn: Colour by layer and the layers'
+                # transparency and lock fade included.
+                paint = _paint_of(self, g)
                 mirrored = g.xform.determinant() < 0.0
                 pk = (id(g.mesh), _material_sig(paint), mirrored)
                 c = code_of.get(pk)
@@ -3902,10 +3953,9 @@ class Viewport(QOpenGLWidget):
         of ``face``, each picked against the paint that side shows — its
         material colour (or the open group's paint), the two-sided back
         paint, or the style's back-face tint."""
-        from core.group import effective_material
         from core.materials import effective_attrs
         attrs = effective_attrs(face.attrs,
-                                effective_material(self.scene.edit_group))
+                                _paint_of(self, self.scene.edit_group))
         tex = attrs.get("texture")
         if tex is not None and tex.get("path"):
             front = None                      # a texture: colour unknown
@@ -5589,9 +5639,8 @@ class Viewport(QOpenGLWidget):
 
         # Inside an open group its faces are the loose mesh, and the
         # group's own paint (issue #47) must still dress the default ones.
-        from core.group import effective_material as _eff_mat
         from core.materials import effective_attrs as _eff_attrs
-        ctx_paint = _eff_mat(self.scene.edit_group)
+        ctx_paint = _paint_of(self, self.scene.edit_group)
 
         def bucket_face(face):
             if face in suppressed_faces:
@@ -6434,7 +6483,6 @@ class Viewport(QOpenGLWidget):
         frame. ``(table, rest)``: ``rest`` are the placements it does not
         take (loose groups, face-me, a singular matrix)."""
         import numpy as np
-        from core.group import effective_material
         key = (self._placements_epoch(), tuple(map(id, groups)))
         memo = getattr(self, "_sil_table", None)
         if memo is not None and memo[0] == key:
@@ -6446,7 +6494,7 @@ class Viewport(QOpenGLWidget):
                     or getattr(g, "billboard", False):
                 rest.append(g)
                 continue
-            base = self._proto_base_chunk(g.mesh, effective_material(g))
+            base = self._proto_base_chunk(g.mesh, _paint_of(self, g))
             if base["soft_pts"] is None:
                 continue                      # nothing curved to outline
             box, inv = self._placement_frame(g)
@@ -6540,8 +6588,7 @@ class Viewport(QOpenGLWidget):
         profiles on, the 21 000 placements of issue #158 baked 14 million
         faces the instanced draw never needed."""
         import numpy as np
-        from core.group import effective_material
-        base = self._proto_base_chunk(g.mesh, effective_material(g))
+        base = self._proto_base_chunk(g.mesh, _paint_of(self, g))
         if base["soft_pts"] is None:
             return b""
         bb, inv = self._placement_frame(g)
@@ -7150,7 +7197,8 @@ class Viewport(QOpenGLWidget):
             return
         selection = self.scene.selection
         for sp in planes:
-            if getattr(sp, "hidden", False):
+            if getattr(sp, "hidden", False) \
+                    or not self.scene.entity_visible(sp):
                 continue                    # its frame is off; a cut stays
             corners = self.section_plane_frame(sp)
             px = []
@@ -7235,7 +7283,8 @@ class Viewport(QOpenGLWidget):
             return None
         best, best_d = None, self.pick_threshold_px
         for sp in planes:
-            if getattr(sp, "hidden", False):
+            if getattr(sp, "hidden", False) \
+                    or not self.scene.entity_selectable(sp):
                 continue
             corners = self.section_plane_frame(sp)
             for i in range(4):
@@ -9062,12 +9111,11 @@ class Viewport(QOpenGLWidget):
         the cached arrays instead of re-transforming."""
         import numpy as np
         mesh = group.mesh
-        from core.group import effective_material
         # A painted instance (issue #47) bakes its own variant of the
         # prototype: default faces in the container's paint. Unpainted
         # siblings keep sharing the plain bake.
         base = self._group_chunk(
-            _proto_wrapper(self, mesh, effective_material(group)))
+            _proto_wrapper(self, mesh, _paint_of(self, group)))
         xf = group.xform
         key = (base["uid"], tuple(xf.data()))
         cache = getattr(self, "_inst_chunks", None)
@@ -9251,9 +9299,8 @@ class Viewport(QOpenGLWidget):
         # The container's paint (issue #47) changes what default faces
         # bake to without touching the mesh, so no serial or sample can
         # notice it: it is part of the entry's identity instead.
-        from core.group import effective_material
         from core.materials import effective_attrs, material_sig
-        paint = effective_material(group)
+        paint = _paint_of(self, group)
         msig = material_sig(paint)
         if entry is not None and entry.get("msig") != msig:
             entry = None

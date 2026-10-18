@@ -46,7 +46,10 @@ follow [SemVer](https://semver.org).
   9 s, con el archivo guardado idéntico byte a byte. Si una vez el programa
   no llega a abrirse con el motor encendido, el siguiente arranque vuelve
   solo al motor de siempre y lo avisa; `--python-engine` en la línea de
-  órdenes hace lo mismo para un arranque.
+  órdenes hace lo mismo para un arranque. Con el motor encendido, el
+  enganche y la selección en esos modelos consultan un índice espacial
+  nativo para saber qué componentes mirar, y las consultas tardan la mitad
+  con el mismo resultado.
 - **Modelos grandes más fluidos** (#158), con los dos motores: orbitar,
   desplazar y hacer zoom en esa planta pasa de 86 ms a 34 ms por cuadro (de
   12 a 30 imágenes por segundo en una gráfica integrada); mover un objeto,
@@ -63,6 +66,13 @@ follow [SemVer](https://semver.org).
   selección en el visor 3D sigue en naranja.
 
 ### Corregido
+- **Pasar el cursor con Línea sobre un modelo muy grande ya no da error**
+  (#158): en modelos con más de un millón de caras en componentes, las
+  aristas de los grupos cercanas al cursor se medían en una versión del
+  índice de selección y se leían en otra, que ya había incorporado más
+  componentes; el enganche podía tomar una arista ajena o fallar con
+  «index … is out of bounds». Pasaba con los dos motores y ya estaba en la
+  0.5.8. También afectaba a seleccionar un grupo por su arista.
 - **Ratón 3D (SpaceMouse) en Windows: sin saltos y con el zoom en su
   sentido** (vídeo de revisión de Rafael García; PR #581 de @deedend como
   pista): el controlador de 3Dconnexion convierte el movimiento de la tapa

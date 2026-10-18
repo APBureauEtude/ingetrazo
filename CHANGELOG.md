@@ -17,6 +17,13 @@ follow [SemVer](https://semver.org).
   Mayús pasa de orbitar a desplazar y al revés.
 
 ### Cambiado
+- **El gestor de extensiones abre con las imágenes ya puestas.** Cada
+  apertura volvía a leer y reducir las capturas completas (algunas de más
+  de 3000 px) y las tarjetas salían con «Vista previa no disponible» antes
+  de su imagen. Ahora la miniatura ya reducida se guarda junto a las
+  capturas (y se rehace si la captura cambia), se recuerda mientras
+  IngeTrazo está abierto y las demás se preparan en segundo plano; no se
+  descarga nada que antes no se descargara.
 - **El plano de Rectángulo, Círculo y Arco en espacio vacío lo elige la
   cámara, por el origen de los ejes** (#719, @pacaeiro), como en SketchUp:
   el suelo al mirar hacia abajo y los planos verticales rojo o verde según

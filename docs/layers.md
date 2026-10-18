@@ -245,8 +245,8 @@ right one, the services with «Lines in their layer's colour».
 
 - **Export view as DXF** (composer) and **File ▸ Export ▸ Current view as
   DXF** (parallel view): each model layer is a DXF layer with **its colour,
-  line type and name**; its outlines go on «<layer>-PERFIL». The cut and the
-  hidden lines go on «<view>-CORTE» and «<view>-OCULTAS».
+  line type and name**; its outlines go on `<layer>-PERFIL`. The cut and the
+  hidden lines go on `<view>-CORTE` and `<view>-OCULTAS`.
 - The line types are defined inside the file.
 - Layer 0 keeps the CAD program's default colour.
 

@@ -11179,8 +11179,11 @@ class Viewport(QOpenGLWidget):
         mouse move; the ~dozens near the cursor cover the point/edge snaps
         the user can actually see."""
         # The placements near THIS pixel enter the index first (lazy mode,
-        # #158): the projection below reads the index as it stands.
-        self._pick_index(near=("snap", px, py))
+        # #158): the projection below reads the index as it stands, and the
+        # edges are read from that same one. Asking again bakes more and
+        # reorders the lazy part: the measured positions then pointed at
+        # other edges, or past the end (the SPR, hovering with Line).
+        idx = self._pick_index(near=("snap", px, py))
         proj = self._gedge_screen()
         if proj is None:
             return []
@@ -11198,8 +11201,6 @@ class Viewport(QOpenGLWidget):
         cand = np.where(d < radius_px)[0]
         if len(cand) > cap:
             cand = cand[np.argsort(d[cand])[:cap]]
-        idx = self._pick_index(near=("snap", px, py))
-        ga, gb = idx.gedge_a, idx.gedge_b
         return [_group_pseudo_edge(idx, int(i)) for i in cand]
 
     def pick_edge_any(self, screen_x: float, screen_y: float):
@@ -11209,6 +11210,9 @@ class Viewport(QOpenGLWidget):
         the reference lock, Push/Pull level with it (groups are read
         from outside without opening them)."""
         loose = self.pick_edge(screen_x, screen_y)
+        # The index this pixel asks for, then its projection: the edge is
+        # read from the index it was measured on (see _nearby_group_edges).
+        idx = self._pick_index(near=("px", screen_x, screen_y))
         proj = self._gedge_screen()
         if proj is None:
             return loose
@@ -11228,7 +11232,7 @@ class Viewport(QOpenGLWidget):
                 dl, _t = _closest_on_segment_2d((screen_x, screen_y), pa, pb)
                 if dl <= d[i]:
                     return loose
-        return _group_pseudo_edge(self._pick_index(near=("px", screen_x, screen_y)), i)
+        return _group_pseudo_edge(idx, i)
 
     #: How close (px) the cursor must come to a component's origin or an
     #: arc's midpoint for it to enter the snap scene at all.
@@ -12456,6 +12460,8 @@ class Viewport(QOpenGLWidget):
         import numpy as np
         best_d = self.pick_threshold_px
         best_g = None
+        # The index first, then its projection (see _nearby_group_edges).
+        idx = self._pick_index(near=("px", screen_x, screen_y))
         proj = self._gedge_screen()
         if proj is not None:
             ax, ay, bx, by, ok = proj
@@ -12467,7 +12473,6 @@ class Viewport(QOpenGLWidget):
                              + (screen_y - ay) * dy) / safe, 0.0, 1.0)
                 d = np.hypot(ax + t * dx - screen_x,
                              ay + t * dy - screen_y)
-                idx = self._pick_index(near=("px", screen_x, screen_y))
                 # The index also carries the edges of the model OUTSIDE the
                 # open group (snap targets); those cannot be picked.
                 sel = getattr(idx, "gedge_sel", None)

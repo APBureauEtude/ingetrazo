@@ -5741,9 +5741,15 @@ class MainWindow(QMainWindow):
         selected and ready to Move into place. Components are ``.igz``
         (models kept for offline use, textures packed in), ``.glb`` (the
         Sketchfab CC-BY set) or ``.obj``."""
+        self.viewport.end_group_edit()
+        self._start_place_shared(
+            "bundled:" + key, lambda: self._build_bundled_component(key, name))
+
+    def _build_bundled_component(self, key: str, name: str | None):
+        """The bundled starter ``key`` read from its file, as a group ready
+        to place — ``None`` (the user told why) when it cannot be read."""
         from core.group import Group
         from core.scene import Scene as _Scene
-        self.viewport.end_group_edit()
         from core.paths import app_root
         base = app_root() / "resources" / "components"
         temp = _Scene()
@@ -5759,7 +5765,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(
                     self, tr("Insert component"),
                     tr("Component file missing: {p}", p=str(igz_path)))
-                return
+                return None
             mesh = temp.groups[0].mesh
         elif glb_path.exists():
             from formats.glb import load_glb
@@ -5772,8 +5778,7 @@ class MainWindow(QMainWindow):
             parts = _obj_parts(temp)
             if parts is not None:
                 parts.name = name or tr(key.capitalize())
-                self._start_place(parts)
-                return
+                return parts
             mesh = temp.mesh
             if not mesh.faces and temp.groups:
                 # Big OBJs land as a reference group (formats/obj.py), not
@@ -5787,8 +5792,47 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, tr("Insert component"),
                 tr("Component file missing: {p}", p=str(glb_path)))
+            return None
+        return Group(mesh, name=name or tr(key.capitalize()))
+
+    def _start_place_shared(self, source: str, build) -> None:
+        """Place a library or bundled component, sharing its definition with
+        the copies of it already in the model.
+
+        Each pick read the file again and added a new, independent piece:
+        four of the same 12 600-face cabinet were 50 400 faces in the model,
+        and its 2 s read came back every time (Marco, 18-10). A copy now
+        shares the definition, as in SketchUp — an edit inside one reaches
+        them all, Make Unique parts one off — so the next pick is instant
+        and the model does not swell. ``build`` reads the file; it is called
+        only when no copy of ``source`` is left in the model."""
+        from PySide6.QtGui import QMatrix4x4
+        from core.group import copy_group
+        shared = self.__dict__.setdefault("_shared_components", {})
+        known = shared.get(source)
+        if known is not None:
+            mesh, base = known
+            live = next((g for g in self.viewport.scene.groups
+                         if g.mesh is mesh and g.is_component()), None)
+            if live is not None:
+                group = copy_group(live)
+                # A fresh pick, not a copy of how that one was left: back
+                # to the definition's own pose, unpainted, on no tag.
+                group.xform = QMatrix4x4(base)
+                group.hidden = group.locked = False
+                group.material = group.layer = group.ifc = None
+                group.exploded = group.explode_offset = None
+                group.axes = None
+                self._start_place(group)
+                return
+            del shared[source]
+        group = build()
+        if group is None:
             return
-        group = Group(mesh, name=name or tr(key.capitalize()))
+        if group.xform is None:
+            group.xform = QMatrix4x4()       # its mesh becomes the definition
+        group.component = True
+        shared[source] = (group.mesh, QMatrix4x4(group.xform))
         self._start_place(group)
 
     def insert_library_component(self, entry: dict) -> None:
@@ -5802,6 +5846,15 @@ class MainWindow(QMainWindow):
         so has to ask (see ``_obj_unit``). The facet seams are softened
         like the bundled starters, so a low-poly piece reads as a real one.
         """
+        self.viewport.end_group_edit()
+        self._start_place_shared(
+            "library:" + str(entry.get("id", "")),
+            lambda: self._build_library_component(entry))
+
+    def _build_library_component(self, entry: dict):
+        """The online-library model ``entry``, downloaded the first time and
+        read from its OBJ, as a group ready to place — ``None`` (the user
+        told why) when it cannot be had."""
         from core import library
         from core.group import Group
         from core.scene import Scene as _Scene
@@ -5814,22 +5867,20 @@ class MainWindow(QMainWindow):
                 self, tr("Component library"),
                 tr("Could not download “{name}”. Check your connection.",
                    name=entry.get("nombre", "")))
-            return
-        self.viewport.end_group_edit()
+            return None
         temp = _Scene()
         try:
             _obj.load_obj(temp, obj,
                            matrix=library.model_matrix(entry, obj))
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, tr("Component library"), str(exc))
-            return
+            return None
         parts = _obj_parts(temp)
         if parts is not None:
             # A model written as parts keeps them: one component to place,
             # its pieces inside (see formats.obj._pieces_group).
             parts.name = entry.get("nombre", "") or parts.name
-            self._start_place(parts)
-            return
+            return parts
         mesh = temp.mesh
         if not mesh.faces and temp.groups:
             mesh = temp.groups[0].mesh       # a big OBJ lands as a group
@@ -5837,9 +5888,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, tr("Component library"),
                 tr("“{name}” has no geometry.", name=entry.get("nombre", "")))
-            return
+            return None
         soften_smooth_edges(mesh, cos_threshold=0.55)
-        self._start_place(Group(mesh, name=entry.get("nombre", "")))
+        return Group(mesh, name=entry.get("nombre", ""))
 
     def _on_open_library(self) -> None:
         from views.library_dialog import LibraryDialog

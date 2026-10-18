@@ -301,3 +301,36 @@ def test_pick_vertex_dense_hidden_corners(monkeypatch):
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()
+
+
+@pytest.mark.parametrize("view", ["iso", "front", "back", "top", "left"])
+def test_the_native_rays_hide_exactly_what_numpy_hides(viewport, view,
+                                                       monkeypatch):
+    """With the experimental engine on, ``_occluded_many``'s Möller–Trumbore
+    block runs in core/occlusion.rs; a ray it cannot call bit for bit comes
+    back to NumPy. Either way the answer is NumPy's, point for point —
+    points on faces and at their corners included (the threshold cases)."""
+    import views.viewport as vv
+    if vv._occlusion_native() is None:
+        pytest.skip("the native engine is off or not built")
+    vp = viewport
+    vp.camera.set_view(view)
+    vp.camera.fit_to(V(-5, -3, 0), V(5, 3, 4))
+    _app.processEvents()
+    pts = _scene_points(vp.scene, random.Random("native" + view), 600)
+    calls = []
+    real = vv._occlusion_native()
+
+    class Spy:
+        def occlusion_span(self, *a):
+            out = real.occlusion_span(*a)
+            calls.append(int(out[1].sum()))
+            return out
+    monkeypatch.setattr(vv, "_occlusion_native", lambda: Spy())
+    native = [h for k in range(0, len(pts), 40)
+              for h in vp._occluded_many(pts[k:k + 40])]
+    monkeypatch.setattr(vv, "_occlusion_native", lambda: None)
+    numpy_ = [h for k in range(0, len(pts), 40)
+              for h in vp._occluded_many(pts[k:k + 40])]
+    assert native == numpy_
+    assert calls                              # the kernel did answer

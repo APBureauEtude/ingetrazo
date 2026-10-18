@@ -73,6 +73,16 @@ follow [SemVer](https://semver.org).
   componentes; el enganche podía tomar una arista ajena o fallar con
   «index … is out of bounds». Pasaba con los dos motores y ya estaba en la
   0.5.8. También afectaba a seleccionar un grupo por su arista.
+- **Inferencias más ligeras sobre modelos densos** (#158): la inferencia
+  «En arista» comprobaba si cada arista cercana estaba tapada, una por una,
+  aunque solo se queda con la más cercana visible; ahora pregunta desde la
+  más cercana y en tandas. Con el motor Rust encendido, además, esas
+  comprobaciones de «¿está tapado?» se calculan en el módulo nativo (las
+  pocas que quedan al límite de la precisión las sigue respondiendo el
+  cálculo de siempre, así que el punto enganchado es el mismo). Pasar el
+  cursor con Línea sobre una planta industrial de 4,7 millones de caras: el
+  movimiento más lento pasa de 28,7 s a 5,2 s y el gesto entero de 204 s a
+  103 s.
 - **Ratón 3D (SpaceMouse) en Windows: sin saltos y con el zoom en su
   sentido** (vídeo de revisión de Rafael García; PR #581 de @deedend como
   pista): el controlador de 3Dconnexion convierte el movimiento de la tapa

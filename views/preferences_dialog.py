@@ -19,8 +19,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QFontDatabase, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -275,6 +275,25 @@ class PreferencesDialog(QDialog):
                 "macOS is not supported yet."))
         status.setWordWrap(True)
         form.addRow("", status)
+        # Live reading: nobody on the team has a device, so an owner can say
+        # which number each move of the cap changes and which way IngeTrazo
+        # takes it — one look settles a sign (#108, the 12-10 video).
+        if name:
+            hint = QLabel(tr("Live reading — move the cap one way at a time:"))
+            hint.setWordWrap(True)
+            form.addRow("", hint)
+            self._ndof_raw = QLabel("—")
+            self._ndof_read = QLabel("—")
+            mono = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+            for lab in (self._ndof_raw, self._ndof_read):
+                lab.setFont(mono)
+                lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                form.addRow("", lab)
+            dev = shared_input()
+            dev.raw.connect(self._show_ndof_raw)
+            dev.motion.connect(self._show_ndof_read)
+            # The device outlives the dialog: let go when it closes.
+            self.finished.connect(self._drop_ndof_monitor)
         tabs.addTab(mouse3d, tr("3D Mouse"))
 
         # ---- Import ---------------------------------------------------------
@@ -388,6 +407,27 @@ class PreferencesDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _drop_ndof_monitor(self, _result=0) -> None:
+        from views.ndof_input import shared_input
+        dev = shared_input()
+        for sig, slot in ((dev.raw, self._show_ndof_raw),
+                          (dev.motion, self._show_ndof_read)):
+            try:
+                sig.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _show_ndof_raw(self, values) -> None:
+        names = ("X", "Y", "Z", "RX", "RY", "RZ")
+        self._ndof_raw.setText(tr("Device:") + "  " + "  ".join(
+            f"{n} {v:+5d}" for n, v in zip(names, values)))
+
+    def _show_ndof_read(self, sample, _dt) -> None:
+        self._ndof_read.setText(tr(
+            "IngeTrazo: right {r:+.2f}  up {u:+.2f}  forward {f:+.2f}  "
+            "tilt {t:+.2f}  twist {s:+.2f}", r=sample.right, u=sample.up,
+            f=sample.forward, t=sample.tilt, s=sample.spin))
 
     def show_units_page(self) -> None:
         """Open on the Units page (Window ▸ Units…, Ctrl+U)."""

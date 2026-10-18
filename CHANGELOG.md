@@ -7,6 +7,23 @@ follow [SemVer](https://semver.org).
 ## [Sin publicar]
 
 ### Añadido
+- **«En el eje» al empezar Línea, Rectángulo, Círculo y Arco** (#546, #718,
+  @pacaeiro): en espacio vacío, el primer punto se engancha a los ejes rojo,
+  verde y azul, como ya hacía la Cinta. Solo cuando no hay nada mejor bajo
+  el cursor: nunca sobre una cara, ni con el eje tapado por el modelo o
+  visto de punta.
+- **Cambiar entre órbita y desplazamiento sin soltar la rueda** (#231, #720,
+  @pacaeiro): durante el arrastre con el botón central, pulsar o soltar
+  Mayús pasa de orbitar a desplazar y al revés.
+
+### Cambiado
+- **El plano de Rectángulo, Círculo y Arco en espacio vacío lo elige la
+  cámara, por el origen de los ejes** (#719, @pacaeiro), como en SketchUp:
+  el suelo al mirar hacia abajo y los planos verticales rojo o verde según
+  hacia dónde mira la vista; antes iban al plano por el centro del modelo.
+  En vistas casi a ras, donde antes el clic no daba punto, ahora sí lo da.
+  La forma se ve del color de su plano mientras se traza. Línea, Cinta y
+  Cota no cambian.
 - **Motor Rust experimental** (apagado por defecto): en Ventana ▸
   Preferencias ▸ General, «Motor Rust (experimental)» calcula las partes
   más pesadas con un módulo nativo nuevo, y se aplica al volver a abrir el
@@ -46,6 +63,50 @@ follow [SemVer](https://semver.org).
   selección en el visor 3D sigue en naranja.
 
 ### Corregido
+- **Ratón 3D (SpaceMouse) en Windows: sin saltos y con el zoom en su
+  sentido** (vídeo de revisión de Rafael García; PR #581 de @deedend como
+  pista): el controlador de 3Dconnexion convierte el movimiento de la tapa
+  en giros de la rueda del ratón para los programas que no conoce, y esos
+  pasos de zoom (unos ocho por segundo) se sumaban a la lectura directa del
+  aparato. Ahora la rueda no hace nada mientras la tapa mueve la vista (por
+  encima de la zona muerta, y 0,4 s después); con la tapa quieta, la rueda
+  del ratón va como siempre. Además el eje adelante/atrás se leía con el
+  signo cambiado en Windows, así que el zoom iba al revés. Y en Preferencias
+  ▸ Ratón 3D hay una lectura en vivo: los seis números que manda el aparato
+  y cómo los entiende IngeTrazo.
+- **Una guía con coordenadas inválidas ya no impide guardar** (#723,
+  @kcgemail): el guardado se negaba entero con «un punto con coordenadas
+  inválidas … scene › guides[0] › point[0]» y el trabajo no se podía
+  guardar. Una guía es solo una ayuda para dibujar, así que ahora se deja
+  fuera del archivo, como ya pasaba con la cámara (#485); y la Cinta y el
+  Transportador ya no dejan guías así.
+- **Las caras con etiqueta propia de un .skp llegan a su capa** (#700,
+  @Aaron1992): llegaban a una capa con el número interno de la etiqueta
+  («84», «680»…) en vez de su nombre, así que ocultar «Banderas» o «Roof»
+  no las ocultaba. Pasaba en casi todos los .skp con caras etiquetadas.
+- **Las partes que se separan de un grupo etiquetado de un .skp conservan
+  su etiqueta** (#703, @Aaron1992): imágenes, figuras que miran a la cámara
+  y copias de componentes caían en Layer 0 y seguían a la vista al ocultar
+  la etiqueta del grupo.
+- **Ver todo encuadra también las imágenes de referencia visibles** (#702,
+  @Aaron1992): un plano importado para calcar, lejos del origen, se quedaba
+  fuera de la pantalla.
+- **El Asistente IA ya no cierra IngeTrazo al arrancar en algunos Flatpak**
+  (#706, @mvanhorn): pedir la fuente monoespaciada del sistema podía
+  romperse dentro del sandbox; el chat usa ahora la fuente de la
+  aplicación.
+- **Puente IA: una lámina creada con `run_python` es un paso que se puede
+  deshacer** (#715, @francisreboucas, parte de #694): antes el puente
+  respondía «sin cambios» y el deshacer del agente quitaba la edición
+  anterior del usuario.
+- Alemán: la vista trasera es «Hinten» y el relleno sólido del corte
+  «Gefüllt» (#705, @Aaron1992).
+- **La goma ya no borra las aristas que quedan detrás de una cara** (#663,
+  @SPMech): al pasar la goma por una cara para borrar una arista dibujada
+  en ella, también marcaba la arista de la cara de atrás que caía bajo el
+  cursor, y las dos se borraban. Ahora la goma solo toma las aristas que se
+  ven, igual que Seleccionar desde #71; vale también para ocultar con Mayús
+  y para el resaltado al pasar el ratón.
 - **Abrir otro documento ya no arrastra los planos de sección del
   anterior** (#602, ArchXQ IT): un archivo sin planos se abría con los del
   documento que estaba abierto antes, y al guardarlo se quedaban grabados

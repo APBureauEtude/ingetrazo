@@ -336,6 +336,23 @@ def _self_check() -> int:
         where = f"({exc})"
     print(f"  Qt buttons (opt): {where}")
 
+    # Qt's HTTPS (extension manager, map tiles): the Windows package ships
+    # no OpenSSL backend, so Qt never picks up a foreign libssl left in
+    # System32 (#564). Read from the plugin folder: asking Qt which
+    # backends exist would itself load OpenSSL.
+    if sys.platform == "win32":
+        try:
+            from PySide6.QtCore import QLibraryInfo
+            tls = Path(QLibraryInfo.path(
+                QLibraryInfo.LibraryPath.PluginsPath)) / "tls"
+            have = sorted(p.stem for p in tls.glob("*.dll"))
+        except Exception as exc:  # noqa: BLE001
+            have, tls = [], f"({exc})"
+        print(f"  TLS (Qt)       : {', '.join(have) or 'none'}  {tls}")
+        if is_frozen() and ("qopensslbackend" in have
+                            or "qschannelbackend" not in have):
+            problems.append("Qt TLS backend")
+
     if problems:
         print(f"\nNOT OK — missing: {', '.join(problems)}")
         return 1

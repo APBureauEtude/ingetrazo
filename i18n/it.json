@@ -2968,5 +2968,8 @@
  "This build of IngeTrazo does not carry the Rust engine.": "Questa versione di IngeTrazo non include il motore Rust.",
  "Computes the heavy parts (hidden lines of the sheets and more) with the new native engine, much faster on big models. It is a test: keep a copy of your files and report anything odd with the label rust-engine. Takes effect at the next start.": "Calcola le parti pesanti (linee nascoste delle tavole e altro) con il nuovo motore nativo, molto più veloce sui modelli grandi. È una prova: tieni una copia dei tuoi file e segnala qualsiasi anomalia con l'etichetta rust-engine. Ha effetto al prossimo avvio.",
  "Restart IngeTrazo to switch the engine.": "Riavvia IngeTrazo per cambiare motore.",
- "IngeTrazo did not open the last time with the experimental Rust engine on, so it is back on the normal engine. You can turn it on again in Preferences ▸ General.": "L'ultima volta IngeTrazo non si è aperto con il motore Rust sperimentale attivo, quindi è tornato al motore normale. Puoi riattivarlo in Preferenze ▸ Generale."
+ "IngeTrazo did not open the last time with the experimental Rust engine on, so it is back on the normal engine. You can turn it on again in Preferences ▸ General.": "L'ultima volta IngeTrazo non si è aperto con il motore Rust sperimentale attivo, quindi è tornato al motore normale. Puoi riattivarlo in Preferenze ▸ Generale.",
+ "Live reading — move the cap one way at a time:": "Lettura dal vivo — muovi il cappuccio in una sola direzione alla volta:",
+ "Device:": "Dispositivo:",
+ "IngeTrazo: right {r:+.2f}  up {u:+.2f}  forward {f:+.2f}  tilt {t:+.2f}  twist {s:+.2f}": "IngeTrazo: destra {r:+.2f}  su {u:+.2f}  avanti {f:+.2f}  inclina {t:+.2f}  ruota {s:+.2f}"
 }

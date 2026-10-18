@@ -793,7 +793,10 @@ def save_scene(scene, path: Path) -> dict:
         payload["text_labels"] = [t.to_dict() for t in labels]
     guides = getattr(scene, "guides", None)
     if guides:
-        payload["guides"] = [g.to_dict() for g in guides]
+        # A guide at NaN is left out instead of refusing the save (#723):
+        # it is only scaffolding, and the loader drops it anyway (#185).
+        payload["guides"] = [g.to_dict() for g in guides
+                             if not hasattr(g, "is_finite") or g.is_finite()]
     # Reference images. Written BEFORE the packing step below on purpose:
     # each entry hangs its file under a "texture" key, so the same walk that
     # embeds face textures embeds the scans too.

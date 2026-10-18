@@ -1247,6 +1247,7 @@ class Viewport(QOpenGLWidget):
         # Camera navigation state (middle button)
         self._last_pos = None
         self._pan_mode = False
+        self._middle_drag_active = False
         #: where the current orbit gesture turns (#164); None = the target
         self._orbit_pivot = None
         # A mouse-look drag for a tool with ``on_look`` (First Person):
@@ -8248,7 +8249,27 @@ class Viewport(QOpenGLWidget):
         # only means something within a plane. Stashed instead of asked for
         # again: this runs on every mouse move, and the answer can cost a pick.
         self._last_work_plane = (plane_point, plane_normal)
-        hit = self._ray_plane(origin, direction, plane_point, plane_normal)
+        tool = self.active_tool
+        allow_planar_grazing = False
+        if (tool is not None
+                and getattr(tool, "start_point", None) is None
+                and getattr(tool, "work_plane", None) is None
+                and getattr(tool, "plane_lock", None) is None
+                and getattr(tool, "plane_ref", None) is None):
+            from tools.base import PlaneLock
+            if isinstance(tool, PlaneLock):
+                from core import axes
+                normal = QVector3D(plane_normal).normalized()
+                through_origin = (
+                    (QVector3D(plane_point) - axes.origin()).length() < 1e-5)
+                principal = any(
+                    abs(QVector3D.dotProduct(normal, axes.axis(name))) > 0.999
+                    for name in ("x", "y", "z")
+                )
+                allow_planar_grazing = through_origin and principal
+        hit = self._ray_plane(
+            origin, direction, plane_point, plane_normal,
+            allow_grazing=allow_planar_grazing)
         if hit is not None:
             return hit
         # The ray only grazes the work plane here, so the intersection is
@@ -8345,7 +8366,8 @@ class Viewport(QOpenGLWidget):
         return face_plane
 
     def _ray_plane(self, origin: QVector3D, direction: QVector3D,
-                   plane_point: QVector3D, plane_normal: QVector3D
+                   plane_point: QVector3D, plane_normal: QVector3D,
+                   *, allow_grazing: bool = False,
                    ) -> Optional[QVector3D]:
         """Ray/plane hit, or ``None`` when it is behind the camera or the ray
         merely grazes the plane."""
@@ -8354,12 +8376,101 @@ class Viewport(QOpenGLWidget):
             return None
         normal = plane_normal / length
         denom = QVector3D.dotProduct(normal, direction)
-        if abs(denom) < math.sin(math.radians(self.GRAZING_PLANE_DEG)):
+        if abs(denom) < 1e-12:
+            return None
+        if (not allow_grazing
+                and abs(denom) < math.sin(math.radians(
+                    self.GRAZING_PLANE_DEG))):
             return None
         t = QVector3D.dotProduct(normal, plane_point - origin) / denom
         if t < 0:
             return None
         return origin + direction * t
+
+    #: XY stays the ground in shallow views and where its cursor-ray hit is
+    #: reasonably close compared with the two vertical global planes.
+    GROUND_PREFERENCE_ANGLE_DEG = 5.0
+    GROUND_DEPTH_PREFERENCE_RATIO = 1.25
+    PERSPECTIVE_GROUND_DEPTH_PREFERENCE_RATIO = 10.0
+    PLANE_ALIGNMENT_TIE_MARGIN = 0.05
+
+    def _camera_planar_work_plane(
+        self, cursor: Optional[tuple[float, float]] = None,
+    ) -> Optional[tuple[QVector3D, QVector3D]]:
+        """Choose XY as floor/ceiling when preferred, otherwise XZ or YZ.
+
+        The vertical planes compete by their alignment with the local cursor
+        ray. XY remains the ground (or ceiling when viewed from below), with
+        a depth preference that avoids mapping a nearby cursor to an
+        implausibly distant point on the floor.
+        """
+        from core import axes
+        origin = axes.origin()
+        view = self.camera.target - self.camera.eye()
+        if view.lengthSquared() < 1e-18:
+            return None
+        view.normalize()
+        ray_origin = self.camera.eye()
+        ray_direction = view
+        cursor_origin: Optional[QVector3D] = None
+        cursor_direction: Optional[QVector3D] = None
+        if cursor is not None:
+            cursor_origin, cursor_direction = self._pixel_to_ray(*cursor)
+            if cursor_origin is not None and cursor_direction is not None:
+                ray_origin = cursor_origin
+                ray_direction = cursor_direction.normalized()
+
+        normals = {name: axes.axis(name) for name in ("x", "y", "z")}
+        hits: dict[str, tuple[QVector3D, float]] = {}
+        if ray_origin is not None:
+            for name, normal in normals.items():
+                hit = self._ray_plane(
+                    ray_origin, ray_direction, origin, normal,
+                    allow_grazing=True)
+                if hit is None:
+                    continue
+                depth = (
+                    (hit - self.camera.eye()).length()
+                    if self.camera.perspective
+                    else QVector3D.dotProduct(hit - self.camera.eye(), view)
+                )
+                if depth >= 0:
+                    hits[name] = hit, depth
+
+        horizontal_angle = math.degrees(math.asin(min(
+            1.0, abs(QVector3D.dotProduct(view, normals["z"])))))
+        if "z" in hits:
+            vertical_depths = [
+                hits[name][1] for name in ("x", "y") if name in hits]
+            depth_ratio = (
+                self.GROUND_DEPTH_PREFERENCE_RATIO
+                if horizontal_angle <= self.GROUND_PREFERENCE_ANGLE_DEG
+                else self.PERSPECTIVE_GROUND_DEPTH_PREFERENCE_RATIO
+            )
+            if (not vertical_depths
+                    or hits["z"][1] <= min(vertical_depths) * depth_ratio):
+                return origin, normals["z"]
+
+        alignment = {
+            name: abs(QVector3D.dotProduct(ray_direction, normals[name]))
+            for name in ("x", "y")
+        }
+        candidates = {"x", "y"}
+        if cursor_origin is not None and cursor_direction is not None:
+            candidates = {
+                name for name in candidates
+                if self._ray_plane(
+                    cursor_origin, cursor_direction, origin, normals[name],
+                    allow_grazing=True) is not None
+            }
+        if not candidates:
+            candidates = {"x", "y"}
+        normal_name = max(candidates, key=alignment.__getitem__)
+        if (candidates == {"x", "y"}
+                and abs(alignment["x"] - alignment["y"])
+                <= self.PLANE_ALIGNMENT_TIE_MARGIN):
+            normal_name = "y"
+        return origin, normals[normal_name]
 
     # When the camera is at least this tilted off the horizon, the work plane
     # stays horizontal (XY) — that covers top, iso, and most architectural
@@ -8424,6 +8535,12 @@ class Viewport(QOpenGLWidget):
 
         start = getattr(tool, "start_point", None) if tool is not None else None
         if start is None:
+            from core import axes
+            from tools.base import PlaneLock
+            if isinstance(tool, PlaneLock):
+                locked = tool.locked_work_plane(axes.origin())
+                if locked is not None:
+                    return locked
             # First-click hover: if the cursor is over an existing face —
             # loose OR a group's (drawing/measuring on top of an imported
             # reference model) — use that face's plane so a new polygon
@@ -8440,6 +8557,10 @@ class Viewport(QOpenGLWidget):
                 image = self.image_plane_at(cursor[0], cursor[1])
                 if image is not None:
                     return image.plane()
+            if isinstance(tool, PlaneLock) and cursor is not None:
+                plane = self._camera_planar_work_plane(cursor)
+                if plane is not None:
+                    return plane
             # In an axis-aligned (standard) view, an unsnapped first point
             # belongs on the plane FACING the camera through the model
             # centre — so measuring/drawing in a front view stays in the
@@ -11690,6 +11811,22 @@ class Viewport(QOpenGLWidget):
                 best = name
         return best
 
+    def _axis_source_visible(self, name: str, point: QVector3D) -> bool:
+        """Whether an axis has a visible screen direction at ``point``.
+
+        An axis viewed end-on has no usable screen direction; near its
+        vanishing point a small world step must still move visibly on screen.
+        """
+        from core import axes as _axes
+        axis = _axes.axis(name)
+        half_step = 0.25
+        before = self._world_to_pixel(point - axis * half_step)
+        after = self._world_to_pixel(point + axis * half_step)
+        if before is None or after is None:
+            return False
+        return math.hypot(after[0] - before[0],
+                          after[1] - before[1]) >= 0.5
+
     def pick_guide(self, screen_x: float, screen_y: float):
         """Return the construction guide nearest the cursor within the pick
         threshold, or ``None`` (for the Eraser)."""
@@ -12895,10 +13032,24 @@ class Viewport(QOpenGLWidget):
         self._last_pos = None
         self._orbit_pivot = None
         self._pan_mode = False
+        self._middle_drag_active = False
         if self.nav_mode is not None:
             self._apply_nav_cursor()
         else:
             self._apply_tool_cursor()
+
+    def _set_middle_drag_pan_mode(self, pan: bool) -> None:
+        """Switch an active MMB drag between orbit and pan."""
+        if not self._middle_drag_active or self.nav_mode is not None:
+            return
+        pan = bool(pan)
+        if self._pan_mode == pan:
+            return
+        self._pan_mode = pan
+        from views.icons import tool_cursor
+        cur = tool_cursor("pan" if pan else "orbit")
+        if cur is not None:
+            self.setCursor(cur)
 
     def set_nav_mode(self, mode: Optional[str]) -> None:
         """Enter a camera navigation mode ("orbit" / "pan").
@@ -12917,6 +13068,7 @@ class Viewport(QOpenGLWidget):
         self._last_pos = None             # a drag in progress ends here
         self._orbit_pivot = None
         self._pan_mode = False
+        self._middle_drag_active = False
         if mode is not None:
             self._apply_nav_cursor()      # orbit / pan / magnifier icons
         else:
@@ -13013,6 +13165,7 @@ class Viewport(QOpenGLWidget):
         if ev.button() == Qt.MiddleButton:
             self._last_pos = ev.position().toPoint()
             self._pan_mode = bool(ev.modifiers() & Qt.ShiftModifier)
+            self._middle_drag_active = True
             self._orbit_pivot = self._orbit_pivot_at(
                 ev.position().x(), ev.position().y())
             self._pan_depth = self._depth_of(self._orbit_pivot)
@@ -13239,6 +13392,9 @@ class Viewport(QOpenGLWidget):
             # «el orbital se mantiene activo… no se desactiva con nada»
             # (Andrés Rodríguez, Windows 11 + NVIDIA, 0.5.0).
             self._end_camera_drag()
+        if self._middle_drag_active:
+            self._set_middle_drag_pan_mode(
+                bool(ev.modifiers() & Qt.ShiftModifier))
         if self._last_pos is not None:
             p = ev.position().toPoint()
             dx = p.x() - self._last_pos.x()
@@ -13508,6 +13664,7 @@ class Viewport(QOpenGLWidget):
             self._last_pos = None
             self._orbit_pivot = None
             self._pan_mode = False
+            self._middle_drag_active = False
             if self.nav_mode is not None:
                 self._apply_nav_cursor()
             else:
@@ -13670,6 +13827,14 @@ class Viewport(QOpenGLWidget):
         return None
 
     def wheelEvent(self, ev) -> None:
+        # While a 3D mouse moves the view, wheel notches are its driver's
+        # imitation of the same push (3Dconnexion does that for programs it
+        # does not know): zooming on them too made the view jump a step
+        # about eight times a second over the smooth move.
+        from views.ndof_input import cap_in_use
+        if cap_in_use():
+            ev.accept()
+            return
         self._input_t = _time_mod.monotonic()   # P0: input→paint latency
         # Zoom toward the cursor: keep the point under the
         # pointer fixed on screen, not the origin. During a wheel burst the
@@ -13822,6 +13987,7 @@ class Viewport(QOpenGLWidget):
             # outlives the key, so the Shift release must not undo it.
             self._shift_plane_mark = None
         if ev.key() == Qt.Key_Shift and not ev.isAutoRepeat():
+            self._set_middle_drag_pan_mode(True)
             self._capture_shift_lock()
             self._refresh_snap()
             # Do not return — Shift is a modifier; let the rest fall through.
@@ -14193,6 +14359,7 @@ class Viewport(QOpenGLWidget):
                 ev.accept()
                 return
         if ev.key() == Qt.Key_Shift and not ev.isAutoRepeat():
+            self._set_middle_drag_pan_mode(False)
             self._shift_lock = None
             self._release_shift_plane_mark()
             self._refresh_snap()

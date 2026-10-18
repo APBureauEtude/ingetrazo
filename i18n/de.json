@@ -122,7 +122,7 @@
  "BIM objects: {n}": "BIM-Objekte: {n}",
  "BIM tagging": "BIM-Klassifizierung",
  "BOUNDING BOX": "BEGRENZUNGSRAHMEN",
- "Back": "Rückseite",
+ "Back": "Hinten",
  "Back color:": "Rückseitenfarbe:",
  "Back color — paints faces seen from behind": "Rückseitenfarbe — färbt Flächen, die von hinten gesehen werden",
  "Back color saved — it paints back faces in Textures, Shaded, Monochrome and X-ray modes.": "Rückseitenfarbe gespeichert — sie färbt Rückseiten in den Modi Texturen, Schattiert, Monochrom und Röntgen.",
@@ -1566,7 +1566,7 @@
  "Every other edge, between two visible faces.": "Alle anderen Kanten, zwischen zwei sichtbaren Flächen.",
  "Draw profiles thicker": "Profile dicker zeichnen",
  "Off, every edge uses the Edges pen (recomputes the view).": "Ausgeschaltet verwendet jede Kante den Kanten-Stift (berechnet die Ansicht neu).",
- "Solid": "Voll",
+ "Solid": "Gefüllt",
  "Hatched 45°": "Schraffur 45°",
  "Fill where the section plane slices a solid (the poché). Only closed solids fill; an open surface stays white.": "Füllung, wo die Schnittebene einen Körper schneidet (Poché). Nur geschlossene Körper werden gefüllt; eine offene Fläche bleibt weiß.",
  "Section fill": "Schnittfüllung",
@@ -2967,5 +2967,8 @@
  "This build of IngeTrazo does not carry the Rust engine.": "Diese IngeTrazo-Version enthält den Rust-Rechenkern nicht.",
  "Computes the heavy parts (hidden lines of the sheets and more) with the new native engine, much faster on big models. It is a test: keep a copy of your files and report anything odd with the label rust-engine. Takes effect at the next start.": "Berechnet die aufwendigen Teile (verdeckte Linien der Blätter und mehr) mit dem neuen nativen Rechenkern, bei großen Modellen viel schneller. Es ist ein Test: Bewahre eine Kopie deiner Dateien auf und melde Auffälliges mit dem Label rust-engine. Wirkt beim nächsten Start.",
  "Restart IngeTrazo to switch the engine.": "Starte IngeTrazo neu, um den Rechenkern zu wechseln.",
- "IngeTrazo did not open the last time with the experimental Rust engine on, so it is back on the normal engine. You can turn it on again in Preferences ▸ General.": "IngeTrazo hat sich beim letzten Mal mit der experimentellen Rust-Engine nicht geöffnet und ist daher zur normalen Engine zurückgekehrt. Sie können sie unter Einstellungen ▸ Allgemein wieder einschalten."
+ "IngeTrazo did not open the last time with the experimental Rust engine on, so it is back on the normal engine. You can turn it on again in Preferences ▸ General.": "IngeTrazo hat sich beim letzten Mal mit der experimentellen Rust-Engine nicht geöffnet und ist daher zur normalen Engine zurückgekehrt. Sie können sie unter Einstellungen ▸ Allgemein wieder einschalten.",
+ "Live reading — move the cap one way at a time:": "Live-Anzeige — die Kappe jeweils nur in eine Richtung bewegen:",
+ "Device:": "Gerät:",
+ "IngeTrazo: right {r:+.2f}  up {u:+.2f}  forward {f:+.2f}  tilt {t:+.2f}  twist {s:+.2f}": "IngeTrazo: rechts {r:+.2f}  hoch {u:+.2f}  vor {f:+.2f}  kippen {t:+.2f}  drehen {s:+.2f}"
 }

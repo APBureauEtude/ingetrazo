@@ -134,6 +134,14 @@ jobs:
           done
           # …y sin la segunda copia de las DLL en la raíz (31 MB de sobra).
           test ! -e dist/ingetrazo/_internal/libredwg-0.dll
+          # Qt va por schannel: sin su backend OpenSSL ni las DLL -x64, una
+          # libssl ajena en System32 ya no rompe el gestor (#564). La
+          # OpenSSL de Python (libssl-3.dll, sin -x64) sí se queda.
+          test ! -e dist/ingetrazo/_internal/PySide6/plugins/tls/qopensslbackend.dll
+          test -f dist/ingetrazo/_internal/PySide6/plugins/tls/qschannelbackend.dll
+          test ! -e dist/ingetrazo/_internal/libssl-3-x64.dll
+          test ! -e dist/ingetrazo/_internal/libcrypto-3-x64.dll
+          test -f dist/ingetrazo/_internal/libssl-3.dll
           # Y el mismo --check que ya corren el tar, el AppImage y el snap
           # (release.yml), que Windows no tenía: cubre estos archivos y los
           # que se añadan después, sin que haya que acordarse de listarlos

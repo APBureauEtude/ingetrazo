@@ -17,6 +17,18 @@ follow [SemVer](https://semver.org).
   Mayús pasa de orbitar a desplazar y al revés.
 
 ### Cambiado
+- **Elegir otra vez el mismo componente de la biblioteca pone una copia
+  del mismo componente.** Cada vez se volvía a leer el archivo del modelo
+  y se añadía una pieza nueva e independiente: cuatro veces el mismo
+  mueble de 12 600 caras eran 50 400 caras en el modelo y la lectura de
+  2 s se repetía cada vez. Ahora la primera vez se coloca un componente y
+  las siguientes son copias que comparten su definición, como en
+  SketchUp (editar una cambia todas; «Hacer único» separa una). Vale para
+  la biblioteca en línea y para los componentes incluidos. Medido con 40
+  inserciones de 10 modelos: cargar el modelo pasa de 440 a 30 ms
+  (mediana; el peor, de 2,2 a 0,13 s) y colocarlo de 286 a 118 ms. La
+  ventana de la biblioteca pinta además su primera pantalla de
+  miniaturas al abrir, sin esperar un ciclo.
 - **El gestor de extensiones abre con las imágenes ya puestas.** Cada
   apertura volvía a leer y reducir las capturas completas (algunas de más
   de 3000 px) y las tarjetas salían con «Vista previa no disponible» antes

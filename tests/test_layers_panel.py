@@ -519,6 +519,13 @@ def win():
     yield w
     w._saved_version = w.viewport.scene.version
     w.close()
+    # Closing saves the window's layout; some tests here move the Layers tab
+    # to the other side, and the next window of the run (another test file)
+    # would open with trays on both sides — wider than it may be (CI:
+    # test_the_standing_hint_never_widens_the_window). Leave none behind.
+    from PySide6.QtCore import QSettings
+    QSettings().remove("ui/window_state")
+    QSettings().remove("ui/window_geometry")
 
 
 def test_the_layers_tab_sits_beside_the_browser_and_left_properties(win):
@@ -942,6 +949,7 @@ def test_dropping_rows_files_them_in_a_folder(win):
 
 
 def test_the_drop_target_is_the_folder_under_the_pointer(win):
+    from PySide6.QtCore import QPoint
     panel = win.layers_dock.panel
     scene = win.viewport.scene
     scene.layers += [Layer("A"), Layer("B", folder="Arq")]
@@ -952,7 +960,15 @@ def test_the_drop_target_is_the_folder_under_the_pointer(win):
                                ("A", "layer", None)):
         rect = tree.visualItemRect(panel.item_for(name, kind))
         assert tree.target_folder(rect.center()) == expect
-    assert tree.target_folder(tree.viewport().rect().bottomLeft()) is None
+    # Empty space under the last row: out of any folder. The list is made
+    # tall enough to have some, whatever window size the run left.
+    tree.setMinimumHeight(400)
+    _app.processEvents()
+    rows = [panel.tree.topLevelItem(i)
+            for i in range(panel.tree.topLevelItemCount())]
+    below = max(tree.visualItemRect(it).bottom() for it in rows) + 10
+    assert below < tree.viewport().height()
+    assert tree.target_folder(QPoint(0, below)) is None
 
 
 def test_a_real_drag_and_drop_moves_the_selected_rows(win):

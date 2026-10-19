@@ -430,13 +430,18 @@ def isolate(scene, names) -> bool:
 
 def taggable(entities) -> list:
     """The entities a layer is assigned to — faces, edges, groups and
-    components, dimensions, leader texts, section planes."""
+    components, dimensions, leader texts, section planes, guides and
+    reference images. The one list Entity Info, the right-click, the
+    Layers panel and its toolbar all ask."""
     from core.dimension import Dimension
     from core.group import Group
+    from core.guide import Guide
+    from core.image_plane import ImagePlane
     from core.mesh import Edge, Face
     from core.section import SectionPlane
     from core.textlabel import TextLabel
-    kinds = (Face, Edge, Group, Dimension, TextLabel, SectionPlane)
+    kinds = (Face, Edge, Group, Dimension, TextLabel, SectionPlane, Guide,
+             ImagePlane)
     return [e for e in entities or () if isinstance(e, kinds)]
 
 
@@ -578,8 +583,8 @@ def _release_active(scene) -> bool:
 
 def object_ids(scene) -> set:
     """Identity of every object in the document — groups and components at
-    any depth (by ``id`` and by ``uid``), dimensions, leader texts. Compared
-    before and after a command to find what it created
+    any depth (by ``id`` and by ``uid``), dimensions, leader texts,
+    guides. Compared before and after a command to find what it created
     (:func:`tag_new_objects`)."""
     from core.purge import iter_groups
     ids: set = set()
@@ -587,24 +592,80 @@ def object_ids(scene) -> set:
         ids.add(id(g))
         if getattr(g, "uid", None):
             ids.add(g.uid)
-    for coll in ("dimensions", "text_labels"):
+    for coll in ("dimensions", "text_labels", "guides"):
         ids.update(id(o) for o in getattr(scene, coll, None) or ())
     return ids
+
+
+#: The layers guides, dimensions and leader texts go to by themselves while
+#: no layer is active: ``(scene collection, English name)``. The name is
+#: translated when the layer is made, so a Spanish document gets «Guías»,
+#: «Cotas» and «Textos».
+AUTO_LAYERS = (("guides", "Guides"), ("dimensions", "Dimensions"),
+               ("text_labels", "Texts"))
+
+
+def auto_ids(scene) -> set:
+    """Identity of the guides, dimensions and texts in the document — the
+    cheap «before» of a command run with no active layer
+    (:func:`tag_new_objects` then only looks at those lists)."""
+    ids: set = set()
+    for coll, _name in AUTO_LAYERS:
+        ids.update(id(o) for o in getattr(scene, coll, None) or ())
+    return ids
+
+
+def auto_layer(scene, english: str) -> str:
+    """The automatic layer for ``english`` («Guides», «Dimensions»,
+    «Texts») in the interface language, made the first time it is needed.
+    One the user hid or locked hands back to the default layer: nothing
+    new is ever drawn straight into hiding, as with the active layer."""
+    from core.i18n import tr
+    name = tr(english)
+    ly = scene.layer(name)
+    if ly is None:
+        scene.layers.append(Layer(name))
+        return name
+    if not ly.visible or ly.locked:
+        return DEFAULT_LAYER
+    return name
+
+
+def _tag_automatic(scene, before: set) -> int:
+    """With no layer active, the new guides go onto «Guides», the new
+    dimensions onto «Dimensions» and the new texts onto «Texts»
+    (scaffolding and annotation are what is switched off all at once);
+    everything else stays where it was."""
+    n = 0
+    for coll, english in AUTO_LAYERS:
+        fresh = [o for o in getattr(scene, coll, None) or ()
+                 if id(o) not in before and layer_of(o) == DEFAULT_LAYER]
+        if not fresh:
+            continue
+        name = auto_layer(scene, english)
+        if name == DEFAULT_LAYER:
+            continue
+        for obj in fresh:
+            assign_layer(obj, name)
+            n += 1
+    return n
 
 
 def tag_new_objects(scene, before: set) -> int:
     """Put the objects a command created on the active layer.
 
-    A group, a component, a dimension or a leader text made while a layer
-    is active goes onto it; loose lines and faces stay on the default
+    A group, a component, a dimension, a leader text or a guide made while
+    a layer is active goes onto it; loose lines and faces stay on the default
     layer (a layer hidden never leaves half a solid). Only the outermost
     new object is tagged: a new group's own children follow it. One that
-    already carries a layer (a copy, a pasted object) keeps its own.
+    already carries a layer (a copy, a pasted object) keeps its own. With
+    no layer active, guides, dimensions and texts go to their automatic
+    layers (:data:`AUTO_LAYERS`) — ``before`` is then :func:`auto_ids`.
     Returns how many objects were tagged."""
     from core.purge import iter_groups
     name = active_layer(scene)
     if name == DEFAULT_LAYER:
-        return 0
+        return _tag_automatic(scene, before)
     # A copy that REPLACES an object (Make Unique, Replace Component…)
     # keeps its uid: that one is not new, and keeps the layer it had.
     fresh = [g for g in iter_groups(getattr(scene, "groups", None) or ())
@@ -614,7 +675,7 @@ def tag_new_objects(scene, before: set) -> int:
     # the default layer and follow their container.
     inner = {id(c) for g in fresh for c in getattr(g, "children", None) or ()}
     fresh = [g for g in fresh if id(g) not in inner]
-    for coll in ("dimensions", "text_labels"):
+    for coll in ("dimensions", "text_labels", "guides"):
         fresh += [o for o in getattr(scene, coll, None) or ()
                   if id(o) not in before]
     n = 0

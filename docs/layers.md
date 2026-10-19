@@ -1,9 +1,9 @@
 # Layers
 
-Layers organise the model. Every object, face, edge, dimension, text and
-section plane carries a layer, and with it you decide **what is seen**,
-**what can be touched**, **where new things go** and **how they come out on
-the sheets and in DXF**.
+Layers organise the model. Every object, face, edge, dimension, text,
+section plane, guide and reference image carries a layer, and with it you
+decide **what is seen**, **what can be touched**, **where new things go**
+and **how they come out on the sheets and in DXF**.
 
 Everything in this manual can be tried with the example document
 `examples/capas-prueba.igz` (see [Example document](#example-document)); its
@@ -105,7 +105,7 @@ unused layers…
 ## 2. Active layer
 
 The layer with the filled **pencil** is the active one. What you create goes
-onto it: **groups, components, dimensions and texts**.
+onto it: **groups, components, dimensions, texts and guides**.
 
 **Loose lines and faces stay on Layer 0**, so hiding a layer never leaves
 half a solid. To draw «on» a layer, draw and **group**: the group goes onto
@@ -113,6 +113,14 @@ the active layer.
 
 Hiding or locking the active layer hands back to Layer 0 (nothing is ever
 drawn straight into hiding).
+
+**With no layer active, guides, dimensions and texts have a layer of
+their own:** a new guide goes onto **Guides**, a new dimension onto
+**Dimensions** and a new text onto **Texts** (named in the interface
+language), made the first time one is drawn. So the scaffolding, every
+dimension or every text is switched off with one eye. If that layer is
+hidden or locked, a new one stays on Layer 0, in sight. Groups and loose
+geometry are not affected.
 
 ---
 

@@ -795,8 +795,8 @@ class LayersPanel(QWidget):
         hi = self.tree.headerItem()
         hi.setIcon(COL_ACTIVE, _pencil_icon(True))
         hi.setToolTip(COL_ACTIVE, tr(
-            "Active layer: new groups, components, dimensions and texts "
-            "go to it"))
+            "Active layer: new groups, components, dimensions, texts and "
+            "guides go to it"))
         hi.setIcon(COL_EYE, node_icon("eye"))
         hi.setToolTip(COL_EYE, tr("Visible"))
         hi.setIcon(COL_LOCK, node_icon("lock"))
@@ -824,8 +824,8 @@ class LayersPanel(QWidget):
             "click a row's to change it"))
         hi.setTextAlignment(COL_OPACITY, Qt.AlignCenter)
         hi.setToolTip(COL_COUNT, tr(
-            "Entities on the layer: faces, edges, objects, dimensions and "
-            "texts"))
+            "Entities on the layer: faces, edges, objects, dimensions, texts, "
+            "guides and images"))
         # As in the Browser: eye and padlock first (then the isolate
         # target, as in the drop-down), the name next (the tree lines and
         # folds hang from it), then the rest.
@@ -2083,11 +2083,6 @@ class LayersPanel(QWidget):
         nothing in silence, which is how it read as broken («Asignar
         selección funcionó a la segunda», Rafael, 2026-09-16)."""
         from core.history import AssignLayerCommand
-        from core.dimension import Dimension
-        from core.group import Group
-        from core.mesh import Edge, Face
-        from core.section import SectionPlane
-        from core.textlabel import TextLabel
         scene = self._scene()
         item = self.tree.currentItem()
         if item is None or self._key(item)[0] != KIND_LAYER:
@@ -2097,9 +2092,7 @@ class LayersPanel(QWidget):
         name = self._key(item)[1]
         # Annotations are tagged too: a "Anotaciones" layer a
         # scene hides gives a clean plan without duplicating the model.
-        targets = [ent for ent in scene.selection
-                   if isinstance(ent, (Face, Edge, Group, Dimension, TextLabel,
-                                       SectionPlane))]
+        targets = L.taggable(scene.selection)
         if not targets:
             self._window.statusBar().showMessage(
                 tr("Select something in the model first, then Assign."), 3000)

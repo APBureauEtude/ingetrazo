@@ -128,7 +128,9 @@ def on_layers(scene, names) -> list:
     pool = (list(scene.edges) + list(scene.faces)
             + list(_context_groups(scene))
             + list(getattr(scene, "dimensions", None) or ())
-            + list(getattr(scene, "text_labels", None) or ()))
+            + list(getattr(scene, "text_labels", None) or ())
+            + list(getattr(scene, "guides", None) or ())
+            + list(getattr(scene, "image_planes", None) or ()))
     return [e for e in pool
             if layer_of(e) in names and scene.entity_selectable(e)]
 

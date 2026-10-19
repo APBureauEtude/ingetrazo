@@ -131,10 +131,14 @@ def test_loose_lines_and_faces_stay_on_layer_0_and_their_group_does_not():
     assert layer_of(scene.groups[-1]) == "Muros"
 
 
-def test_no_active_layer_walks_nothing_and_tags_nothing():
+def test_no_active_layer_walks_no_group_and_tags_no_group():
+    """With no layer active only the guides and dimensions are looked at
+    (they go to their automatic layers, test_layer_guides): a model's
+    thousands of groups are never walked before each command."""
     scene = Scene()
+    scene.groups.append(Group(Mesh(), name="g"))
     history = History(scene)
-    assert history._objects_before() is None
+    assert history._objects_before() == set()
     f = _square(scene.mesh)
     history.execute(MakeGroupCommand([f], list(scene.mesh.edges)))
     assert layer_of(scene.groups[-1]) == DEFAULT_LAYER

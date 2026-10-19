@@ -3078,7 +3078,7 @@
  "Default (from the sheet)": "Predefinito (dalla tavola)",
  "Line weight in mm (—: default, from the sheet) — click a row's to change it": "Spessore di linea in mm (—: predefinito, dalla tavola) — fai clic su quello di una riga per cambiarlo",
  "Show all columns": "Mostra tutte le colonne",
- "Entities on the layer: faces, edges, objects, dimensions and texts": "Entità sul livello: facce, spigoli, oggetti, quote e testi",
+ "Entities on the layer: faces, edges, objects, dimensions, texts, guides and images": "Entità sul livello: facce, spigoli, oggetti, quote, testi, guide e immagini",
  "Opaque": "Opaco",
  "Transparency of the layer's faces in the model (—: opaque) — click a row's to change it": "Trasparenza delle facce del livello nel modello (—: opaco) — fai clic su quella di una riga per cambiarla",
  "Print": "Stampa",
@@ -3087,7 +3087,7 @@
  "Print — a layer switched off here is seen in the model but left out of the sheets, their PDF and DXF; click here for every layer": "Stampa — un livello disattivato qui si vede nel modello ma non compare nelle tavole, nel loro PDF e DXF; fai clic qui per tutti i livelli",
  "On the sheets — click to leave it out of them": "Nelle tavole — fai clic per escluderlo",
  "Not printed: seen in the model, left out of the sheets — click to print it": "Non stampato: visibile nel modello, escluso dalle tavole — fai clic per stamparlo",
- "Active layer: new groups, components, dimensions and texts go to it": "Livello attivo: nuovi gruppi, componenti, quote e testi vanno qui",
+ "Active layer: new groups, components, dimensions, texts and guides go to it": "Livello attivo: nuovi gruppi, componenti, quote, testi e guide vanno qui",
  "The layer of what is selected becomes the active one: new objects go to it.": "Il livello della selezione diventa quello attivo: i nuovi oggetti vanno lì.",
  "Default columns": "Colonne predefinite",
  "Sort by name": "Ordina per nome",
@@ -3129,5 +3129,6 @@
  "Group them when there are many": "Raggrupparle quando sono molte",
  "Always in submenus": "Sempre in sottomenu",
  "Each entry on its own": "Ogni voce separata",
- "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Come appaiono le voci delle estensioni nel menu del tasto destro (subito) e nel menu Estensioni (al prossimo avvio)."
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Come appaiono le voci delle estensioni nel menu del tasto destro (subito) e nel menu Estensioni (al prossimo avvio).",
+ "Texts": "Testi"
 }

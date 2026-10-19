@@ -3085,7 +3085,7 @@
  "Default (from the sheet)": "Domyślna (z arkusza)",
  "Line weight in mm (—: default, from the sheet) — click a row's to change it": "Grubość linii w mm (—: domyślna, z arkusza) — kliknij wartość w wierszu, aby ją zmienić",
  "Show all columns": "Pokaż wszystkie kolumny",
- "Entities on the layer: faces, edges, objects, dimensions and texts": "Elementy na warstwie: ściany, krawędzie, obiekty, wymiary i teksty",
+ "Entities on the layer: faces, edges, objects, dimensions, texts, guides and images": "Elementy na warstwie: ściany, krawędzie, obiekty, wymiary, teksty, linie pomocnicze i obrazy",
  "Opaque": "Nieprzezroczysta",
  "Transparency of the layer's faces in the model (—: opaque) — click a row's to change it": "Przezroczystość ścian warstwy w modelu (—: nieprzezroczysta) — kliknij wartość w wierszu, aby ją zmienić",
  "Print": "Drukuj",
@@ -3094,7 +3094,7 @@
  "Print — a layer switched off here is seen in the model but left out of the sheets, their PDF and DXF; click here for every layer": "Drukuj — warstwa wyłączona tutaj jest widoczna w modelu, ale pomijana na arkuszach, w ich PDF i DXF; kliknij tutaj, aby zmienić wszystkie warstwy",
  "On the sheets — click to leave it out of them": "Na arkuszach — kliknij, aby ją pominąć",
  "Not printed: seen in the model, left out of the sheets — click to print it": "Niedrukowana: widoczna w modelu, pominięta na arkuszach — kliknij, aby ją drukować",
- "Active layer: new groups, components, dimensions and texts go to it": "Warstwa aktywna: trafiają do niej nowe grupy, komponenty, wymiary i teksty",
+ "Active layer: new groups, components, dimensions, texts and guides go to it": "Warstwa aktywna: trafiają do niej nowe grupy, komponenty, wymiary, teksty i linie pomocnicze",
  "The layer of what is selected becomes the active one: new objects go to it.": "Warstwa zaznaczenia staje się aktywna: nowe obiekty trafią do niej.",
  "Default columns": "Kolumny domyślne",
  "Sort by name": "Sortuj według nazwy",
@@ -3136,5 +3136,6 @@
  "Group them when there are many": "Grupuj, gdy jest ich wiele",
  "Always in submenus": "Zawsze w podmenu",
  "Each entry on its own": "Każda pozycja osobno",
- "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Jak pozycje rozszerzeń są wyświetlane w menu prawego przycisku (od razu) i w menu Rozszerzenia (po ponownym uruchomieniu)."
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Jak pozycje rozszerzeń są wyświetlane w menu prawego przycisku (od razu) i w menu Rozszerzenia (po ponownym uruchomieniu).",
+ "Texts": "Teksty"
 }

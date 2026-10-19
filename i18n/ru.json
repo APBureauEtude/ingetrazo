@@ -3077,7 +3077,7 @@
  "Default (from the sheet)": "По умолчанию (по листу)",
  "Line weight in mm (—: default, from the sheet) — click a row's to change it": "Толщина линии в мм (—: по умолчанию, по листу) — щёлкните значение строки, чтобы изменить",
  "Show all columns": "Показать все столбцы",
- "Entities on the layer: faces, edges, objects, dimensions and texts": "Объекты на слое: грани, рёбра, объекты, размеры и тексты",
+ "Entities on the layer: faces, edges, objects, dimensions, texts, guides and images": "Объекты на слое: грани, рёбра, объекты, размеры, тексты, направляющие и изображения",
  "Opaque": "Непрозрачный",
  "Transparency of the layer's faces in the model (—: opaque) — click a row's to change it": "Прозрачность граней слоя в модели (—: непрозрачный) — щёлкните значение строки, чтобы изменить",
  "Print": "Печать",
@@ -3086,7 +3086,7 @@
  "Print — a layer switched off here is seen in the model but left out of the sheets, their PDF and DXF; click here for every layer": "Печать — отключённый здесь слой виден в модели, но не выводится на листы, в их PDF и DXF; щёлкните здесь для всех слоёв",
  "On the sheets — click to leave it out of them": "Выводится на листы — щёлкните, чтобы исключить",
  "Not printed: seen in the model, left out of the sheets — click to print it": "Не печатается: виден в модели, но не выводится на листы — щёлкните, чтобы печатать",
- "Active layer: new groups, components, dimensions and texts go to it": "Активный слой: сюда идут новые группы, компоненты, размеры и тексты",
+ "Active layer: new groups, components, dimensions, texts and guides go to it": "Активный слой: сюда идут новые группы, компоненты, размеры, тексты и направляющие",
  "The layer of what is selected becomes the active one: new objects go to it.": "Слой выделенного становится активным: новые объекты пойдут на него.",
  "Default columns": "Столбцы по умолчанию",
  "Sort by name": "Сортировать по имени",
@@ -3128,5 +3128,6 @@
  "Group them when there are many": "Группировать, если их много",
  "Always in submenus": "Всегда в подменю",
  "Each entry on its own": "Каждый пункт отдельно",
- "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Как пункты расширений показываются в контекстном меню (сразу) и в меню «Расширения» (при следующем запуске)."
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Как пункты расширений показываются в контекстном меню (сразу) и в меню «Расширения» (при следующем запуске).",
+ "Texts": "Тексты"
 }

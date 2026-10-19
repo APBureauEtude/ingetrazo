@@ -2212,11 +2212,13 @@ class Viewport(QOpenGLWidget):
         # depth-write off (scaffolding must not cull anything), and none on
         # a plan sheet or a styled composer frame — a printed lámina does
         # not carry the scaffolding, and that is also how it behaved before.
-        if (self.plano_style is None and self.style_override is None
-                and getattr(self.scene, "guides", None)):
+        shown_guides = (self._shown_guides()
+                        if self.plano_style is None
+                        and self.style_override is None else [])
+        if shown_guides:
             dist = max(float(self.camera.distance), 1e-3)
             g_coords, g_spans = _guide_vertices(
-                self.scene.guides, dist * 0.03, self.scene.selection,
+                shown_guides, dist * 0.03, self.scene.selection,
                 centre=self.camera.target, reach=dist * 15.0)
             if g_spans:
                 data = g_coords.tobytes()
@@ -7659,7 +7661,7 @@ class Viewport(QOpenGLWidget):
         the depth buffer hides them behind geometry (issue #23). A cross is
         a screen-space mark a few pixels wide, not a line through the
         model, so it stays in the overlay where its size is in pixels."""
-        guides = getattr(self.scene, "guides", None)
+        guides = self._shown_guides()
         if not guides:
             return
         pen = QPen(QColor(70, 90, 120), 1, Qt.DashLine)
@@ -11463,7 +11465,7 @@ class Viewport(QOpenGLWidget):
         # used to kill on-line snapping in ordinary 3D views); guide POINTS
         # snap as degenerate pseudo-edges, exactly like survey points.
         lines = []
-        for g in getattr(self.scene, "guides", None) or []:
+        for g in self._shown_guides():
             if g.is_line:
                 seg = self._guide_snap_segment(g)
                 if seg is not None:
@@ -11892,10 +11894,23 @@ class Viewport(QOpenGLWidget):
         return math.hypot(after[0] - before[0],
                           after[1] - before[1]) >= 0.5
 
+    def _shown_guides(self) -> list:
+        """The guides on screen: the ones whose layer is visible (a guide
+        is scaffolding on a layer like any dimension, so switching the
+        layer off takes its guides off the screen and out of the snap)."""
+        guides = getattr(self.scene, "guides", None) or ()
+        visible = getattr(self.scene, "entity_visible", None)
+        if visible is None:
+            return list(guides)
+        return [g for g in guides if visible(g)]
+
     def pick_guide(self, screen_x: float, screen_y: float):
         """Return the construction guide nearest the cursor within the pick
-        threshold, or ``None`` (for the Eraser)."""
-        guides = getattr(self.scene, "guides", None)
+        threshold, or ``None`` (for the Eraser). One on a hidden or
+        locked layer is not there to pick."""
+        selectable = getattr(self.scene, "entity_selectable", None)
+        guides = [g for g in getattr(self.scene, "guides", None) or ()
+                  if selectable is None or selectable(g)]
         if not guides:
             return None
         best, best_d = None, self.pick_threshold_px

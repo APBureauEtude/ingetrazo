@@ -3084,7 +3084,7 @@
  "Default (from the sheet)": "Padrão (conforme a prancha)",
  "Line weight in mm (—: default, from the sheet) — click a row's to change it": "Espessura de linha em mm (—: padrão, conforme a prancha) — clique na de uma fila para mudá-la",
  "Show all columns": "Mostrar todas as colunas",
- "Entities on the layer: faces, edges, objects, dimensions and texts": "Entidades na camada: faces, arestas, objetos, cotas e textos",
+ "Entities on the layer: faces, edges, objects, dimensions, texts, guides and images": "Entidades na camada: faces, arestas, objetos, cotas, textos, guias e imagens",
  "Opaque": "Opaca",
  "Transparency of the layer's faces in the model (—: opaque) — click a row's to change it": "Transparência das faces da camada no modelo (—: opaca) — clique na de uma fila para mudá-la",
  "Print": "Imprimir",
@@ -3093,7 +3093,7 @@
  "Print — a layer switched off here is seen in the model but left out of the sheets, their PDF and DXF; click here for every layer": "Imprimir — uma camada desativada aqui aparece no modelo, mas não nas pranchas, no PDF nem no DXF; clique aqui para todas as camadas",
  "On the sheets — click to leave it out of them": "Nas pranchas — clique para deixá-la de fora",
  "Not printed: seen in the model, left out of the sheets — click to print it": "Não impressa: visível no modelo, fora das pranchas — clique para imprimi-la",
- "Active layer: new groups, components, dimensions and texts go to it": "Camada ativa: novos grupos, componentes, cotas e textos vão para ela",
+ "Active layer: new groups, components, dimensions, texts and guides go to it": "Camada ativa: novos grupos, componentes, cotas, textos e guias vão para ela",
  "The layer of what is selected becomes the active one: new objects go to it.": "A camada do que está selecionado passa a ser a ativa: os novos objetos vão para ela.",
  "Default columns": "Colunas padrão",
  "Sort by name": "Ordenar por nome",
@@ -3135,5 +3135,6 @@
  "Group them when there are many": "Agrupar quando houver muitas",
  "Always in submenus": "Sempre em submenus",
  "Each entry on its own": "Cada entrada separada",
- "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Como as entradas das extensões aparecem no menu do botão direito (na hora) e no menu Extensões (na próxima abertura)."
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Como as entradas das extensões aparecem no menu do botão direito (na hora) e no menu Extensões (na próxima abertura).",
+ "Texts": "Textos"
 }

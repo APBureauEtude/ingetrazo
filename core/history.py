@@ -267,11 +267,14 @@ class History:
         return True
 
     def _objects_before(self):
-        """The objects in the document before a command runs — only while a
-        layer is active, so the default case walks nothing."""
-        from core.layers import DEFAULT_LAYER, active_layer, object_ids
+        """The objects in the document before a command runs. With no
+        layer active only the guides, dimensions and texts (they go to
+        their automatic layers), so the default case never walks the
+        groups."""
+        from core.layers import (DEFAULT_LAYER, active_layer, auto_ids,
+                                 object_ids)
         if active_layer(self.scene) == DEFAULT_LAYER:
-            return None
+            return auto_ids(self.scene)
         return object_ids(self.scene)
 
     def _tag_new_objects(self, before) -> None:

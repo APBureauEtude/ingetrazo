@@ -69,7 +69,7 @@ def iter_meshes(scene):
 
 def _annotations(scene):
     for coll in ("dimensions", "text_labels", "image_planes",
-                 "section_planes"):
+                 "section_planes", "guides"):
         yield from (getattr(scene, coll, None) or ())
 
 

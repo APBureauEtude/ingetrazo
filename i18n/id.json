@@ -3080,7 +3080,7 @@
  "Default (from the sheet)": "Bawaan (dari lembar)",
  "Line weight in mm (—: default, from the sheet) — click a row's to change it": "Tebal garis dalam mm (—: bawaan, dari lembar) — klik nilai pada baris untuk mengubahnya",
  "Show all columns": "Tampilkan semua kolom",
- "Entities on the layer: faces, edges, objects, dimensions and texts": "Entitas di layer: muka, rusuk, objek, dimensi, dan teks",
+ "Entities on the layer: faces, edges, objects, dimensions, texts, guides and images": "Entitas di layer: muka, rusuk, objek, dimensi, teks, garis bantu, dan gambar",
  "Opaque": "Buram",
  "Transparency of the layer's faces in the model (—: opaque) — click a row's to change it": "Transparansi muka layer di model (—: buram) — klik nilai pada baris untuk mengubahnya",
  "Print": "Cetak",
@@ -3089,7 +3089,7 @@
  "Print — a layer switched off here is seen in the model but left out of the sheets, their PDF and DXF; click here for every layer": "Cetak — layer yang dimatikan di sini terlihat di model tetapi tidak muncul di lembar, PDF, maupun DXF-nya; klik di sini untuk semua layer",
  "On the sheets — click to leave it out of them": "Ada di lembar — klik untuk mengeluarkannya",
  "Not printed: seen in the model, left out of the sheets — click to print it": "Tidak dicetak: terlihat di model, tidak muncul di lembar — klik untuk mencetaknya",
- "Active layer: new groups, components, dimensions and texts go to it": "Layer aktif: grup, komponen, dimensi, dan teks baru masuk ke sini",
+ "Active layer: new groups, components, dimensions, texts and guides go to it": "Layer aktif: grup, komponen, dimensi, teks, dan garis bantu baru masuk ke sini",
  "The layer of what is selected becomes the active one: new objects go to it.": "Layer dari yang dipilih menjadi layer aktif: objek baru masuk ke sana.",
  "Default columns": "Kolom bawaan",
  "Sort by name": "Urutkan menurut nama",
@@ -3131,5 +3131,6 @@
  "Group them when there are many": "Kelompokkan jika banyak",
  "Always in submenus": "Selalu dalam submenu",
  "Each entry on its own": "Setiap entri terpisah",
- "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Cara entri ekstensi ditampilkan di menu klik kanan (langsung) dan di menu Ekstensi (saat dibuka lagi)."
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Cara entri ekstensi ditampilkan di menu klik kanan (langsung) dan di menu Ekstensi (saat dibuka lagi).",
+ "Texts": "Teks"
 }

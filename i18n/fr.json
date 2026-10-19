@@ -3077,7 +3077,7 @@
  "Default (from the sheet)": "Par défaut (selon la planche)",
  "Line weight in mm (—: default, from the sheet) — click a row's to change it": "Épaisseur de ligne en mm (— : par défaut, selon la planche) — cliquez sur celle d'une rangée pour la changer",
  "Show all columns": "Afficher toutes les colonnes",
- "Entities on the layer: faces, edges, objects, dimensions and texts": "Entités sur le calque : faces, arêtes, objets, cotes et textes",
+ "Entities on the layer: faces, edges, objects, dimensions, texts, guides and images": "Entités sur le calque : faces, arêtes, objets, cotes, textes, guides et images",
  "Opaque": "Opaque",
  "Transparency of the layer's faces in the model (—: opaque) — click a row's to change it": "Transparence des faces du calque dans le modèle (— : opaque) — cliquez sur celle d'une rangée pour la changer",
  "Print": "Imprimer",
@@ -3086,7 +3086,7 @@
  "Print — a layer switched off here is seen in the model but left out of the sheets, their PDF and DXF; click here for every layer": "Imprimer — un calque désactivé ici est visible dans le modèle mais absent des planches, de leur PDF et DXF ; cliquez ici pour tous les calques",
  "On the sheets — click to leave it out of them": "Sur les planches — cliquez pour l'en retirer",
  "Not printed: seen in the model, left out of the sheets — click to print it": "Non imprimé : visible dans le modèle, absent des planches — cliquez pour l'imprimer",
- "Active layer: new groups, components, dimensions and texts go to it": "Calque actif : les nouveaux groupes, composants, cotes et textes y vont",
+ "Active layer: new groups, components, dimensions, texts and guides go to it": "Calque actif : les nouveaux groupes, composants, cotes, textes et guides y vont",
  "The layer of what is selected becomes the active one: new objects go to it.": "Le calque de la sélection devient le calque actif : les nouveaux objets y vont.",
  "Default columns": "Colonnes par défaut",
  "Sort by name": "Trier par nom",
@@ -3128,5 +3128,6 @@
  "Group them when there are many": "Les regrouper quand il y en a beaucoup",
  "Always in submenus": "Toujours dans des sous-menus",
  "Each entry on its own": "Chaque entrée séparément",
- "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Comment les entrées des extensions s'affichent dans le menu du clic droit (immédiatement) et dans le menu Extensions (au prochain démarrage)."
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Comment les entrées des extensions s'affichent dans le menu du clic droit (immédiatement) et dans le menu Extensions (au prochain démarrage).",
+ "Texts": "Textes"
 }

@@ -290,3 +290,28 @@ def test_json_meshes_defer_and_build_the_same(json_doc, monkeypatch,
     for m in _meshes(lazy):
         _compare(lazy_mesh.plan_of(m), m)
     assert _canonical(lazy) == _canonical(eager)
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_a_json_mesh_builds_after_the_document_is_released(
+        json_doc, monkeypatch, tmp_path, seed):
+    """The loader empties the document tree in place once read
+    (_release_in_steps, a window open with progress): a JSON mesh built
+    later must not read it — it came out with no faces at all."""
+    path = tmp_path / "doc.igz"
+    igz.save_scene(_painted_scene(seed, tmp_path), path)
+    eager = _open(monkeypatch, path, False)
+    real = igz._load_into_inner
+    trees = []
+    orig_read = igz._read_document
+
+    def keep(*a, **k):
+        data, archive = orig_read(*a, **k)
+        trees.append(data)
+        return data, archive
+    monkeypatch.setattr(igz, "_read_document", keep)
+    lazy = _open(monkeypatch, path, True)
+    assert trees, "the reader ran"
+    igz._release_in_steps(trees[0], lambda: None)       # as the window does
+    assert real is igz._load_into_inner
+    assert _canonical(lazy) == _canonical(eager)

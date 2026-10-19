@@ -793,7 +793,10 @@ def save_scene(scene, path: Path) -> dict:
         payload["text_labels"] = [t.to_dict() for t in labels]
     guides = getattr(scene, "guides", None)
     if guides:
-        payload["guides"] = [g.to_dict() for g in guides]
+        # A guide at NaN is left out instead of refusing the save (#723):
+        # it is only scaffolding, and the loader drops it anyway (#185).
+        payload["guides"] = [g.to_dict() for g in guides
+                             if not hasattr(g, "is_finite") or g.is_finite()]
     # Reference images. Written BEFORE the packing step below on purpose:
     # each entry hangs its file under a "texture" key, so the same walk that
     # embeds face textures embeds the scans too.
@@ -1507,9 +1510,14 @@ def _load_mesh(mesh, payload, geom=None) -> None:
             if curves is not None and curves.size and \
                     int(curves.max()) >= _mesh_mod._CURVE_COUNTER:
                 _mesh_mod._CURVE_COUNTER = int(curves.max()) + 1
-            if _mesh_mod.DeferredMesh.defer(
-                    mesh, lambda m: _load_mesh_json(m, payload),
-                    len(src["counts"]), src):
+            # Built from its own arrays, not from ``payload``: the loader
+            # empties the document tree in place once it is read
+            # (_release_in_steps), and a mesh built later from it came out
+            # with no faces at all.
+            def build(m, src=src):
+                _load_mesh_json(m, _payload_from_arrays(src))
+            if _mesh_mod.DeferredMesh.defer(mesh, build, len(src["counts"]),
+                                            src):
                 return
     _load_mesh_json(mesh, payload)
 
@@ -1593,6 +1601,47 @@ def _json_arrays(payload) -> dict | None:
         counts=np.asarray(ring_counts, dtype=np.int64),
         face_attr=np.asarray(face_attr, dtype=np.int64),
         sequential=small)
+
+
+def _payload_from_arrays(src) -> dict:
+    """The JSON block :func:`_json_arrays` read, back from its arrays: the
+    same points (the document's own floats), flags, curves, layers, rings
+    (nested holes already dropped — dropping again keeps them) and face
+    attributes, for :func:`_load_mesh_json`."""
+    pos = src["pos"].tolist()
+    names = src["meta"].get("edge_layers") or []
+    flags = src["flags"].tolist()
+    curves = src["curves"].tolist() if src["curves"] is not None else None
+    layers = src["layers"].tolist() if src["layers"] is not None else None
+    edges = []
+    for i, (a, b) in enumerate(src["edges"].tolist()):
+        raw = {"a": pos[a], "b": pos[b]}
+        if flags[i] & 1:
+            raw["soft"] = True
+        if flags[i] & 2:
+            raw["hidden"] = True
+        if curves is not None and curves[i] >= 0:
+            raw["curve"] = curves[i]
+        if layers is not None and layers[i] >= 0:
+            raw["layer"] = names[layers[i]]
+        edges.append(raw)
+    rings = src["rings"].tolist()
+    sizes = src["sizes"].tolist()
+    table = src["meta"].get("face_attrs") or []
+    faces = []
+    c = r = 0
+    for nr, k in zip(src["counts"].tolist(), src["face_attr"].tolist()):
+        loops = []
+        for _ in range(nr):
+            loops.append([pos[i] for i in rings[c:c + sizes[r]]])
+            c += sizes[r]
+            r += 1
+        raw = dict(table[k]) if k >= 0 else {}
+        raw["vertices"] = loops[0]
+        if len(loops) > 1:
+            raw["holes"] = loops[1:]
+        faces.append(raw)
+    return {"edges": edges, "faces": faces}
 
 
 def _load_mesh_json(mesh, payload) -> None:

@@ -387,6 +387,23 @@ def _lean_instanced() -> bool:
         return _LEAN_INSTANCED
     from core import _native
     return _native.native is not None
+#: The snap engine's occlusion rays go through core._native's kernel when
+#: the experimental engine is on (tests compare both).
+_OCCL_NATIVE = True
+
+
+def _occlusion_native():
+    """core._native when it can take ``_occluded_many``'s rays, else None."""
+    if not _OCCL_NATIVE:
+        return None
+    from core import _native
+    mod = _native.native
+    return mod if mod is not None and hasattr(mod, "occlusion_span") else None
+
+
+#: Lazy placements are filtered by core._native's spatial index before
+#: being baked for a pick (the experimental engine; tests compare both).
+_INSTANCE_FILTER = True
 #: Span lists this long are culled with NumPy (_visible_spans_np).
 _SPAN_VECTOR_MIN = 64
 #: Recorded instanced passes replayed by the native engine when it is on.
@@ -1244,6 +1261,7 @@ class Viewport(QOpenGLWidget):
         # Camera navigation state (middle button)
         self._last_pos = None
         self._pan_mode = False
+        self._middle_drag_active = False
         #: where the current orbit gesture turns (#164); None = the target
         self._orbit_pivot = None
         # A mouse-look drag for a tool with ``on_look`` (First Person):
@@ -2631,7 +2649,7 @@ class Viewport(QOpenGLWidget):
 
         loose = sc.mesh
 
-        def walk(g):
+        def part(g):
             m = g.mesh
             xf = g.xform
             # The mesh open for editing IS the loose mesh: its content is
@@ -2643,16 +2661,43 @@ class Viewport(QOpenGLWidget):
             # ``locked`` too: the pick block lists a group as selectable or
             # not, and a padlock that did not re-key it left the group
             # movable and openable from the view.
-            parts.append((id(g), id(m), serial,
-                          tuple(xf.data()) if xf is not None else None,
-                          g.layer, bool(g.billboard), bool(g.hidden),
-                          bool(getattr(g, "locked", False)),
-                          _material_sig(getattr(g, "material", None))))
+            return (id(g), id(m), serial,
+                    tuple(xf.data()) if xf is not None else None,
+                    g.layer, bool(g.billboard), bool(g.hidden),
+                    bool(getattr(g, "locked", False)),
+                    _material_sig(getattr(g, "material", None)))
+
+        pv = getattr(self, "_preview_groups", None) or ()
+        base = getattr(self, "_epoch_frozen_base", None)
+        if (not live and pv and base is not None and base[0] == cheap
+                and base[1] == parts):
+            # A frozen preview (a drag): only the previewed groups can
+            # move, so only their parts are made again — the walk over
+            # every placement ran on every frame (21 406 of them, #158).
+            # The same parts in the same order: the very same epoch.
+            whole = base[2]
+            for i, g in base[3]:
+                whole[i] = part(g)
+            epoch = hash(tuple(whole))
+            self._epoch_memo = ((tick, _cache_ver(self)), epoch)
+            self._epoch_same = None
+            return epoch
+        movers: list = []
+        head = len(parts)
+
+        def walk(g):
+            if id(g) in pv:
+                movers.append((len(parts), g))
+            parts.append(part(g))
             for c in (g.children or ()):
                 walk(c)
         for g in sc.groups:
             walk(g)
         epoch = hash(tuple(parts))
+        # (cheap key, the parts before the walk, every part, the movers'
+        # slots) — what the next frozen frame starts from.
+        self._epoch_frozen_base = ((cheap, parts[:head], list(parts), movers)
+                                   if not live and pv else None)
         self._epoch_memo = ((tick, _cache_ver(self)), epoch)
         self._epoch_same = (cheap, epoch) if live else None
         return epoch
@@ -8218,7 +8263,27 @@ class Viewport(QOpenGLWidget):
         # only means something within a plane. Stashed instead of asked for
         # again: this runs on every mouse move, and the answer can cost a pick.
         self._last_work_plane = (plane_point, plane_normal)
-        hit = self._ray_plane(origin, direction, plane_point, plane_normal)
+        tool = self.active_tool
+        allow_planar_grazing = False
+        if (tool is not None
+                and getattr(tool, "start_point", None) is None
+                and getattr(tool, "work_plane", None) is None
+                and getattr(tool, "plane_lock", None) is None
+                and getattr(tool, "plane_ref", None) is None):
+            from tools.base import PlaneLock
+            if isinstance(tool, PlaneLock):
+                from core import axes
+                normal = QVector3D(plane_normal).normalized()
+                through_origin = (
+                    (QVector3D(plane_point) - axes.origin()).length() < 1e-5)
+                principal = any(
+                    abs(QVector3D.dotProduct(normal, axes.axis(name))) > 0.999
+                    for name in ("x", "y", "z")
+                )
+                allow_planar_grazing = through_origin and principal
+        hit = self._ray_plane(
+            origin, direction, plane_point, plane_normal,
+            allow_grazing=allow_planar_grazing)
         if hit is not None:
             return hit
         # The ray only grazes the work plane here, so the intersection is
@@ -8315,7 +8380,8 @@ class Viewport(QOpenGLWidget):
         return face_plane
 
     def _ray_plane(self, origin: QVector3D, direction: QVector3D,
-                   plane_point: QVector3D, plane_normal: QVector3D
+                   plane_point: QVector3D, plane_normal: QVector3D,
+                   *, allow_grazing: bool = False,
                    ) -> Optional[QVector3D]:
         """Ray/plane hit, or ``None`` when it is behind the camera or the ray
         merely grazes the plane."""
@@ -8324,12 +8390,101 @@ class Viewport(QOpenGLWidget):
             return None
         normal = plane_normal / length
         denom = QVector3D.dotProduct(normal, direction)
-        if abs(denom) < math.sin(math.radians(self.GRAZING_PLANE_DEG)):
+        if abs(denom) < 1e-12:
+            return None
+        if (not allow_grazing
+                and abs(denom) < math.sin(math.radians(
+                    self.GRAZING_PLANE_DEG))):
             return None
         t = QVector3D.dotProduct(normal, plane_point - origin) / denom
         if t < 0:
             return None
         return origin + direction * t
+
+    #: XY stays the ground in shallow views and where its cursor-ray hit is
+    #: reasonably close compared with the two vertical global planes.
+    GROUND_PREFERENCE_ANGLE_DEG = 5.0
+    GROUND_DEPTH_PREFERENCE_RATIO = 1.25
+    PERSPECTIVE_GROUND_DEPTH_PREFERENCE_RATIO = 10.0
+    PLANE_ALIGNMENT_TIE_MARGIN = 0.05
+
+    def _camera_planar_work_plane(
+        self, cursor: Optional[tuple[float, float]] = None,
+    ) -> Optional[tuple[QVector3D, QVector3D]]:
+        """Choose XY as floor/ceiling when preferred, otherwise XZ or YZ.
+
+        The vertical planes compete by their alignment with the local cursor
+        ray. XY remains the ground (or ceiling when viewed from below), with
+        a depth preference that avoids mapping a nearby cursor to an
+        implausibly distant point on the floor.
+        """
+        from core import axes
+        origin = axes.origin()
+        view = self.camera.target - self.camera.eye()
+        if view.lengthSquared() < 1e-18:
+            return None
+        view.normalize()
+        ray_origin = self.camera.eye()
+        ray_direction = view
+        cursor_origin: Optional[QVector3D] = None
+        cursor_direction: Optional[QVector3D] = None
+        if cursor is not None:
+            cursor_origin, cursor_direction = self._pixel_to_ray(*cursor)
+            if cursor_origin is not None and cursor_direction is not None:
+                ray_origin = cursor_origin
+                ray_direction = cursor_direction.normalized()
+
+        normals = {name: axes.axis(name) for name in ("x", "y", "z")}
+        hits: dict[str, tuple[QVector3D, float]] = {}
+        if ray_origin is not None:
+            for name, normal in normals.items():
+                hit = self._ray_plane(
+                    ray_origin, ray_direction, origin, normal,
+                    allow_grazing=True)
+                if hit is None:
+                    continue
+                depth = (
+                    (hit - self.camera.eye()).length()
+                    if self.camera.perspective
+                    else QVector3D.dotProduct(hit - self.camera.eye(), view)
+                )
+                if depth >= 0:
+                    hits[name] = hit, depth
+
+        horizontal_angle = math.degrees(math.asin(min(
+            1.0, abs(QVector3D.dotProduct(view, normals["z"])))))
+        if "z" in hits:
+            vertical_depths = [
+                hits[name][1] for name in ("x", "y") if name in hits]
+            depth_ratio = (
+                self.GROUND_DEPTH_PREFERENCE_RATIO
+                if horizontal_angle <= self.GROUND_PREFERENCE_ANGLE_DEG
+                else self.PERSPECTIVE_GROUND_DEPTH_PREFERENCE_RATIO
+            )
+            if (not vertical_depths
+                    or hits["z"][1] <= min(vertical_depths) * depth_ratio):
+                return origin, normals["z"]
+
+        alignment = {
+            name: abs(QVector3D.dotProduct(ray_direction, normals[name]))
+            for name in ("x", "y")
+        }
+        candidates = {"x", "y"}
+        if cursor_origin is not None and cursor_direction is not None:
+            candidates = {
+                name for name in candidates
+                if self._ray_plane(
+                    cursor_origin, cursor_direction, origin, normals[name],
+                    allow_grazing=True) is not None
+            }
+        if not candidates:
+            candidates = {"x", "y"}
+        normal_name = max(candidates, key=alignment.__getitem__)
+        if (candidates == {"x", "y"}
+                and abs(alignment["x"] - alignment["y"])
+                <= self.PLANE_ALIGNMENT_TIE_MARGIN):
+            normal_name = "y"
+        return origin, normals[normal_name]
 
     # When the camera is at least this tilted off the horizon, the work plane
     # stays horizontal (XY) — that covers top, iso, and most architectural
@@ -8394,6 +8549,12 @@ class Viewport(QOpenGLWidget):
 
         start = getattr(tool, "start_point", None) if tool is not None else None
         if start is None:
+            from core import axes
+            from tools.base import PlaneLock
+            if isinstance(tool, PlaneLock):
+                locked = tool.locked_work_plane(axes.origin())
+                if locked is not None:
+                    return locked
             # First-click hover: if the cursor is over an existing face —
             # loose OR a group's (drawing/measuring on top of an imported
             # reference model) — use that face's plane so a new polygon
@@ -8410,6 +8571,10 @@ class Viewport(QOpenGLWidget):
                 image = self.image_plane_at(cursor[0], cursor[1])
                 if image is not None:
                     return image.plane()
+            if isinstance(tool, PlaneLock) and cursor is not None:
+                plane = self._camera_planar_work_plane(cursor)
+                if plane is not None:
+                    return plane
             # In an axis-aligned (standard) view, an unsnapped first point
             # belongs on the plane FACING the camera through the model
             # centre — so measuring/drawing in a front view stays in the
@@ -9754,6 +9919,59 @@ class Viewport(QOpenGLWidget):
         self._pick_lazy_memo = (key, table)
         return table
 
+    def _pick_instance_set(self, table):
+        """core._native's InstanceSet over the lazy placements of ``table``
+        (see _pick_lazy_table), or ``None`` without the experimental
+        engine. A prototype's index (a BVH of its pick triangles, its hard
+        edges, from its local bake) is kept while its bake is."""
+        if not _INSTANCE_FILTER:
+            return None
+        from core import _native
+        mod = _native.native
+        if mod is None or not hasattr(mod, "InstanceSet"):
+            return None
+        memo = getattr(self, "_inst_set_memo", None)
+        if memo is not None and memo[0] is table:
+            return memo[1]
+        import numpy as np
+        from core.group import effective_material
+        groups = table[0]
+        cache = getattr(self, "_inst_proto_cache", None) or {}
+        keep: dict = {}
+        by_mesh: dict = {}
+        protos: list = []
+        proto_of = np.empty(len(groups), dtype=np.int64)
+        mats = np.empty((len(groups), 16), dtype=np.float64)
+        for i, g in enumerate(groups):
+            k = by_mesh.get(id(g.mesh))
+            if k is None:
+                # Every placement of a mesh has the same triangles and hard
+                # edges, whatever its paint: one bake (the first one's).
+                base = self._proto_base_chunk(g.mesh, effective_material(g))
+                ckey = (base.get("uid"), base.get("rev"))
+                ip = cache.get(ckey)
+                if ip is None:
+                    z = np.zeros((0, 3))
+                    v0 = base.get("v0")
+                    edges = (np.frombuffer(base["edges"], dtype=np.float32)
+                             .reshape(-1, 6).astype(np.float64)
+                             if base.get("edges") else np.zeros((0, 6)))
+                    ip = mod.InstanceProto(
+                        np.ascontiguousarray(v0) if v0 is not None else z,
+                        np.ascontiguousarray(base["e1"]) if v0 is not None
+                        else z,
+                        np.ascontiguousarray(base["e2"]) if v0 is not None
+                        else z, edges)
+                keep[ckey] = ip
+                k = by_mesh[id(g.mesh)] = len(protos)
+                protos.append(ip)
+            proto_of[i] = k
+            mats[i] = g.xform.data()
+        self._inst_proto_cache = keep
+        iset = mod.InstanceSet(protos, proto_of, mats)
+        self._inst_set_memo = (table, iset)
+        return iset
+
     def _pick_materialize(self, near) -> None:
         """Bake into the pick index the lazy placements a query needs:
         ``near`` = ``None`` (around the cursor), ``("px", x, y)`` (around a
@@ -9815,6 +10033,14 @@ class Viewport(QOpenGLWidget):
                         np.array([seen[1].x(), seen[1].y(), seen[1].z()]) - o))
                     hit &= tmin <= t_vis * 1.02 + 0.05
             need = np.flatnonzero(hit)
+            iset = self._pick_instance_set(table) if len(need) else None
+            if iset is not None:
+                # Of the boxes the ray crosses, the placements whose
+                # triangles it can meet (the spatial index, with margins
+                # past the exact test's): only those are baked.
+                need = np.asarray(iset.ray_filter(
+                    need.astype(np.int64), tuple(o.tolist()),
+                    tuple(d.tolist()), reach), dtype=np.int64)
         else:
             if near is None:
                 pos = getattr(self, "_last_mouse_pos", None)
@@ -9841,6 +10067,18 @@ class Viewport(QOpenGLWidget):
                     near_pt = np.clip(e, lo[need], hi[need])
                     dist = np.linalg.norm(near_pt - e, axis=1)
                     need = need[dist <= far]
+                iset = self._pick_instance_set(table) if len(need) else None
+                if iset is not None:
+                    # Of the boxes near the cursor, the placements with a
+                    # hard edge within the farthest reach a snap measures
+                    # or a triangle within the footprint (with margins).
+                    M = self._np_mvp()
+                    need = np.asarray(iset.screen_filter(
+                        need.astype(np.int64),
+                        np.ascontiguousarray(M.T).ravel().tolist(),
+                        float(self.width()), float(self.height()), x, y,
+                        Viewport.GEDGE_REACH_PX + 2.0,
+                        self._PICK_NEAR_PX + 2.0), dtype=np.int64)
                 self._pick_near_memo = (ckey, need)
         new = [int(i) for i in need if id(groups[int(i)]) not in live]
         if len(new) > self._PICK_NEW_PER_QUERY and near != "all":
@@ -9935,6 +10173,185 @@ class Viewport(QOpenGLWidget):
         return np.flatnonzero((inside & front.all(axis=1)) | straddle
                               | ~finite)
 
+    def _pick_block_part(self, candidatos, tocables, lazy_set, base):
+        """One part of the pick block (see _pick_index): the faces, owners,
+        triangles and hard edges of ``candidatos``, numbered after ``base``
+        (the part before it, or None). Lists, joined by _pick_join_parts."""
+        import numpy as np
+        scene = self.scene
+        chunks = []
+        for g in candidatos:
+            if getattr(g, "billboard", False):
+                continue          # per-frame quad; picked separately
+            gvis = scene.entity_visible(g)
+            # The layer says whether it can be snapped to; the context
+            # says whether it can be picked.
+            gsnap = scene.entity_selectable(g)
+            gsel = gsnap and id(g) in tocables
+            if not (gvis or gsnap):
+                continue
+            chunk = self._group_chunk(g)
+            if not (chunk["faces"] or chunk["edges"]):
+                continue          # nothing in it to pick or snap to
+            # Note the `or edges`: a group of nothing but lines and arcs
+            # has no faces, and skipping it here dropped it out of the
+            # index ENTIRELY — so inference found none of its edges and
+            # the edge fallback below, written for "a lines-only group",
+            # read an empty array and never found it either (GitHub #8).
+            # The OWNER a hit resolves to depends on the open context
+            # (inside the plaza its children are the objects): it keys
+            # the block too, or a double-click into the plaza kept
+            # answering "the plaza" for the arch inside (Marco,
+            # 2026-09-14).
+            chunks.append((g, chunk, gvis, gsel, gsnap))
+        n_ent = base["n_ent"] if base else 0
+        n_plist = base["n_plist"] if base else 0
+        b_tri_off = base["n_tri"] if base else 0
+        n_ggroups = base["n_ggroups"] if base else 0
+        b_entities: list = []
+        # Per entity, the PLACEMENT (proxy) whose matrix puts the
+        # face in the world — the owner above is what a click
+        # selects. Run-length, one int per face: a Python object
+        # per face doubled the cold build (30 → 65 ms).
+        b_pidx: list = []
+        b_plist: list = []
+        b_v0, b_e1, b_e2, b_te = [], [], [], []
+        b_area, b_vis, b_sel = [], [], []
+        b_spans: list = []    # (bbox, tri start, count) per chunk
+        # Group hard edges, flat — pick_group's fallback (cursor over
+        # empty space / lines-only group) walked every group edge in
+        # Python (~300 ms per mouse move against a 300k-edge import).
+        b_gea, b_geb, b_ggi = [], [], []
+        b_gsel: list = []     # per edge: may pick_group land on it
+        b_ggroups: list = []
+        # Lazy placements (#158) keep their triangles in their own
+        # arrays — spans the ray walks as they are — and go after
+        # the static chunks, whose concatenation is kept: joining
+        # every array on each change of the lazy set copied
+        # hundreds of MB per hover.
+        b_own: list = []
+        static_key: list = []
+        count = 0
+        for g, chunk, gvis, gsel, gsnap in chunks:
+            n = len(chunk["faces"])
+            off = n_ent + count
+            owner = self._owner_of(g)
+            # A chunk keeps its (face, owner) list: the block is
+            # rebuilt whenever the lazy placements change (#158),
+            # and re-making a tuple per face of everything already
+            # in it cost ~250 ms a hover on 14 million faces.
+            ents = chunk.get("_pick_ents")
+            if ents is None or ents[0] is not owner:
+                from views import array_bake
+                if isinstance(chunk["faces"], array_bake.DeferredFaces):
+                    # A lazy mesh (experimental engine): its faces
+                    # are built when a pick lands on one.
+                    pairs = array_bake.LazyPairs(chunk["faces"], owner)
+                else:
+                    pairs = [(f, owner) for f in chunk["faces"]]
+                ents = chunk["_pick_ents"] = (owner, pairs)
+            b_entities.append(ents[1])
+            count += n
+            b_pidx.append(np.full(n, n_plist + len(b_plist), dtype=np.int32))
+            b_plist.append(g)
+            b_area.append(chunk["areas"])
+            b_vis.append(np.full(n, gvis, dtype=bool))
+            b_sel.append(np.full(n, gsel, dtype=bool))
+            if chunk["v0"] is not None and id(g) in lazy_set:
+                b_own.append((chunk.get("bbox"), chunk["v0"],
+                              chunk["e1"], chunk["e2"],
+                              chunk["tri_ent"], off))
+            elif chunk["v0"] is not None:
+                static_key.append((chunk.get("uid", id(chunk)), chunk.get("rev"), off))
+                v0, e1, e2, te, cells = _split_chunk_spans(chunk)
+                b_v0.append(v0)
+                b_e1.append(e1)
+                b_e2.append(e2)
+                b_te.append(te + off)
+                if cells is None:
+                    b_spans.append((chunk.get("bbox"), b_tri_off,
+                                    len(v0)))
+                else:
+                    # One span per grid cell, each with its own box:
+                    # a ray meets the cells it crosses, not the chunk.
+                    b_spans += [(bb, b_tri_off + s0, n)
+                                for bb, s0, n in cells]
+                b_tri_off += len(v0)
+            if gsnap and chunk["edges"]:
+                ge = chunk.get("_pick_ge")
+                if ge is None or ge[0] is not chunk["edges"]:
+                    ge = chunk["_pick_ge"] = (
+                        chunk["edges"],
+                        np.frombuffer(chunk["edges"], dtype=np.float32)
+                        .reshape(-1, 2, 3).astype(np.float64))
+                ge = ge[1]
+                b_gea.append(ge[:, 0])
+                b_geb.append(ge[:, 1])
+                b_ggi.append(np.full(len(ge), n_ggroups + len(b_ggroups),
+                                     dtype=np.int64))
+                b_gsel.append(np.full(len(ge), gsel, dtype=bool))
+                b_ggroups.append(owner)
+        part = {"entities": b_entities, "pidx": b_pidx, "plist": b_plist,
+                "area": b_area, "vis": b_vis, "sel": b_sel,
+                "own": b_own, "static_key": static_key,
+                "v0": b_v0, "e1": b_e1, "e2": b_e2, "te": b_te,
+                "spans": b_spans, "gea": b_gea, "geb": b_geb, "ggi": b_ggi,
+                "gsel": b_gsel, "ggroups": b_ggroups,
+                "n_ent": n_ent + count, "n_plist": n_plist + len(b_plist),
+                "n_tri": b_tri_off,
+                "n_ggroups": n_ggroups + len(b_ggroups)}
+        if base is None:
+            # The fixed part joins its own lists once, here: it is kept.
+            for k in ("pidx", "area", "vis", "sel", "gea", "geb", "ggi",
+                      "gsel"):
+                part[k] = [np.concatenate(part[k])] if part[k] else []
+            if all(isinstance(e, list) for e in b_entities):
+                part["entities"] = [[x for e in b_entities for x in e]]
+        return part
+
+    def _pick_join_parts(self, fixed, lazy) -> dict:
+        """The pick block of the fixed part followed by the lazy one — the
+        very arrays the single pass made, in the same order."""
+        import numpy as np
+        from views.array_bake import PickEntities
+
+        def cat(k, empty):
+            parts = fixed[k] + lazy[k]
+            return np.concatenate(parts) if parts else empty
+        ents = fixed["entities"] + lazy["entities"]
+        if not lazy["entities"] and len(ents) == 1 and \
+                isinstance(ents[0], list):
+            entities: list = ents[0]      # the fixed part's, kept
+        elif all(isinstance(e, list) for e in ents) and \
+                sum(map(len, ents)) < 200_000:
+            entities = [x for e in ents for x in e]
+        else:
+            entities = PickEntities()
+            for e in ents:
+                entities.extend(e)
+        static = fixed["static_key"] + lazy["static_key"]
+        gea = fixed["gea"] + lazy["gea"]
+        return {
+            "entities": entities,
+            "place_idx": cat("pidx", np.empty(0, np.int32)),
+            "placements": fixed["plist"] + lazy["plist"],
+            "areas": cat("area", np.empty(0)),
+            "vis": cat("vis", np.empty(0, bool)),
+            "sel": cat("sel", np.empty(0, bool)),
+            **Viewport._pick_static_tris(self, tuple(static),
+                                         fixed["v0"] + lazy["v0"],
+                                         fixed["e1"] + lazy["e1"],
+                                         fixed["e2"] + lazy["e2"],
+                                         fixed["te"] + lazy["te"]),
+            "own": fixed["own"] + lazy["own"],
+            "gedge_a": np.concatenate(gea) if gea else None,
+            "gedge_b": cat("geb", None) if gea else None,
+            "gedge_gi": cat("ggi", None) if gea else None,
+            "gedge_sel": cat("gsel", None) if gea else None,
+            "gedge_groups": fixed["ggroups"] + lazy["ggroups"],
+            "spans": fixed["spans"] + lazy["spans"],
+        }
+
     def _pick_index(self, near=None):
         """Flat NumPy pick index of the scene — triangles of every loose and
         group face (with visibility/selectability masks and areas) plus the
@@ -9971,6 +10388,17 @@ class Viewport(QOpenGLWidget):
                id(self.scene.edit_group), getattr(self, "_pick_gen", 0))
         cached = getattr(self, "_pick_index_cache", None)
         if cached is not None and cached[0] == key:
+            return cached[1]
+        if (cached is not None and len(cached) > 2
+                and cached[0][:4] == key[:4]
+                and getattr(self, "_frozen_cache_version", None) is not None
+                and cached[2] is not None
+                and cached[2] is getattr(self, "_pick_block", None)):
+            # Only the lazy set moved, under a frozen preview (a drag): the
+            # block is kept frozen as it is, the loose part is the same —
+            # the rebuild would make this very index again (it did, ~35 ms
+            # a pointer move dragging beside the plant of #158).
+            self._pick_index_cache = (key, cached[1], cached[2])
             return cached[1]
         _p0 = _time_mod.perf_counter() if _PERF else 0.0
         import numpy as np
@@ -10072,141 +10500,26 @@ class Viewport(QOpenGLWidget):
                    oculto, len(candidatos), getattr(self, "_pick_gen", 0))
             blk = getattr(self, "_pick_block", None)
             frozen = getattr(self, "_frozen_cache_version", None) is not None
-            chunks = []
             if blk is None or (blk[0] != sig and not frozen):
-                for g in candidatos:
-                    if getattr(g, "billboard", False):
-                        continue          # per-frame quad; picked separately
-                    gvis = scene.entity_visible(g)
-                    # The layer says whether it can be snapped to; the context
-                    # says whether it can be picked.
-                    gsnap = scene.entity_selectable(g)
-                    gsel = gsnap and id(g) in tocables
-                    if not (gvis or gsnap):
-                        continue
-                    chunk = self._group_chunk(g)
-                    if not (chunk["faces"] or chunk["edges"]):
-                        continue          # nothing in it to pick or snap to
-                    # Note the `or edges`: a group of nothing but lines and arcs
-                    # has no faces, and skipping it here dropped it out of the
-                    # index ENTIRELY — so inference found none of its edges and
-                    # the edge fallback below, written for "a lines-only group",
-                    # read an empty array and never found it either (GitHub #8).
-                    # The OWNER a hit resolves to depends on the open context
-                    # (inside the plaza its children are the objects): it keys
-                    # the block too, or a double-click into the plaza kept
-                    # answering "the plaza" for the arch inside (Marco,
-                    # 2026-09-14).
-                    chunks.append((g, chunk, gvis, gsel, gsnap))
-                b_entities: list = []
-                # Per entity, the PLACEMENT (proxy) whose matrix puts the
-                # face in the world — the owner above is what a click
-                # selects. Run-length, one int per face: a Python object
-                # per face doubled the cold build (30 → 65 ms).
-                b_pidx: list = []
-                b_plist: list = []
-                b_v0, b_e1, b_e2, b_te = [], [], [], []
-                b_area, b_vis, b_sel = [], [], []
-                b_spans: list = []    # (bbox, tri start, count) per chunk
-                b_tri_off = 0
-                # Group hard edges, flat — pick_group's fallback (cursor over
-                # empty space / lines-only group) walked every group edge in
-                # Python (~300 ms per mouse move against a 300k-edge import).
-                b_gea, b_geb, b_ggi = [], [], []
-                b_gsel: list = []     # per edge: may pick_group land on it
-                b_ggroups: list = []
-                # Lazy placements (#158) keep their triangles in their own
-                # arrays — spans the ray walks as they are — and go after
-                # the static chunks, whose concatenation is kept: joining
-                # every array on each change of the lazy set copied
-                # hundreds of MB per hover.
+                # Two parts, fixed placements first, as the block always
+                # ran: the fixed part lasts while the placements do, and a
+                # change of the lazy set rebuilds only the lazy part on its
+                # offsets. Re-making the fixed one each time (900
+                # placements, half a million faces) was most of every hover
+                # that met new lazy placements on the plant of #158.
                 lazy_set = (lazy[4] if lazy is not None else ())
-                chunks.sort(key=lambda c: id(c[0]) in lazy_set)
-                b_own: list = []
-                static_key: list = []
-                for g, chunk, gvis, gsel, gsnap in chunks:
-                    n = len(chunk["faces"])
-                    off = len(b_entities)
-                    owner = self._owner_of(g)
-                    # A chunk keeps its (face, owner) list: the block is
-                    # rebuilt whenever the lazy placements change (#158),
-                    # and re-making a tuple per face of everything already
-                    # in it cost ~250 ms a hover on 14 million faces.
-                    ents = chunk.get("_pick_ents")
-                    if ents is None or ents[0] is not owner:
-                        from views import array_bake
-                        if isinstance(chunk["faces"], array_bake.DeferredFaces):
-                            # A lazy mesh (experimental engine): its faces
-                            # are built when a pick lands on one.
-                            pairs = array_bake.LazyPairs(chunk["faces"], owner)
-                        else:
-                            pairs = [(f, owner) for f in chunk["faces"]]
-                        ents = chunk["_pick_ents"] = (owner, pairs)
-                    if not isinstance(ents[1], list) and \
-                            isinstance(b_entities, list):
-                        from views.array_bake import PickEntities
-                        b_entities = PickEntities(b_entities)
-                    b_entities.extend(ents[1])
-                    b_pidx.append(np.full(n, len(b_plist), dtype=np.int32))
-                    b_plist.append(g)
-                    b_area.append(chunk["areas"])
-                    b_vis.append(np.full(n, gvis, dtype=bool))
-                    b_sel.append(np.full(n, gsel, dtype=bool))
-                    if chunk["v0"] is not None and id(g) in lazy_set:
-                        b_own.append((chunk.get("bbox"), chunk["v0"],
-                                      chunk["e1"], chunk["e2"],
-                                      chunk["tri_ent"], off))
-                    elif chunk["v0"] is not None:
-                        static_key.append((id(chunk), chunk.get("rev"), off))
-                        v0, e1, e2, te, cells = _split_chunk_spans(chunk)
-                        b_v0.append(v0)
-                        b_e1.append(e1)
-                        b_e2.append(e2)
-                        b_te.append(te + off)
-                        if cells is None:
-                            b_spans.append((chunk.get("bbox"), b_tri_off,
-                                            len(v0)))
-                        else:
-                            # One span per grid cell, each with its own box:
-                            # a ray meets the cells it crosses, not the chunk.
-                            b_spans += [(bb, b_tri_off + s0, n)
-                                        for bb, s0, n in cells]
-                        b_tri_off += len(v0)
-                    if gsnap and chunk["edges"]:
-                        ge = chunk.get("_pick_ge")
-                        if ge is None or ge[0] is not chunk["edges"]:
-                            ge = chunk["_pick_ge"] = (
-                                chunk["edges"],
-                                np.frombuffer(chunk["edges"], dtype=np.float32)
-                                .reshape(-1, 2, 3).astype(np.float64))
-                        ge = ge[1]
-                        b_gea.append(ge[:, 0])
-                        b_geb.append(ge[:, 1])
-                        b_ggi.append(np.full(len(ge), len(b_ggroups),
-                                             dtype=np.int64))
-                        b_gsel.append(np.full(len(ge), gsel, dtype=bool))
-                        b_ggroups.append(owner)
-                blk = (sig, {
-                    "entities": b_entities,
-                    "place_idx": (np.concatenate(b_pidx) if b_pidx
-                                  else np.empty(0, np.int32)),
-                    "placements": b_plist,
-                    "areas": (np.concatenate(b_area) if b_area
-                              else np.empty(0)),
-                    "vis": (np.concatenate(b_vis) if b_vis
-                            else np.empty(0, bool)),
-                    "sel": (np.concatenate(b_sel) if b_sel
-                            else np.empty(0, bool)),
-                    **Viewport._pick_static_tris(self, tuple(static_key),
-                                                 b_v0, b_e1, b_e2, b_te),
-                    "own": b_own,
-                    "gedge_a": np.concatenate(b_gea) if b_gea else None,
-                    "gedge_b": np.concatenate(b_geb) if b_gea else None,
-                    "gedge_gi": np.concatenate(b_ggi) if b_gea else None,
-                    "gedge_sel": np.concatenate(b_gsel) if b_gea else None,
-                    "gedge_groups": b_ggroups,
-                    "spans": b_spans,
-                })
+                fixed = [g for g in candidatos if id(g) not in lazy_set]
+                lazies = [g for g in candidatos if id(g) in lazy_set]
+                fkey = (sig[0], oculto, len(fixed), id(scene.edit_group))
+                fpart = getattr(self, "_pick_fixed_part", None)
+                if fpart is None or fpart[0] != fkey:
+                    # Called through the class: the stub viewports of the
+                    # tests run this unbound.
+                    fpart = self._pick_fixed_part = (fkey, Viewport._pick_block_part(
+                        self, fixed, tocables, lazy_set, None))
+                lpart = Viewport._pick_block_part(self, lazies, tocables,
+                                                  lazy_set, fpart[1])
+                blk = (sig, Viewport._pick_join_parts(self, fpart[1], lpart))
                 self._pick_block = blk
             block = blk[1]
             if block["entities"]:
@@ -10299,7 +10612,7 @@ class Viewport(QOpenGLWidget):
         idx.own_spans = own_spans
         if _PERF:
             _plog("pick_index", (_time_mod.perf_counter() - _p0) * 1000.0)
-        self._pick_index_cache = (key, idx)
+        self._pick_index_cache = (key, idx, getattr(self, "_pick_block", None))
         return idx
 
     def _pick_static_tris(self, key, v0, e1, e2, te) -> dict:
@@ -10499,7 +10812,11 @@ class Viewport(QOpenGLWidget):
                origin.x(), origin.y(), origin.z(),
                direction.x(), direction.y(), direction.z())
         cached = getattr(self, "_hover_hits_cache", None)
-        if cached is not None and cached[0] == key:
+        # The answer is per entity OF THIS INDEX: a lazy index (#158) is
+        # rebuilt between two asks of one hover when a query brings new
+        # placements in, and the old index's per-entity times read against
+        # the new one picked the wrong face, or ran past its end.
+        if cached is not None and cached[0] == key and cached[2] is idx:
             return cached[1]
         face_t = self._ray_hits(idx, origin, direction, idx.ent_sel)
         sp = _active_cut(self.scene)
@@ -10517,7 +10834,7 @@ class Viewport(QOpenGLWidget):
                 vals = face_t[finite]
                 vals[hidden] = np.inf
                 face_t[finite] = vals
-        self._hover_hits_cache = (key, face_t)
+        self._hover_hits_cache = (key, face_t, idx)
         return face_t
 
     def edge_point_under_cursor(self, edge, screen_x: float, screen_y: float):
@@ -10740,12 +11057,15 @@ class Viewport(QOpenGLWidget):
                self.width(), self.height(),
                getattr(self, "_edit_rest_mode", None))
         cached = getattr(self, "_gedge_px_cache", None)
-        if cached is not None and cached[0] == key:
+        # The array itself, not only its id(): a rebuilt index's edges can
+        # be given the address of the ones they replaced.
+        if (cached is not None and cached[0] == key and len(cached) > 2
+                and cached[2] is idx.gedge_a):
             return cached[1]
         ax, ay, oka = self._project_px(idx.gedge_a)
         bx, by, okb = self._project_px(idx.gedge_b)
         data = (ax, ay, bx, by, oka & okb)
-        self._gedge_px_cache = (key, data)
+        self._gedge_px_cache = (key, data, idx.gedge_a)
         return data
 
     #: The group-edge distances' contract with their two readers (the
@@ -10784,7 +11104,8 @@ class Viewport(QOpenGLWidget):
         # the snap scene the rounded one — the same pass must serve both.
         key = (id(proj), int(round(px)), int(round(py)))
         cached = getattr(self, "_gedge_dist_cache", None)
-        if cached is not None and cached[0] == key:
+        if (cached is not None and cached[0] == key and len(cached) > 2
+                and cached[2] is proj):
             return cached[1]
         ax, ay, bx, by, ok = proj
         d = None
@@ -10815,7 +11136,7 @@ class Viewport(QOpenGLWidget):
                         break
         if d is None:
             d = segment_distances(ax, ay, bx, by, ok, px, py)
-        self._gedge_dist_cache = (key, d)
+        self._gedge_dist_cache = (key, d, proj)
         return d
 
     def _ledge_screen(self):
@@ -10872,8 +11193,11 @@ class Viewport(QOpenGLWidget):
         mouse move; the ~dozens near the cursor cover the point/edge snaps
         the user can actually see."""
         # The placements near THIS pixel enter the index first (lazy mode,
-        # #158): the projection below reads the index as it stands.
-        self._pick_index(near=("snap", px, py))
+        # #158): the projection below reads the index as it stands, and the
+        # edges are read from that same one. Asking again bakes more and
+        # reorders the lazy part: the measured positions then pointed at
+        # other edges, or past the end (the SPR, hovering with Line).
+        idx = self._pick_index(near=("snap", px, py))
         proj = self._gedge_screen()
         if proj is None:
             return []
@@ -10891,8 +11215,6 @@ class Viewport(QOpenGLWidget):
         cand = np.where(d < radius_px)[0]
         if len(cand) > cap:
             cand = cand[np.argsort(d[cand])[:cap]]
-        idx = self._pick_index(near=("snap", px, py))
-        ga, gb = idx.gedge_a, idx.gedge_b
         return [_group_pseudo_edge(idx, int(i)) for i in cand]
 
     def pick_edge_any(self, screen_x: float, screen_y: float):
@@ -10902,6 +11224,9 @@ class Viewport(QOpenGLWidget):
         the reference lock, Push/Pull level with it (groups are read
         from outside without opening them)."""
         loose = self.pick_edge(screen_x, screen_y)
+        # The index this pixel asks for, then its projection: the edge is
+        # read from the index it was measured on (see _nearby_group_edges).
+        idx = self._pick_index(near=("px", screen_x, screen_y))
         proj = self._gedge_screen()
         if proj is None:
             return loose
@@ -10921,7 +11246,7 @@ class Viewport(QOpenGLWidget):
                 dl, _t = _closest_on_segment_2d((screen_x, screen_y), pa, pb)
                 if dl <= d[i]:
                     return loose
-        return _group_pseudo_edge(self._pick_index(near=("px", screen_x, screen_y)), i)
+        return _group_pseudo_edge(idx, i)
 
     #: How close (px) the cursor must come to a component's origin or an
     #: arc's midpoint for it to enter the snap scene at all.
@@ -11504,6 +11829,22 @@ class Viewport(QOpenGLWidget):
                 best = name
         return best
 
+    def _axis_source_visible(self, name: str, point: QVector3D) -> bool:
+        """Whether an axis has a visible screen direction at ``point``.
+
+        An axis viewed end-on has no usable screen direction; near its
+        vanishing point a small world step must still move visibly on screen.
+        """
+        from core import axes as _axes
+        axis = _axes.axis(name)
+        half_step = 0.25
+        before = self._world_to_pixel(point - axis * half_step)
+        after = self._world_to_pixel(point + axis * half_step)
+        if before is None or after is None:
+            return False
+        return math.hypot(after[0] - before[0],
+                          after[1] - before[1]) >= 0.5
+
     def pick_guide(self, screen_x: float, screen_y: float):
         """Return the construction guide nearest the cursor within the pick
         threshold, or ``None`` (for the Eraser)."""
@@ -11567,17 +11908,37 @@ class Viewport(QOpenGLWidget):
         _c, px, py, ok = cat
         d = np.where(ok, np.hypot(px - screen_x, py - screen_y), np.inf)
         cand = np.where(d < self.pick_threshold_px)[0]
-        for i in cand[np.argsort(d[cand])]:
+
+        def vertex_of(i):
             if i < 2 * n:
                 e = idx.edges[int(i) % n]
-                vertex = e.a if i < n else e.b
-            else:
-                j = int(i) - 2 * n
-                arr = idx.gedge_a if j < m else idx.gedge_b
-                p = arr[j % m]
-                vertex = QVector3D(p[0], p[1], p[2])
-            if not self._is_occluded(vertex):
-                return vertex
+                return e.a if i < n else e.b
+            j = int(i) - 2 * n
+            arr = idx.gedge_a if j < m else idx.gedge_b
+            p = arr[j % m]
+            return QVector3D(p[0], p[1], p[2])
+        order = cand[np.argsort(d[cand])]
+        if not len(order):
+            return None
+        # The nearest one, alone first (usually the answer); then the
+        # rest in batches of 8, 16, 32… sharing one occlusion pass, as the
+        # snap engine reads its candidates. One ray per candidate, in turn,
+        # took minutes a pointer move over a dense mesh whose hundreds of
+        # nearby corners were nearly all hidden (a 128 788-face STL in #158).
+        first = vertex_of(order[0])
+        if not self._is_occluded(first):
+            return first
+        many = getattr(self, "_occluded_many", None)
+        k, size = 1, 8
+        while k < len(order):
+            batch = [vertex_of(i) for i in order[k:k + size]]
+            hidden = (many(batch) if many is not None
+                      else [self._is_occluded(v) for v in batch])
+            for v, h in zip(batch, hidden):
+                if not h:
+                    return v
+            k += size
+            size *= 2
         return None
 
     def hlr_geometry(self):
@@ -11917,6 +12278,8 @@ class Viewport(QOpenGLWidget):
         # settled as hidden stops asking.
         meet = meet & (tmin < limit[:, None])                         # (R, S)
         ent_mask = idx.ent_vis
+        native = _occlusion_native()
+        o3 = (float(o[0]), float(o[1]), float(o[2]))
         live_spans = np.flatnonzero(meet.any(axis=0))
         order = np.argsort(np.where(meet[:, live_spans],
                                     tmin[:, live_spans], np.inf).min(axis=0))
@@ -11940,12 +12303,24 @@ class Viewport(QOpenGLWidget):
                 continue
             if not live.all():
                 v0, e1, e2 = v0[live], e1[live], e2[live]
-            s = o - v0                                                # (n, 3)
-            q = np.cross(s, e1)                                       # (n, 3)
-            uq = np.einsum("ij,ij->i", e2, q)                         # (n,)
             r_all = np.flatnonzero(meet[:, si] & (best >= limit))
             if not len(r_all):
                 continue
+            if native is not None:
+                # The same block in the native engine; the rays it cannot
+                # call bit for bit (core/occlusion.rs) come back to NumPy
+                # below, from where they stood before this span.
+                before = best[r_all]
+                nb, doubt = native.occlusion_span(
+                    o3, np.ascontiguousarray(D[r_all]), before,
+                    np.ascontiguousarray(limit[r_all]), v0, e1, e2)
+                best[r_all] = np.where(doubt, before, nb)
+                r_all = r_all[doubt]
+                if not len(r_all):
+                    continue
+            s = o - v0                                                # (n, 3)
+            q = np.cross(s, e1)                                       # (n, 3)
+            uq = np.einsum("ij,ij->i", e2, q)                         # (n,)
             step = max(1, self._OCCL_BLOCK // max(len(v0), 1))
             for k in range(0, len(r_all), step):
                 r = r_all[k:k + step]
@@ -12016,7 +12391,10 @@ class Viewport(QOpenGLWidget):
         except AttributeError:            # a bare stand-in (tests): no memo
             key = None
         cached = getattr(self, "_face_any_memo", None)
-        if key is not None and cached is not None and cached[0] == key:
+        # Keyed by the index itself, not its id(): a rebuilt index can be
+        # given the address of the one it replaced.
+        if (key is not None and cached is not None and cached[0] == key
+                and len(cached) > 2 and cached[2] is idx):
             return cached[1]
         result = (None, None)
         origin, direction = self._pixel_to_ray(screen_x, screen_y)
@@ -12035,7 +12413,7 @@ class Viewport(QOpenGLWidget):
                     result = idx.entities[chosen]
                     self._face_any_index = chosen
         if key is not None:
-            self._face_any_memo = (key, result)
+            self._face_any_memo = (key, result, idx)
         return result
 
     def pick_face_placement(self, screen_x: float, screen_y: float):
@@ -12110,6 +12488,8 @@ class Viewport(QOpenGLWidget):
         import numpy as np
         best_d = self.pick_threshold_px
         best_g = None
+        # The index first, then its projection (see _nearby_group_edges).
+        idx = self._pick_index(near=("px", screen_x, screen_y))
         proj = self._gedge_screen()
         if proj is not None:
             ax, ay, bx, by, ok = proj
@@ -12121,7 +12501,6 @@ class Viewport(QOpenGLWidget):
                              + (screen_y - ay) * dy) / safe, 0.0, 1.0)
                 d = np.hypot(ax + t * dx - screen_x,
                              ay + t * dy - screen_y)
-                idx = self._pick_index(near=("px", screen_x, screen_y))
                 # The index also carries the edges of the model OUTSIDE the
                 # open group (snap targets); those cannot be picked.
                 sel = getattr(idx, "gedge_sel", None)
@@ -12686,10 +13065,24 @@ class Viewport(QOpenGLWidget):
         self._last_pos = None
         self._orbit_pivot = None
         self._pan_mode = False
+        self._middle_drag_active = False
         if self.nav_mode is not None:
             self._apply_nav_cursor()
         else:
             self._apply_tool_cursor()
+
+    def _set_middle_drag_pan_mode(self, pan: bool) -> None:
+        """Switch an active MMB drag between orbit and pan."""
+        if not self._middle_drag_active or self.nav_mode is not None:
+            return
+        pan = bool(pan)
+        if self._pan_mode == pan:
+            return
+        self._pan_mode = pan
+        from views.icons import tool_cursor
+        cur = tool_cursor("pan" if pan else "orbit")
+        if cur is not None:
+            self.setCursor(cur)
 
     def set_nav_mode(self, mode: Optional[str]) -> None:
         """Enter a camera navigation mode ("orbit" / "pan").
@@ -12708,6 +13101,7 @@ class Viewport(QOpenGLWidget):
         self._last_pos = None             # a drag in progress ends here
         self._orbit_pivot = None
         self._pan_mode = False
+        self._middle_drag_active = False
         if mode is not None:
             self._apply_nav_cursor()      # orbit / pan / magnifier icons
         else:
@@ -12804,6 +13198,7 @@ class Viewport(QOpenGLWidget):
         if ev.button() == Qt.MiddleButton:
             self._last_pos = ev.position().toPoint()
             self._pan_mode = bool(ev.modifiers() & Qt.ShiftModifier)
+            self._middle_drag_active = True
             self._orbit_pivot = self._orbit_pivot_at(
                 ev.position().x(), ev.position().y())
             self._pan_depth = self._depth_of(self._orbit_pivot)
@@ -13030,6 +13425,9 @@ class Viewport(QOpenGLWidget):
             # «el orbital se mantiene activo… no se desactiva con nada»
             # (Andrés Rodríguez, Windows 11 + NVIDIA, 0.5.0).
             self._end_camera_drag()
+        if self._middle_drag_active:
+            self._set_middle_drag_pan_mode(
+                bool(ev.modifiers() & Qt.ShiftModifier))
         if self._last_pos is not None:
             p = ev.position().toPoint()
             dx = p.x() - self._last_pos.x()
@@ -13299,6 +13697,7 @@ class Viewport(QOpenGLWidget):
             self._last_pos = None
             self._orbit_pivot = None
             self._pan_mode = False
+            self._middle_drag_active = False
             if self.nav_mode is not None:
                 self._apply_nav_cursor()
             else:
@@ -13461,6 +13860,14 @@ class Viewport(QOpenGLWidget):
         return None
 
     def wheelEvent(self, ev) -> None:
+        # While a 3D mouse moves the view, wheel notches are its driver's
+        # imitation of the same push (3Dconnexion does that for programs it
+        # does not know): zooming on them too made the view jump a step
+        # about eight times a second over the smooth move.
+        from views.ndof_input import cap_in_use
+        if cap_in_use():
+            ev.accept()
+            return
         self._input_t = _time_mod.monotonic()   # P0: input→paint latency
         # Zoom toward the cursor: keep the point under the
         # pointer fixed on screen, not the origin. During a wheel burst the
@@ -13613,6 +14020,7 @@ class Viewport(QOpenGLWidget):
             # outlives the key, so the Shift release must not undo it.
             self._shift_plane_mark = None
         if ev.key() == Qt.Key_Shift and not ev.isAutoRepeat():
+            self._set_middle_drag_pan_mode(True)
             self._capture_shift_lock()
             self._refresh_snap()
             # Do not return — Shift is a modifier; let the rest fall through.
@@ -13984,6 +14392,7 @@ class Viewport(QOpenGLWidget):
                 ev.accept()
                 return
         if ev.key() == Qt.Key_Shift and not ev.isAutoRepeat():
+            self._set_middle_drag_pan_mode(False)
             self._shift_lock = None
             self._release_shift_plane_mark()
             self._refresh_snap()

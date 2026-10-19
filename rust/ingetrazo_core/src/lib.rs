@@ -14,6 +14,8 @@ mod boxes;
 mod facegeom;
 mod gltape;
 mod hlr;
+mod instances;
+mod occlusion;
 mod parity;
 mod weld;
 
@@ -23,10 +25,13 @@ fn ingetrazo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<HlrOccluders>()?;
     m.add_function(wrap_pyfunction!(touching_boxes, m)?)?;
     m.add_class::<ParityTris>()?;
+    m.add_function(wrap_pyfunction!(occlusion_span, m)?)?;
     m.add_function(wrap_pyfunction!(face_geometry, m)?)?;
     m.add_function(wrap_pyfunction!(qt_vector_probe, m)?)?;
     m.add_function(wrap_pyfunction!(weld_points, m)?)?;
     m.add_class::<GlReplay>()?;
+    m.add_class::<InstanceProto>()?;
+    m.add_class::<InstanceSet>()?;
     Ok(())
 }
 
@@ -389,4 +394,161 @@ impl GlReplay {
         unsafe { self.tape.run(&rows, &fl) }
             .map_err(|r| pyo3::exceptions::PyValueError::new_err(format!("bad opcode at {r}")))
     }
+}
+
+/// One prototype for the spatial index: its pick triangles (``v0``,
+/// ``e1``, ``e2``: (T,3) local, as the chunk keeps them) under a BVH, and
+/// its hard edges (``edges``: (E,6) local endpoints).
+#[pyclass(frozen)]
+struct InstanceProto {
+    inner: std::sync::Arc<instances::Proto>,
+}
+
+#[pymethods]
+impl InstanceProto {
+    #[new]
+    fn new(
+        py: Python<'_>,
+        v0: PyReadonlyArray2<'_, f64>,
+        e1: PyReadonlyArray2<'_, f64>,
+        e2: PyReadonlyArray2<'_, f64>,
+        edges: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Self> {
+        let (a, b, c) = (rows3(&v0.as_array()), rows3(&e1.as_array()), rows3(&e2.as_array()));
+        if a.len() != b.len() || a.len() != c.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err("triangle arrays"));
+        }
+        let ev = edges.as_array();
+        if ev.shape()[0] > 0 && ev.shape()[1] != 6 {
+            return Err(pyo3::exceptions::PyValueError::new_err("edges (E,6)"));
+        }
+        let es: Vec<[[f64; 3]; 2]> = (0..ev.shape()[0]).map(|i| [
+            [ev[[i, 0]], ev[[i, 1]], ev[[i, 2]]], [ev[[i, 3]], ev[[i, 4]], ev[[i, 5]]]]).collect();
+        let inner = py.detach(|| instances::Proto::new(a, b, c, es));
+        Ok(Self { inner: std::sync::Arc::new(inner) })
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.n_tris()
+    }
+}
+
+/// The placements of a scene state over their prototypes: ``protos`` (a
+/// list of InstanceProto), ``proto_of`` (P,) which one each placement
+/// shows, ``mats`` (P,16) their matrices column-major (QMatrix4x4.data()).
+#[pyclass(frozen)]
+struct InstanceSet {
+    protos: Vec<std::sync::Arc<instances::Proto>>,
+    places: Vec<instances::Placement>,
+}
+
+#[pymethods]
+impl InstanceSet {
+    #[new]
+    fn new(
+        protos: Vec<PyRef<'_, InstanceProto>>,
+        proto_of: PyReadonlyArray1<'_, i64>,
+        mats: PyReadonlyArray2<'_, f64>,
+    ) -> PyResult<Self> {
+        let pr: Vec<std::sync::Arc<instances::Proto>> = protos.iter().map(|p| p.inner.clone()).collect();
+        let po = proto_of.as_array();
+        let m = mats.as_array();
+        if m.shape()[0] != po.len() || (po.len() > 0 && m.shape()[1] != 16) {
+            return Err(pyo3::exceptions::PyValueError::new_err("placements"));
+        }
+        let mut places = Vec::with_capacity(po.len());
+        for i in 0..po.len() {
+            let k = po[i];
+            if k < 0 || k as usize >= pr.len() {
+                return Err(pyo3::exceptions::PyValueError::new_err("proto index"));
+            }
+            let mut mm = [0.0f64; 16];
+            for j in 0..16 {
+                mm[j] = m[[i, j]];
+            }
+            places.push(instances::Placement { proto: k as usize, m: mm, inv: instances::affine_inverse(&mm) });
+        }
+        Ok(Self { protos: pr, places })
+    }
+
+    fn __len__(&self) -> usize {
+        self.places.len()
+    }
+
+    /// Of placements ``cand``, those whose triangles the world ray ``o`` +
+    /// t·``d`` may meet for t in [0, ``reach``] (None: unbounded) — a
+    /// placement whose matrix cannot be inverted is always kept.
+    #[pyo3(signature = (cand, o, d, reach=None))]
+    fn ray_filter(&self, py: Python<'_>, cand: PyReadonlyArray1<'_, i64>,
+                  o: (f64, f64, f64), d: (f64, f64, f64), reach: Option<f64>) -> PyResult<Vec<i64>> {
+        use rayon::prelude::*;
+        let c = cand.as_array().to_vec();
+        self.check(&c)?;
+        let (o, d) = ([o.0, o.1, o.2], [d.0, d.1, d.2]);
+        let lim = reach.unwrap_or(f64::INFINITY);
+        Ok(py.detach(|| c.par_iter().copied().filter(|&i| {
+            let p = &self.places[i as usize];
+            match p.local_ray(o, d) {
+                None => true,
+                Some((lo, ld)) => self.protos[p.proto].ray_may_hit(lo, ld, lim),
+            }
+        }).collect()))
+    }
+
+    /// Of placements ``cand``, those with something near ``(px, py)`` on a
+    /// ``w``×``h`` view through ``mvp`` (16 floats, column-major): a hard
+    /// edge within ``edge_reach`` px, a triangle within ``tri_reach``.
+    #[allow(clippy::too_many_arguments)]
+    fn screen_filter(&self, py: Python<'_>, cand: PyReadonlyArray1<'_, i64>, mvp: Vec<f64>,
+                     w: f64, h: f64, px: f64, py_: f64, edge_reach: f64,
+                     tri_reach: f64) -> PyResult<Vec<i64>> {
+        use rayon::prelude::*;
+        if mvp.len() != 16 {
+            return Err(pyo3::exceptions::PyValueError::new_err("mvp"));
+        }
+        let c = cand.as_array().to_vec();
+        self.check(&c)?;
+        let mut a = [0.0f64; 16];
+        a.copy_from_slice(&mvp);
+        Ok(py.detach(|| c.par_iter().copied().filter(|&i| {
+            let p = &self.places[i as usize];
+            let m = instances::mat_mul(&a, &p.m);
+            self.protos[p.proto].screen_near(&m, w, h, px, py_, edge_reach, tri_reach)
+        }).collect()))
+    }
+}
+
+impl InstanceSet {
+    fn check(&self, c: &[i64]) -> PyResult<()> {
+        if c.iter().any(|&i| i < 0 || i as usize >= self.places.len()) {
+            return Err(pyo3::exceptions::PyValueError::new_err("placement index"));
+        }
+        Ok(())
+    }
+}
+
+/// ``Viewport._occluded_many``'s block for one span: rays from ``origin``
+/// along the rows of ``dirs`` (R,3), against the span's triangles ``v0``,
+/// ``e1``, ``e2`` (N,3). Returns ``(best, doubt)``: per ray, the minimum of
+/// ``best`` (R,) and every accepted hit, and whether that answer could hang
+/// on the last bit (then the caller asks NumPy), with ``limit`` (R,) the
+/// distance of the point the ray goes to.
+#[pyfunction]
+fn occlusion_span<'py>(
+    py: Python<'py>,
+    origin: (f64, f64, f64),
+    dirs: PyReadonlyArray2<'py, f64>,
+    best: PyReadonlyArray1<'py, f64>,
+    limit: PyReadonlyArray1<'py, f64>,
+    v0: PyReadonlyArray2<'py, f64>,
+    e1: PyReadonlyArray2<'py, f64>,
+    e2: PyReadonlyArray2<'py, f64>,
+) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<bool>>)> {
+    let o = [origin.0, origin.1, origin.2];
+    let d = rows3(&dirs.as_array());
+    let b = best.as_array().to_vec();
+    let l = limit.as_array().to_vec();
+    let (a, x, y) = (rows3(&v0.as_array()), rows3(&e1.as_array()), rows3(&e2.as_array()));
+    let (nb, doubt) = py.detach(|| occlusion::span(o, &d, &b, &l, &a, &x, &y));
+    Ok((PyArray1::from_vec(py, nb), PyArray1::from_vec(py, doubt)))
 }

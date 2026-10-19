@@ -338,7 +338,25 @@ if sys.platform == 'win32':
                   if not (Path(b[0]).name.lower() in _DWG_DLLS
                           and Path(b[0]).parent == Path('.'))]
 
-pyz = PYZ(a.pure, a.zipped_data)
+# Qt's HTTPS on Windows goes through Windows' own TLS (schannel), never
+# OpenSSL. Qt looks for libssl-3-x64.dll beside the .exe, then in System32,
+# and reaches the copy in _internal only through PATH — so a machine where
+# another program left OpenSSL 3.6 in System32 got that libssl, linked
+# against OUR libcrypto 3.5, and the extension manager died on «CRYPTO_calloc
+# not found» (#564). Choosing schannel in code is too late: asking Qt which
+# backends exist already loads OpenSSL. Without the plugin Qt picks
+# schannel. Python's own ssl uses libssl-3.dll / libcrypto-3.dll (no -x64)
+# and stays.
+if sys.platform == 'win32':
+    _QT_OPENSSL = {'qopensslbackend.dll', 'libssl-3-x64.dll',
+                   'libcrypto-3-x64.dll'}
+    _before = len(a.binaries)
+    a.binaries = [b for b in a.binaries
+                  if Path(b[0]).name.lower() not in _QT_OPENSSL]
+    print('spec: dropped %d OpenSSL files of Qt (#564)'
+          % (_before - len(a.binaries)))
+
+pyz =PYZ(a.pure, a.zipped_data)
 
 icon = None
 if sys.platform == 'win32':

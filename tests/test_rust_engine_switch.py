@@ -52,3 +52,42 @@ def test_environment_overrides_preference(fresh, monkeypatch, env, pref, on):
     general_settings.set_value(_native.SETTING, pref)
     mod = fresh()
     assert (mod.native is not None) is on
+
+
+def test_a_start_that_never_drew_turns_the_engine_off(monkeypatch):
+    """The start guard: with the engine on, a start marks itself under way
+    and the first drawn frame clears the mark; a start that finds the mark
+    still there (the last one never got to the window) goes back to the
+    normal engine, saved, and says so once."""
+    monkeypatch.delenv("INGETRAZO_RUST", raising=False)
+    try:
+        general_settings.set_value(_native.SETTING, "1")
+        general_settings.set_value(_native.STARTING, "0")
+        assert _native.start_guard([]) is False
+        assert general_settings.value(_native.STARTING) == "1"
+        _native.start_ok()                         # the window drew
+        assert general_settings.value(_native.STARTING) == "0"
+        assert _native.start_guard([]) is False    # a good start again
+        # ... and this one dies before its first frame.
+        assert _native.start_guard([]) is True
+        assert general_settings.value(_native.SETTING) == "0"
+        assert general_settings.value(_native.STARTING) == "0"
+        assert _native.start_guard([]) is False    # off now: nothing to say
+    finally:
+        general_settings.set_value(_native.SETTING, "0")
+        general_settings.set_value(_native.STARTING, "0")
+
+
+def test_python_engine_flag_wins_for_one_run(monkeypatch):
+    monkeypatch.delenv("INGETRAZO_RUST", raising=False)
+    try:
+        general_settings.set_value(_native.SETTING, "1")
+        assert _native.start_guard(["--python-engine"]) is False
+        import os
+        assert os.environ["INGETRAZO_RUST"] == "0"
+        assert general_settings.value(_native.SETTING) == "1"   # kept
+        assert _native.wanted() is False
+    finally:
+        monkeypatch.delenv("INGETRAZO_RUST", raising=False)
+        general_settings.set_value(_native.SETTING, "0")
+        general_settings.set_value(_native.STARTING, "0")

@@ -473,6 +473,73 @@ class MainWindow(QMainWindow):
                     self.addToolBarBreak(area)
                 self.addToolBar(area, tb)
                 tb.setVisible(shown)
+        self._wrap_toolbar_rows()
+
+    def addToolBar(self, *args):  # noqa: N802 — Qt override
+        """Every toolbar, the window's own and an extension's — at start-up
+        or later from its menu — goes through here; a row that no longer
+        fits on the screen is wrapped once the layout has settled."""
+        result = super().addToolBar(*args)
+        timer = self.__dict__.get("_toolbar_wrap_timer")
+        if timer is None:
+            from PySide6.QtCore import QTimer
+            timer = self._toolbar_wrap_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(0)
+            timer.timeout.connect(self._wrap_toolbar_rows)
+        timer.start()
+        return result
+
+    def _wrap_toolbar_rows(self) -> None:
+        """Start a new row of toolbars where a row stops fitting on the
+        screen. Qt never wraps a row by itself, and every toolbar keeps at
+        least its handle and its overflow arrow: with the 52 extensions of
+        the catalog installed, 34 toolbars shared the top row and the window
+        could not be narrower than 2205 px on a 1477 px screen — Marco
+        could not resize it (18-10). A row that fits is left as it is, so
+        the factory layout and the user's own never move."""
+        from PySide6.QtCore import Qt
+        screen = self.screen()
+        if screen is None or not self.isVisible():
+            return
+        self.layout().activate()
+        avail = screen.availableGeometry()
+        frame_w = self.frameGeometry().width() - self.width()
+        frame_h = self.frameGeometry().height() - self.height()
+        wrapped = False
+        for area in (Qt.TopToolBarArea, Qt.BottomToolBarArea,
+                     Qt.LeftToolBarArea, Qt.RightToolBarArea):
+            vertical = area in (Qt.LeftToolBarArea, Qt.RightToolBarArea)
+            limit = (avail.height() - frame_h - self.menuBar().height()
+                     if vertical else avail.width() - frame_w) - 8
+            bars = [tb for tb in self.findChildren(QToolBar)
+                    if not tb.isFloating() and tb.isVisibleTo(self)
+                    and self.toolBarArea(tb) == area]
+            if vertical:
+                bars.sort(key=lambda tb: (tb.geometry().x(), tb.geometry().y()))
+            else:
+                bars.sort(key=lambda tb: (tb.geometry().y(), tb.geometry().x()))
+            row = None
+            used = 0
+            for tb in bars:
+                g = tb.geometry()
+                line = g.x() if vertical else g.y()
+                hint = tb.minimumSizeHint()
+                size = hint.height() if vertical else hint.width()
+                if line != row:
+                    row, used = line, size
+                    continue
+                if used + size > limit:
+                    self.insertToolBarBreak(tb)
+                    wrapped = True
+                    used = size
+                else:
+                    used += size
+        if wrapped:
+            self.layout().activate()
+            if not self.isMaximized() and not self.isFullScreen() \
+                    and self.frameGeometry().width() > avail.width():
+                self.resize(avail.width() - frame_w, self.height())
 
     def restore_default_toolbars(self) -> None:
         """Window ▸ Restore default toolbars (and the right-click menu over
@@ -2578,6 +2645,8 @@ class MainWindow(QMainWindow):
                 self._show_default_trays(st)
                 self._place_new_toolbars(st)
                 self._pack_toolbars()
+            else:
+                self._wrap_toolbar_rows()
 
     def _on_manage_extensions(self) -> None:
         from views.extension_manager_dialog import ExtensionManagerDialog

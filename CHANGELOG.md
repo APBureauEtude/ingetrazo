@@ -17,6 +17,16 @@ follow [SemVer](https://semver.org).
   Mayús pasa de orbitar a desplazar y al revés.
 
 ### Cambiado
+- **Los menús de las extensiones se ordenan solos cuando hay muchas.** Con
+  el catálogo entero instalado, el menú del botón derecho era más alto que
+  la pantalla (Qt lo partía en dos columnas) y el menú Extensiones tenía
+  62 líneas. Ahora las entradas sueltas de una misma extensión van en un
+  submenú con su nombre; en el botón derecho, con más de 8 extensiones,
+  todas van bajo «Extensiones ▸»; y en el menú Extensiones, con más de 15,
+  cada una va en su categoría del catálogo (Arquitectura, Dibujo,
+  Render…). Con pocas extensiones casi nada cambia. Preferencias ▸ General
+  ▸ «Menús de las extensiones» permite agruparlas siempre o dejarlas como
+  antes.
 - **Elegir otra vez el mismo componente de la biblioteca pone una copia
   del mismo componente.** Cada vez se volvía a leer el archivo del modelo
   y se añadía una pieza nueva e independiente: cuatro veces el mismo
@@ -85,6 +95,18 @@ follow [SemVer](https://semver.org).
   selección en el visor 3D sigue en naranja.
 
 ### Corregido
+- **La ventana no se dejaba encoger con muchas extensiones.** Sus barras
+  de herramientas se sumaban a la misma fila de arriba (34 barras con el
+  catálogo entero) y la ventana no podía ser más estrecha que 2205 px en
+  una pantalla de 1477. Ahora una fila que no cabe en la pantalla sigue
+  en otra fila; las que caben no se mueven.
+- **La ventana no se maximizaba con paneles de extensiones muy altos.** Un
+  panel de 652 px de alto mínimo hacía que la ventana necesitara 902 px en
+  una pantalla con 890: GNOME no la maximizaba (o quedaba más grande que
+  la pantalla). Ahora, solo cuando la ventana no cabe, los paneles
+  laterales más altos ganan una barra de desplazamiento.
+- **«Crear componente…» salía dos veces** en el menú del botón derecho con
+  geometría suelta y grupos seleccionados a la vez.
 - **Pasar el cursor con Línea sobre un modelo muy grande ya no da error**
   (#158): en modelos con más de un millón de caras en componentes, las
   aristas de los grupos cercanas al cursor se medían en una versión del

@@ -2995,5 +2995,10 @@
  "Performance: hover with Line and Move up to twice as fast, the pick index split into cells, and the interaction benchmark.": "Leistung: Hovern mit Linie und Verschieben bis zu doppelt so schnell, der Auswahlindex in Zellen unterteilt und der Interaktions-Benchmark.",
  "Bug reports and requests from daily use: Push/Pull, Offset, toolbars and the sidebars.": "Fehlerberichte und Wünsche aus dem täglichen Gebrauch: Drücken/Ziehen, Versatz, Werkzeugleisten und Seitenleisten.",
  "Reports on installation, the extension manager, shortcuts and curved surfaces.": "Berichte zur Installation, zur Erweiterungsverwaltung, zu Tastenkürzeln und gekrümmten Flächen.",
- "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Funktionswünsche aus der Modellierpraxis: 3D-Text, Kopien entlang Folge mir, Punkte und Drücken/Ziehen an Linien."
+ "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Funktionswünsche aus der Modellierpraxis: 3D-Text, Kopien entlang Folge mir, Punkte und Drücken/Ziehen an Linien.",
+ "Extension menus:": "Erweiterungsmenüs:",
+ "Group them when there are many": "Bei vielen gruppieren",
+ "Always in submenus": "Immer in Untermenüs",
+ "Each entry on its own": "Jeder Eintrag einzeln",
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Wie die Einträge der Erweiterungen im Rechtsklickmenü (sofort) und im Menü Erweiterungen (beim nächsten Start) erscheinen."
 }

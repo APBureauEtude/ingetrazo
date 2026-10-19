@@ -2996,5 +2996,10 @@
  "Performance: hover with Line and Move up to twice as fast, the pick index split into cells, and the interaction benchmark.": "Prestazioni: passaggio del cursore con Linea e Sposta fino a due volte più veloce, l’indice di selezione diviso in celle e il benchmark di interazione.",
  "Bug reports and requests from daily use: Push/Pull, Offset, toolbars and the sidebars.": "Segnalazioni di bug e richieste dall’uso quotidiano: Spingi/Tira, Offset, barre degli strumenti e barre laterali.",
  "Reports on installation, the extension manager, shortcuts and curved surfaces.": "Segnalazioni su installazione, gestore delle estensioni, scorciatoie e superfici curve.",
- "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Richieste di funzioni dalla pratica di modellazione: testo 3D, copie lungo Seguimi, punti e Spingi/Tira sulle linee."
+ "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Richieste di funzioni dalla pratica di modellazione: testo 3D, copie lungo Seguimi, punti e Spingi/Tira sulle linee.",
+ "Extension menus:": "Menu delle estensioni:",
+ "Group them when there are many": "Raggrupparle quando sono molte",
+ "Always in submenus": "Sempre in sottomenu",
+ "Each entry on its own": "Ogni voce separata",
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Come appaiono le voci delle estensioni nel menu del tasto destro (subito) e nel menu Estensioni (al prossimo avvio)."
 }

@@ -2995,5 +2995,10 @@
  "Performance: hover with Line and Move up to twice as fast, the pick index split into cells, and the interaction benchmark.": "Rendimiento: pasar el cursor con Línea y Mover hasta el doble de rápido, el índice de selección dividido en celdas y el banco de interacción.",
  "Bug reports and requests from daily use: Push/Pull, Offset, toolbars and the sidebars.": "Informes de fallos y peticiones del uso diario: Empujar/Tirar, Equidistancia, barras de herramientas y barras laterales.",
  "Reports on installation, the extension manager, shortcuts and curved surfaces.": "Informes sobre la instalación, el gestor de extensiones, los atajos y las superficies curvas.",
- "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Peticiones nacidas de la práctica de modelado: texto 3D, copias a lo largo de Sígueme, puntos y Empujar/Tirar sobre líneas."
+ "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Peticiones nacidas de la práctica de modelado: texto 3D, copias a lo largo de Sígueme, puntos y Empujar/Tirar sobre líneas.",
+ "Extension menus:": "Menús de las extensiones:",
+ "Group them when there are many": "Agruparlas cuando haya muchas",
+ "Always in submenus": "Siempre en submenús",
+ "Each entry on its own": "Cada entrada por separado",
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Cómo se muestran las entradas de las extensiones en el menú del botón derecho (al instante) y en el menú Extensiones (al volver a abrir)."
 }

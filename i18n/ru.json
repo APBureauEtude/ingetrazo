@@ -2995,5 +2995,10 @@
  "Performance: hover with Line and Move up to twice as fast, the pick index split into cells, and the interaction benchmark.": "Производительность: наведение с «Линией» и «Переместить» до двух раз быстрее, индекс выбора, разбитый на ячейки, и тест интерактивности.",
  "Bug reports and requests from daily use: Push/Pull, Offset, toolbars and the sidebars.": "Отчёты об ошибках и пожелания из повседневной работы: «Тянуть/Толкать», «Смещение», панели инструментов и боковые панели.",
  "Reports on installation, the extension manager, shortcuts and curved surfaces.": "Отчёты об установке, менеджере расширений, сочетаниях клавиш и криволинейных поверхностях.",
- "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Пожелания из практики моделирования: 3D-текст, копии вдоль «Следуй за мной», точки и «Тянуть/Толкать» по линиям."
+ "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Пожелания из практики моделирования: 3D-текст, копии вдоль «Следуй за мной», точки и «Тянуть/Толкать» по линиям.",
+ "Extension menus:": "Меню расширений:",
+ "Group them when there are many": "Группировать, если их много",
+ "Always in submenus": "Всегда в подменю",
+ "Each entry on its own": "Каждый пункт отдельно",
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Как пункты расширений показываются в контекстном меню (сразу) и в меню «Расширения» (при следующем запуске)."
 }

@@ -455,21 +455,54 @@ class _LayerTree(QTreeWidget):
     _CELLS = (COL_ACTIVE, COL_EYE, COL_LOCK, COL_ISOLATE, COL_COLOR,
               COL_LINETYPE, COL_WEIGHT, COL_OPACITY, COL_PRINT)
 
+    #: A press on one of the cells is the panel's until the button is let
+    #: go: Qt never saw it, so a move with the button held would draw a
+    #: selection box from wherever Qt's last press was — a few pixels of
+    #: wobble while clicking an eye selected a run of layers.
+    _cell_press = False
+
+    def _cell_click(self, event) -> bool:
+        """Act on a plain left click on one of :attr:`_CELLS`; whether it
+        was one (and so taken)."""
+        if (event.button() != Qt.LeftButton
+                or event.modifiers() & (Qt.ControlModifier
+                                        | Qt.ShiftModifier)):
+            return False
+        pos = event.position().toPoint()
+        item = self.itemAt(pos)
+        col = self.columnAt(pos.x())
+        if item is None or col not in self._CELLS:
+            return False
+        key = self._panel._key(item)
+        targets = self._panel._targets(item)
+        event.accept()
+        self._cell_press = True
+        QTimer.singleShot(0, lambda: self._panel.click_cell(
+            key, col, targets))
+        return True
+
     def mousePressEvent(self, event) -> None:
-        if (event.button() == Qt.LeftButton
-                and not event.modifiers() & (Qt.ControlModifier
-                                             | Qt.ShiftModifier)):
-            pos = event.position().toPoint()
-            item = self.itemAt(pos)
-            col = self.columnAt(pos.x())
-            if item is not None and col in self._CELLS:
-                key = self._panel._key(item)
-                targets = self._panel._targets(item)
-                event.accept()
-                QTimer.singleShot(0, lambda: self._panel.click_cell(
-                    key, col, targets))
-                return
-        super().mousePressEvent(event)
+        if not self._cell_click(event):
+            super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 — Qt override
+        # Two quick clicks on an eye are two clicks (off and on again), not
+        # a double click for the list to select or rename the row with.
+        if not self._cell_click(event):
+            super().mouseDoubleClickEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:         # noqa: N802 — Qt override
+        if self._cell_press:
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:      # noqa: N802 — Qt override
+        if self._cell_press:
+            self._cell_press = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def updateGeometries(self) -> None:
         """Qt lays the header over the whole viewport; a strip is then kept

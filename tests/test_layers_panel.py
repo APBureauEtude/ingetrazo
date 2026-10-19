@@ -816,6 +816,69 @@ def test_a_real_click_on_the_eye_of_a_selected_row_acts_on_all(win):
     assert {panel._key(it)[1] for it in tree.selectedItems()} == {"A", "B"}
 
 
+def _eye_point(panel, name):
+    from PySide6.QtCore import QPoint
+    from views.layers_panel import COL_EYE
+    tree = panel.tree
+    rect = tree.visualItemRect(panel.item_for(name))
+    x = tree.columnViewportPosition(COL_EYE) + tree.columnWidth(COL_EYE) // 2
+    return QPoint(x, rect.center().y())
+
+
+def test_a_wobble_while_clicking_an_eye_selects_no_row(win):
+    """The press on an eye is the panel's, so Qt never saw it: a few
+    pixels of movement with the button held drew a selection box from
+    Qt's last press, and switching a layer on again left a run of layers
+    selected (the user's video, 2026-10-19: «Cotas» and «Guías» blue)."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtTest import QTest
+    panel = win.layers_dock.panel
+    scene = win.viewport.scene
+    scene.layers += [Layer("Capa 1"), Layer("Cotas"), Layer("Guías")]
+    panel.refresh()
+    tree = panel.tree
+    QTest.mouseClick(tree.viewport(), Qt.LeftButton, Qt.NoModifier,
+                     _eye_point(panel, DEFAULT_LAYER))        # Qt's last press
+    _app.processEvents()
+    tree.clearSelection()
+    start, end = _eye_point(panel, "Cotas"), _eye_point(panel, "Guías")
+    QTest.mousePress(tree.viewport(), Qt.LeftButton, Qt.NoModifier, start)
+    move = QMouseEvent(QEvent.MouseMove, QPointF(end),
+                       QPointF(tree.viewport().mapToGlobal(end)),
+                       Qt.NoButton, Qt.LeftButton, Qt.NoModifier)
+    QApplication.sendEvent(tree.viewport(), move)
+    QTest.mouseRelease(tree.viewport(), Qt.LeftButton, Qt.NoModifier, end)
+    _app.processEvents()
+    assert tree.selectedItems() == []
+    assert not scene.layer("Cotas").visible and scene.layer("Guías").visible
+
+
+def test_two_quick_clicks_on_an_eye_switch_it_off_and_on(win):
+    """The second of two quick clicks reaches the list as a double click:
+    it is a click on the eye too, never a double click that selects (or
+    renames) the row."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtTest import QTest
+    panel = win.layers_dock.panel
+    scene = win.viewport.scene
+    scene.layers += [Layer("Cotas"), Layer("Guías")]
+    panel.refresh()
+    tree = panel.tree
+    p = _eye_point(panel, "Cotas")
+    QTest.mouseClick(tree.viewport(), Qt.LeftButton, Qt.NoModifier, p)
+    double = QMouseEvent(QEvent.MouseButtonDblClick, QPointF(p),
+                         QPointF(tree.viewport().mapToGlobal(p)),
+                         Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    QApplication.sendEvent(tree.viewport(), double)
+    QTest.mouseRelease(tree.viewport(), Qt.LeftButton, Qt.NoModifier, p)
+    _app.processEvents()
+    assert scene.layer("Cotas").visible                   # off, then on
+    assert tree.selectedItems() == []
+    assert tree.state() != tree.State.EditingState
+
+
 def test_the_target_column_sits_after_the_padlock(win):
     from views.layers_panel import (COL_EYE, COL_ISOLATE, COL_LOCK,
                                     COL_NAME, LayersPanel)

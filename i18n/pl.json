@@ -3004,6 +3004,11 @@
  "Bug reports and requests from daily use: Push/Pull, Offset, toolbars and the sidebars.": "Zgłoszenia błędów i prośby z codziennej pracy: Wypychanie/Wciąganie, Odsunięcie, paski narzędzi i panele boczne.",
  "Reports on installation, the extension manager, shortcuts and curved surfaces.": "Zgłoszenia dotyczące instalacji, menedżera rozszerzeń, skrótów i powierzchni zakrzywionych.",
  "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Prośby o funkcje z praktyki modelowania: tekst 3D, kopie wzdłuż Podążaj, punkty i Wypychanie/Wciąganie linii.",
+ "Extension menus:": "Menu rozszerzeń:",
+ "Group them when there are many": "Grupuj, gdy jest ich wiele",
+ "Always in submenus": "Zawsze w podmenu",
+ "Each entry on its own": "Każda pozycja osobno",
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Jak pozycje rozszerzeń są wyświetlane w menu prawego przycisku (od razu) i w menu Rozszerzenia (po ponownym uruchomieniu).",
  "Show unit": "Pokaż jednostkę",
  "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "Wyłączone: tylko liczba (1.30 zamiast 1.30 m), dla arkuszy podających jednostkę raz. Stopy i cale razem zachowują swoje znaki."
 }

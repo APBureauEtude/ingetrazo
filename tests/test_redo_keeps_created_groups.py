@@ -215,6 +215,28 @@ def test_window_loose_geometry_and_one_group_then_explode_redoes_both():
         win.close()
 
 
+def test_split_into_pieces_then_explode_redoes_both():
+    from core.history import SplitIntoPiecesCommand
+    from core.pieces import split_into_pieces
+    scene = Scene()
+    hist = History(scene)
+    m = Mesh()
+    for x in (0.0, 5.0):                   # two boxes that do not touch
+        p = [V(x, 0, 0), V(x + 1, 0, 0), V(x + 1, 1, 0), V(x, 1, 0)]
+        q = [v + V(0, 0, 1) for v in p]
+        m.add_face(list(reversed(p)))
+        m.add_face(q)
+        for i in range(4):
+            j = (i + 1) % 4
+            m.add_face([p[i], p[j], q[j], q[i]])
+    stool = Group(m, name="stool")
+    scene.groups.append(stool)
+    _replay(scene, hist,
+            SplitIntoPiecesCommand(stool, split_into_pieces(stool)),
+            lambda s: ExplodeGroupCommand(stool))
+    assert stool not in scene.groups and len(scene.groups) == 2
+
+
 def test_replace_component_then_explode_redoes_both():
     scene = Scene()
     hist = History(scene)

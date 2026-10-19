@@ -1556,13 +1556,16 @@ def test_the_columns_button_switches_columns_and_remembers(win):
     panel = win.layers_dock.panel
     QSettings().remove(LayersPanel.HIDDEN_COLUMNS_KEY)
     panel._apply_column_choice()
-    # By default the print mark, the transparency and the count are off.
-    from views.layers_panel import COL_OPACITY, COL_PRINT
-    assert panel.hidden_columns() == {COL_PRINT, COL_OPACITY, COL_COUNT}
+    # By default the weight, the print mark, the transparency and the count
+    # are off.
+    from views.layers_panel import COL_OPACITY, COL_PRINT, COL_WEIGHT
+    assert panel.hidden_columns() == {COL_WEIGHT, COL_PRINT, COL_OPACITY,
+                                      COL_COUNT}
     assert panel.tree.isColumnHidden(COL_COUNT)
     assert panel.tree.isColumnHidden(COL_OPACITY)
-    assert panel.columns_button.text() == "+3"
-    for c in (COL_COUNT, COL_OPACITY, COL_PRINT):  # now chosen: all on
+    assert panel.columns_button.text() == "+4"
+    for c in (COL_COUNT, COL_OPACITY, COL_PRINT,
+              COL_WEIGHT):                         # now chosen: all on
         panel.set_column_shown(c, True)
     win.layers_dock.raise_()
     _app.processEvents()
@@ -1585,7 +1588,7 @@ def test_the_columns_button_switches_columns_and_remembers(win):
     assert LayersPanel.hidden_columns(panel) == {COL_COUNT}
     QSettings().remove(LayersPanel.HIDDEN_COLUMNS_KEY)
     panel._apply_column_choice()
-    assert b.text() == "+3"                        # back to the default
+    assert b.text() == "+4"                        # back to the default
 
 
 def test_dropped_menus_stay_inside_the_panel(win):
@@ -1870,10 +1873,29 @@ def test_default_columns_puts_the_daily_set_back(win):
     menu = panel._columns_menu()
     next(a for a in menu.actions() if a.text() == "Default columns").trigger()
     hidden = panel.hidden_columns()
-    assert hidden == {COL_PRINT, COL_OPACITY, COL_COUNT}
-    for col in (COL_COLOR, COL_LINETYPE, COL_WEIGHT):
+    assert hidden == {COL_WEIGHT, COL_PRINT, COL_OPACITY, COL_COUNT}
+    for col in (COL_COLOR, COL_LINETYPE):
         assert not panel.tree.isColumnHidden(col)
-    assert panel.columns_button.text() == "+3"
+    assert panel.tree.isColumnHidden(COL_WEIGHT)
+    assert panel.columns_button.text() == "+4"
+
+
+def test_the_line_weight_column_starts_off(win):
+    """Nothing chosen yet: the weight is set once per layer and only shows
+    on sheets, so it waits in the columns menu; the line type stays."""
+    from PySide6.QtCore import QSettings
+    from views.layers_panel import COL_LINETYPE, COL_WEIGHT, LayersPanel
+    panel = win.layers_dock.panel
+    QSettings().remove(LayersPanel.HIDDEN_COLUMNS_KEY)
+    panel._apply_column_choice()
+    assert COL_WEIGHT in panel.hidden_columns()
+    assert panel.tree.isColumnHidden(COL_WEIGHT)
+    assert not panel.tree.isColumnHidden(COL_LINETYPE)
+    menu = panel._columns_menu()
+    act = next(a for a in menu.actions() if a.text() == "Line weight")
+    assert not act.isChecked()
+    act.setChecked(True)                             # one tick brings it back
+    assert not panel.tree.isColumnHidden(COL_WEIGHT)
 
 
 def test_the_columns_menu_reads_show_all_switches_then_defaults(win):

@@ -1518,11 +1518,12 @@ class LayersPanel(QWidget):
     HIDDEN_COLUMNS_KEY = "layers/hidden_columns"
 
     #: Off until asked for — what is set now and then, not looked at every
-    #: day: the print mark (a few reference layers, once per project),
+    #: day: the line weight (set once per layer, and only seen on sheets),
+    #: the print mark (a few reference layers, once per project),
     #: transparency (a viewing aid) and the count (it adds faces, edges and
     #: objects up, a number that mostly says «empty or not» — which the
     #: filter and Purge say already). The name keeps room to be read.
-    DEFAULT_HIDDEN = (COL_PRINT, COL_OPACITY, COL_COUNT)
+    DEFAULT_HIDDEN = (COL_WEIGHT, COL_PRINT, COL_OPACITY, COL_COUNT)
 
     def hidden_columns(self) -> set[int]:
         from PySide6.QtCore import QSettings

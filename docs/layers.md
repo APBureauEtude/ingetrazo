@@ -57,8 +57,8 @@ stays open while you tick, so several change in one go.
 
 ![Columns menu](images/layers/menu-columns.png)
 
-- **Default**: eye, padlock, target, name, pencil, colour, line and mm.
-  Printer, transparency and # start off.
+- **Default**: eye, padlock, target, name, pencil, colour and line.
+  Mm, printer, transparency and # start off.
 - **Show all columns** at the top; **Default columns** at the bottom.
 - The choice is remembered.
 

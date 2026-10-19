@@ -2996,5 +2996,7 @@
  "Performance: hover with Line and Move up to twice as fast, the pick index split into cells, and the interaction benchmark.": "性能：使用直线和移动工具时悬停速度最高提升一倍，拾取索引按网格单元划分，以及交互基准测试。",
  "Bug reports and requests from daily use: Push/Pull, Offset, toolbars and the sidebars.": "来自日常使用的错误报告和需求：推/拉、偏移、工具栏和侧边栏。",
  "Reports on installation, the extension manager, shortcuts and curved surfaces.": "关于安装、扩展管理器、快捷键和曲面的问题报告。",
- "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "来自建模实践的功能建议：三维文字、沿路径跟随复制、点以及对线条推/拉。"
+ "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "来自建模实践的功能建议：三维文字、沿路径跟随复制、点以及对线条推/拉。",
+ "Show unit": "显示单位",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "关闭：只显示数字（1.30 而不是 1.30 m），用于只注明一次单位的图纸。英尺和英寸组合仍保留其符号。"
 }

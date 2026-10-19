@@ -7977,10 +7977,12 @@ class Viewport(QOpenGLWidget):
     @staticmethod
     def _format_dim_value(metres: float, style: dict) -> str:
         """Format a length (metres) per the dimension style: unit + precision
-        (see :mod:`core.units` — metric, decimal or fractional imperial)."""
+        (see :mod:`core.units` — metric, decimal or fractional imperial),
+        with or without the unit symbol (#374)."""
         from core.units import format_length
         return format_length(metres, style.get("units", "m"),
-                             int(style.get("decimals", 2)))
+                             int(style.get("decimals", 2)),
+                             bool(style.get("show_unit", True)))
 
     def _draw_occluded_segment(self, painter: QPainter, p3a: QVector3D,
                                p3b: QVector3D, samples: int = 16) -> None:

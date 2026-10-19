@@ -2996,5 +2996,7 @@
  "Performance: hover with Line and Move up to twice as fast, the pick index split into cells, and the interaction benchmark.": "Prestazioni: passaggio del cursore con Linea e Sposta fino a due volte più veloce, l’indice di selezione diviso in celle e il benchmark di interazione.",
  "Bug reports and requests from daily use: Push/Pull, Offset, toolbars and the sidebars.": "Segnalazioni di bug e richieste dall’uso quotidiano: Spingi/Tira, Offset, barre degli strumenti e barre laterali.",
  "Reports on installation, the extension manager, shortcuts and curved surfaces.": "Segnalazioni su installazione, gestore delle estensioni, scorciatoie e superfici curve.",
- "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Richieste di funzioni dalla pratica di modellazione: testo 3D, copie lungo Seguimi, punti e Spingi/Tira sulle linee."
+ "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Richieste di funzioni dalla pratica di modellazione: testo 3D, copie lungo Seguimi, punti e Spingi/Tira sulle linee.",
+ "Show unit": "Mostra unità",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "Disattivato: solo il numero (1.30 invece di 1.30 m), per tavole che indicano l'unità una sola volta. Piedi e pollici insieme mantengono i loro segni."
 }

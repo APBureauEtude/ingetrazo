@@ -3002,5 +3002,7 @@
  "Performance: hover with Line and Move up to twice as fast, the pick index split into cells, and the interaction benchmark.": "Desempenho: passar o cursor com Linha e Mover até duas vezes mais rápido, o índice de seleção dividido em células e o benchmark de interação.",
  "Bug reports and requests from daily use: Push/Pull, Offset, toolbars and the sidebars.": "Relatórios de erros e pedidos do uso diário: Empurrar/Puxar, Equidistância, barras de ferramentas e barras laterais.",
  "Reports on installation, the extension manager, shortcuts and curved surfaces.": "Relatórios sobre a instalação, o gerenciador de extensões, os atalhos e as superfícies curvas.",
- "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Pedidos de recursos vindos da prática de modelagem: texto 3D, cópias ao longo de Siga-me, pontos e Empurrar/Puxar em linhas."
+ "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Pedidos de recursos vindos da prática de modelagem: texto 3D, cópias ao longo de Siga-me, pontos e Empurrar/Puxar em linhas.",
+ "Show unit": "Mostrar unidade",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "Desativado: só o número (1.30 em vez de 1.30 m), para pranchas que indicam a unidade uma só vez. Pés e polegadas juntos mantêm suas marcas."
 }

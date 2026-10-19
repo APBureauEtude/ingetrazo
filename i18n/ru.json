@@ -2995,5 +2995,7 @@
  "Performance: hover with Line and Move up to twice as fast, the pick index split into cells, and the interaction benchmark.": "Производительность: наведение с «Линией» и «Переместить» до двух раз быстрее, индекс выбора, разбитый на ячейки, и тест интерактивности.",
  "Bug reports and requests from daily use: Push/Pull, Offset, toolbars and the sidebars.": "Отчёты об ошибках и пожелания из повседневной работы: «Тянуть/Толкать», «Смещение», панели инструментов и боковые панели.",
  "Reports on installation, the extension manager, shortcuts and curved surfaces.": "Отчёты об установке, менеджере расширений, сочетаниях клавиш и криволинейных поверхностях.",
- "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Пожелания из практики моделирования: 3D-текст, копии вдоль «Следуй за мной», точки и «Тянуть/Толкать» по линиям."
+ "Feature requests from modelling practice: 3D text, copies along Follow Me, points and Push/Pull on lines.": "Пожелания из практики моделирования: 3D-текст, копии вдоль «Следуй за мной», точки и «Тянуть/Толкать» по линиям.",
+ "Show unit": "Показывать единицу",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "Выкл.: только число (1.30 вместо 1.30 м), для листов, где единица указана один раз. Футы и дюймы вместе сохраняют свои знаки."
 }

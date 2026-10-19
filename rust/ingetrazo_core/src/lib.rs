@@ -15,6 +15,7 @@ mod facegeom;
 mod gltape;
 mod hlr;
 mod instances;
+mod occlusion;
 mod parity;
 mod weld;
 
@@ -24,6 +25,7 @@ fn ingetrazo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<HlrOccluders>()?;
     m.add_function(wrap_pyfunction!(touching_boxes, m)?)?;
     m.add_class::<ParityTris>()?;
+    m.add_function(wrap_pyfunction!(occlusion_span, m)?)?;
     m.add_function(wrap_pyfunction!(face_geometry, m)?)?;
     m.add_function(wrap_pyfunction!(qt_vector_probe, m)?)?;
     m.add_function(wrap_pyfunction!(weld_points, m)?)?;
@@ -523,4 +525,30 @@ impl InstanceSet {
         }
         Ok(())
     }
+}
+
+/// ``Viewport._occluded_many``'s block for one span: rays from ``origin``
+/// along the rows of ``dirs`` (R,3), against the span's triangles ``v0``,
+/// ``e1``, ``e2`` (N,3). Returns ``(best, doubt)``: per ray, the minimum of
+/// ``best`` (R,) and every accepted hit, and whether that answer could hang
+/// on the last bit (then the caller asks NumPy), with ``limit`` (R,) the
+/// distance of the point the ray goes to.
+#[pyfunction]
+fn occlusion_span<'py>(
+    py: Python<'py>,
+    origin: (f64, f64, f64),
+    dirs: PyReadonlyArray2<'py, f64>,
+    best: PyReadonlyArray1<'py, f64>,
+    limit: PyReadonlyArray1<'py, f64>,
+    v0: PyReadonlyArray2<'py, f64>,
+    e1: PyReadonlyArray2<'py, f64>,
+    e2: PyReadonlyArray2<'py, f64>,
+) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<bool>>)> {
+    let o = [origin.0, origin.1, origin.2];
+    let d = rows3(&dirs.as_array());
+    let b = best.as_array().to_vec();
+    let l = limit.as_array().to_vec();
+    let (a, x, y) = (rows3(&v0.as_array()), rows3(&e1.as_array()), rows3(&e2.as_array()));
+    let (nb, doubt) = py.detach(|| occlusion::span(o, &d, &b, &l, &a, &x, &y));
+    Ok((PyArray1::from_vec(py, nb), PyArray1::from_vec(py, doubt)))
 }

@@ -387,6 +387,20 @@ def _lean_instanced() -> bool:
         return _LEAN_INSTANCED
     from core import _native
     return _native.native is not None
+#: The snap engine's occlusion rays go through core._native's kernel when
+#: the experimental engine is on (tests compare both).
+_OCCL_NATIVE = True
+
+
+def _occlusion_native():
+    """core._native when it can take ``_occluded_many``'s rays, else None."""
+    if not _OCCL_NATIVE:
+        return None
+    from core import _native
+    mod = _native.native
+    return mod if mod is not None and hasattr(mod, "occlusion_span") else None
+
+
 #: Lazy placements are filtered by core._native's spatial index before
 #: being baked for a pick (the experimental engine; tests compare both).
 _INSTANCE_FILTER = True
@@ -12311,6 +12325,8 @@ class Viewport(QOpenGLWidget):
         # settled as hidden stops asking.
         meet = meet & (tmin < limit[:, None])                         # (R, S)
         ent_mask = idx.ent_vis
+        native = _occlusion_native()
+        o3 = (float(o[0]), float(o[1]), float(o[2]))
         live_spans = np.flatnonzero(meet.any(axis=0))
         order = np.argsort(np.where(meet[:, live_spans],
                                     tmin[:, live_spans], np.inf).min(axis=0))
@@ -12334,12 +12350,24 @@ class Viewport(QOpenGLWidget):
                 continue
             if not live.all():
                 v0, e1, e2 = v0[live], e1[live], e2[live]
-            s = o - v0                                                # (n, 3)
-            q = np.cross(s, e1)                                       # (n, 3)
-            uq = np.einsum("ij,ij->i", e2, q)                         # (n,)
             r_all = np.flatnonzero(meet[:, si] & (best >= limit))
             if not len(r_all):
                 continue
+            if native is not None:
+                # The same block in the native engine; the rays it cannot
+                # call bit for bit (core/occlusion.rs) come back to NumPy
+                # below, from where they stood before this span.
+                before = best[r_all]
+                nb, doubt = native.occlusion_span(
+                    o3, np.ascontiguousarray(D[r_all]), before,
+                    np.ascontiguousarray(limit[r_all]), v0, e1, e2)
+                best[r_all] = np.where(doubt, before, nb)
+                r_all = r_all[doubt]
+                if not len(r_all):
+                    continue
+            s = o - v0                                                # (n, 3)
+            q = np.cross(s, e1)                                       # (n, 3)
+            uq = np.einsum("ij,ij->i", e2, q)                         # (n,)
             step = max(1, self._OCCL_BLOCK // max(len(v0), 1))
             for k in range(0, len(r_all), step):
                 r = r_all[k:k + step]

@@ -17,6 +17,35 @@ follow [SemVer](https://semver.org).
   Mayús pasa de orbitar a desplazar y al revés.
 
 ### Cambiado
+- **Los menús de las extensiones se ordenan solos cuando hay muchas.** Con
+  el catálogo entero instalado, el menú del botón derecho era más alto que
+  la pantalla (Qt lo partía en dos columnas) y el menú Extensiones tenía
+  62 líneas. Ahora las entradas sueltas de una misma extensión van en un
+  submenú con su nombre; en el botón derecho, con más de 8 extensiones,
+  todas van bajo «Extensiones ▸»; y en el menú Extensiones, con más de 15,
+  cada una va en su categoría del catálogo (Arquitectura, Dibujo,
+  Render…). Con pocas extensiones casi nada cambia. Preferencias ▸ General
+  ▸ «Menús de las extensiones» permite agruparlas siempre o dejarlas como
+  antes.
+- **Elegir otra vez el mismo componente de la biblioteca pone una copia
+  del mismo componente.** Cada vez se volvía a leer el archivo del modelo
+  y se añadía una pieza nueva e independiente: cuatro veces el mismo
+  mueble de 12 600 caras eran 50 400 caras en el modelo y la lectura de
+  2 s se repetía cada vez. Ahora la primera vez se coloca un componente y
+  las siguientes son copias que comparten su definición, como en
+  SketchUp (editar una cambia todas; «Hacer único» separa una). Vale para
+  la biblioteca en línea y para los componentes incluidos. Medido con 40
+  inserciones de 10 modelos: cargar el modelo pasa de 440 a 30 ms
+  (mediana; el peor, de 2,2 a 0,13 s) y colocarlo de 286 a 118 ms. La
+  ventana de la biblioteca pinta además su primera pantalla de
+  miniaturas al abrir, sin esperar un ciclo.
+- **El gestor de extensiones abre con las imágenes ya puestas.** Cada
+  apertura volvía a leer y reducir las capturas completas (algunas de más
+  de 3000 px) y las tarjetas salían con «Vista previa no disponible» antes
+  de su imagen. Ahora la miniatura ya reducida se guarda junto a las
+  capturas (y se rehace si la captura cambia), se recuerda mientras
+  IngeTrazo está abierto y las demás se preparan en segundo plano; no se
+  descarga nada que antes no se descargara.
 - **El plano de Rectángulo, Círculo y Arco en espacio vacío lo elige la
   cámara, por el origen de los ejes** (#719, @pacaeiro), como en SketchUp:
   el suelo al mirar hacia abajo y los planos verticales rojo o verde según
@@ -66,6 +95,23 @@ follow [SemVer](https://semver.org).
   selección en el visor 3D sigue en naranja.
 
 ### Corregido
+- **La ventana no se dejaba encoger con muchas extensiones.** Sus barras
+  de herramientas se sumaban a la misma fila de arriba (34 barras con el
+  catálogo entero) y la ventana no podía ser más estrecha que 2205 px en
+  una pantalla de 1477. Ahora una fila que no cabe en la pantalla sigue
+  en otra fila; las que caben no se mueven.
+- **La ventana no se maximizaba con paneles de extensiones muy altos.** Un
+  panel de 652 px de alto mínimo hacía que la ventana necesitara 902 px en
+  una pantalla con 890: GNOME no la maximizaba (o quedaba más grande que
+  la pantalla). Ahora, solo cuando la ventana no cabe, los paneles
+  laterales más altos ganan una barra de desplazamiento.
+- **Ocultar la barra lateral dejaba un panel suelto.** Una extensión que
+  crea su panel por su cuenta («Escenas» de igz_tb_scenes) se quedaba sola
+  a la derecha al plegar la barra, y al moverla mostrar dejaba de responder
+  como se esperaba. Plegar y desplegar (Ctrl+F5, Ctrl+F6 y las manijas)
+  se llevan ahora cualquier panel acoplado en ese lado.
+- **«Crear componente…» salía dos veces** en el menú del botón derecho con
+  geometría suelta y grupos seleccionados a la vez.
 - **Pasar el cursor con Línea sobre un modelo muy grande ya no da error**
   (#158): en modelos con más de un millón de caras en componentes, las
   aristas de los grupos cercanas al cursor se medían en una versión del
@@ -73,6 +119,16 @@ follow [SemVer](https://semver.org).
   componentes; el enganche podía tomar una arista ajena o fallar con
   «index … is out of bounds». Pasaba con los dos motores y ya estaba en la
   0.5.8. También afectaba a seleccionar un grupo por su arista.
+- **Inferencias más ligeras sobre modelos densos** (#158): la inferencia
+  «En arista» comprobaba si cada arista cercana estaba tapada, una por una,
+  aunque solo se queda con la más cercana visible; ahora pregunta desde la
+  más cercana y en tandas. Con el motor Rust encendido, además, esas
+  comprobaciones de «¿está tapado?» se calculan en el módulo nativo (las
+  pocas que quedan al límite de la precisión las sigue respondiendo el
+  cálculo de siempre, así que el punto enganchado es el mismo). Pasar el
+  cursor con Línea sobre una planta industrial de 4,7 millones de caras: el
+  movimiento más lento pasa de 28,7 s a 5,2 s y el gesto entero de 204 s a
+  103 s.
 - **Ratón 3D (SpaceMouse) en Windows: sin saltos y con el zoom en su
   sentido** (vídeo de revisión de Rafael García; PR #581 de @deedend como
   pista): el controlador de 3Dconnexion convierte el movimiento de la tapa

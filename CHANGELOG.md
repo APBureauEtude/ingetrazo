@@ -105,6 +105,11 @@ follow [SemVer](https://semver.org).
   una pantalla con 890: GNOME no la maximizaba (o quedaba más grande que
   la pantalla). Ahora, solo cuando la ventana no cabe, los paneles
   laterales más altos ganan una barra de desplazamiento.
+- **Ocultar la barra lateral dejaba un panel suelto.** Una extensión que
+  crea su panel por su cuenta («Escenas» de igz_tb_scenes) se quedaba sola
+  a la derecha al plegar la barra, y al moverla mostrar dejaba de responder
+  como se esperaba. Plegar y desplegar (Ctrl+F5, Ctrl+F6 y las manijas)
+  se llevan ahora cualquier panel acoplado en ese lado.
 - **«Crear componente…» salía dos veces** en el menú del botón derecho con
   geometría suelta y grupos seleccionados a la vez.
 - **Pasar el cursor con Línea sobre un modelo muy grande ya no da error**

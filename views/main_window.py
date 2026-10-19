@@ -2042,7 +2042,8 @@ class MainWindow(QMainWindow):
                  if self.dockWidgetArea(d) != Qt.LeftDockWidgetArea]
         if on:
             shown = getattr(self, "_sidebar_was", None) or docks[:1]
-            for d in docks:
+            from shiboken6 import isValid
+            for d in docks + [d for d in shown if d not in docks and isValid(d)]:
                 d.setVisible(d in shown)
             top = getattr(self, "_sidebar_top", None)
             if top is not None and top in shown:
@@ -2050,6 +2051,7 @@ class MainWindow(QMainWindow):
         else:
             # OPEN, not on screen: a tray tabbed behind another is not
             # visible, and unfolding left BIM and Terrain closed for good.
+            docks += self._foreign_side_docks(Qt.RightDockWidgetArea)
             self._sidebar_was = [d for d in docks
                                  if d.toggleViewAction().isChecked()]
             self._sidebar_top = next((d for d in docks if d.isVisible()
@@ -2188,6 +2190,19 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self, self._style_dock_tabs)
         QTimer.singleShot(0, self, self._place_sidebar_handle)
 
+    def _foreign_side_docks(self, area) -> list:
+        """Panels docked on ``area`` that are not trays: an extension that
+        builds its own QDockWidget instead of ``add_panel`` («Escenas» of
+        igz_tb_scenes). Folding the side left it standing alone there
+        (Marco, 18-10: «había otra barra… trate de mostrar y ya no
+        funciona») — the folds take them along."""
+        from PySide6.QtWidgets import QDockWidget
+        trays = set(self._sidebar_docks())
+        return [d for d in self.findChildren(QDockWidget)
+                if d not in trays and d.parent() is self
+                and not d.isFloating() and not d.isHidden()
+                and self.dockWidgetArea(d) == area]
+
     def _side_docks(self, area) -> list:
         return [d for d in self._sidebar_docks()
                 if not d.isHidden() and self.dockWidgetArea(d) == area]
@@ -2286,7 +2301,8 @@ class MainWindow(QMainWindow):
                 shown[0].raise_()
             self._left_was = []
         else:
-            self._left_was = self._side_docks(Qt.LeftDockWidgetArea)
+            self._left_was = (self._side_docks(Qt.LeftDockWidgetArea)
+                              + self._foreign_side_docks(Qt.LeftDockWidgetArea))
             for d in self._left_was:
                 d.hide()
         btn = getattr(self, "_left_handle", None)

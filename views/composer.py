@@ -1259,6 +1259,17 @@ def cota_aside_frame(ct: CotaItem) -> tuple:
     return ux * dist, uy * dist, (0.0 if horizontal else deg), tw, th
 
 
+def oblique_tick_angle(line_angle: float) -> float:
+    """Direction (radians, y DOWN) of the oblique tick that ends a
+    dimension line running at ``line_angle``: 45° to the line, turned
+    counter-clockwise ON THE SHEET, so a horizontal cota ends in «/» as the
+    technical-drawing standards draw it. Adding 45° in y-down space gave
+    «\\», 135° to the line (#741). The line's sense does not matter: a
+    reversed line gives the same tick."""
+    import math as _math
+    return line_angle - _math.pi / 4
+
+
 def paint_cota_mm(painter: QPainter, ct: CotaItem) -> None:
     """Architect-style dimension: the line runs ``sep_mm`` off the measured
     points along their normal, tied back with extension
@@ -1343,12 +1354,13 @@ def paint_cota_mm(painter: QPainter, ct: CotaItem) -> None:
         painter.restore()
     elif ct.ends != "none":
         tick = 1.6
+        t = oblique_tick_angle(ang)
         for pt in (a2, b2):
             painter.drawLine(
-                QPointF(pt.x() - tick * _math.cos(ang + _math.radians(45)),
-                        pt.y() - tick * _math.sin(ang + _math.radians(45))),
-                QPointF(pt.x() + tick * _math.cos(ang + _math.radians(45)),
-                        pt.y() + tick * _math.sin(ang + _math.radians(45))))
+                QPointF(pt.x() - tick * _math.cos(t),
+                        pt.y() - tick * _math.sin(t)),
+                QPointF(pt.x() + tick * _math.cos(t),
+                        pt.y() + tick * _math.sin(t)))
     painter.save()
     tcol = QColor(ct.text_color) if getattr(ct, "text_color", "") else color
     lx, ly = cota_label_anchor(ct)          # outside an end / dragged
@@ -1749,7 +1761,8 @@ def paint_cota_angular_mm(painter: QPainter, ca: CotaAngularItem) -> None:
         tick = 1.6
         for ang, _d in ends:
             cx, cy = R * _math.cos(ang), R * _math.sin(ang)
-            t = ang + _math.radians(45)
+            # the arc's tangent is ang + 90°: same «/» as a straight cota
+            t = oblique_tick_angle(ang + _math.pi / 2)
             painter.drawLine(QPointF(cx - tick * _math.cos(t),
                                      cy - tick * _math.sin(t)),
                              QPointF(cx + tick * _math.cos(t),
@@ -1826,7 +1839,7 @@ def paint_cota_radial_mm(painter: QPainter, cr) -> None:
         painter.restore()
     elif cr.ends != "none":
         t = 1.6
-        ang = _math.atan2(uy, ux) + _math.radians(45)
+        ang = oblique_tick_angle(_math.atan2(uy, ux))
         for (px, py), _h in tips:
             painter.drawLine(
                 QPointF(px - t * _math.cos(ang), py - t * _math.sin(ang)),
@@ -9977,12 +9990,10 @@ class ComposerWindow(QMainWindow):
                 ends = style.get("ends", "arrow") or "arrow"
                 for (x, y), heading in ((a2, ang), (b2, ang + math.pi)):
                     if ends == "tick":                # oblique ticks
-                        t = 1.6
+                        t, k = 1.6, oblique_tick_angle(ang)
                         out.append(("line",
-                                    x - t * math.cos(ang + math.radians(45)),
-                                    y - t * math.sin(ang + math.radians(45)),
-                                    x + t * math.cos(ang + math.radians(45)),
-                                    y + t * math.sin(ang + math.radians(45))))
+                                    x - t * math.cos(k), y - t * math.sin(k),
+                                    x + t * math.cos(k), y + t * math.sin(k)))
                     elif ends != "none":              # inside arrows
                         out.append(("arrow", x, y, math.cos(heading),
                                     math.sin(heading)))

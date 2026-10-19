@@ -7945,7 +7945,11 @@ class Viewport(QOpenGLWidget):
                     if self._occluded_on_screen(w):
                         continue
                     if ends == "tick":
-                        ox, oy = -uy * 4.0, ux * 4.0
+                        # 45° to the line, «/» on a horizontal one, as on
+                        # the sheet (composer.oblique_tick_angle); it was
+                        # square to the line, not oblique (#741)
+                        k = 4.0 * math.sqrt(0.5)
+                        ox, oy = (ux + uy) * k, (uy - ux) * k
                         painter.drawLine(QPointF(cx - ox, cy - oy),
                                          QPointF(cx + ox, cy + oy))
                     else:

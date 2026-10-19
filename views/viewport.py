@@ -6977,9 +6977,10 @@ class Viewport(QOpenGLWidget):
             self.camera.target = focus
         frac = max(bw / max(self.width(), 1), bh / max(self.height(), 1))
         frac = max(frac, 0.04)        # don't zoom past a sane limit in one go
-        from core.camera import MAX_DISTANCE, MIN_DISTANCE
+        from core.camera import MAX_DISTANCE
         self.camera.distance = max(
-            MIN_DISTANCE, min(self.camera.distance * frac, MAX_DISTANCE))
+            self.camera.min_distance(),
+            min(self.camera.distance * frac, MAX_DISTANCE))
         self.update()
 
     def _draw_snap_indicator(self, painter: QPainter, snap: SnapResult) -> None:
@@ -8762,6 +8763,17 @@ class Viewport(QOpenGLWidget):
     #: Eye depth (m) a segment is cut at when it runs behind the camera.
     _CLIP_W = 1e-3
 
+    def _clip_w(self) -> float:
+        """Where a segment is cut in front of the eye: 1 mm, or the near
+        plane when the camera has come closer than that would allow — at a
+        few millimetres from a small part, 1 mm cut away the very line
+        being drawn (#653, #692)."""
+        cam = self.camera
+        if not getattr(cam, "perspective", True):
+            return self._CLIP_W
+        near = getattr(cam, "near_plane", None)
+        return min(self._CLIP_W, near()) if callable(near) else self._CLIP_W
+
     def _segment_to_pixels(self, p0: QVector3D, p1: QVector3D):
         """A world segment → its two screen pixels, cut where it passes
         behind the eye instead of dropped whole. A guide is kilometres
@@ -8770,7 +8782,7 @@ class Viewport(QOpenGLWidget):
         mvp = self.camera.projection_matrix() * self.camera.view_matrix()
         c0 = mvp.map(QVector4D(p0.x(), p0.y(), p0.z(), 1.0))
         c1 = mvp.map(QVector4D(p1.x(), p1.y(), p1.z(), 1.0))
-        w0, w1, eps = c0.w(), c1.w(), self._CLIP_W
+        w0, w1, eps = c0.w(), c1.w(), self._clip_w()
         if w0 < eps and w1 < eps:
             return None
         if w0 < eps:
@@ -13919,12 +13931,11 @@ class Viewport(QOpenGLWidget):
             if focus is None:
                 focus = self._world_under_cursor(pos.x(), pos.y())
         if focus is not None:
-            # A perceptible retreat even from a 2 cm close-up: ~1 % of the
+            # A perceptible retreat even from a close-up: ~1 % of the
             # model's size per notch when the frame scaling alone would move
             # the eye less than that (the "zoom is stuck" report).
-            diag = self._model_diag()
             self.camera.zoom_to(steps, focus,
-                                min_step=max(0.05, 0.01 * diag))
+                                min_step=self._zoom_out_step())
         else:
             self.camera.zoom(steps)
         self._zoom_focus = (pose(), pos.x(), pos.y(),
@@ -13933,6 +13944,23 @@ class Viewport(QOpenGLWidget):
             _plog("wheel", (_time_mod.monotonic() - now) * 1000.0,
                   extra=f"reused={'proj' if reproj else reused}", floor=10.0)
         self.update()
+
+    #: The least a notch of the wheel backs out, from a close-up, once the
+    #: camera stands 2 cm or more from what it looks at — and always in an
+    #: empty scene, which has no size to go by.
+    _ZOOM_OUT_STEP = 0.05
+
+    def _zoom_out_step(self) -> float:
+        """Zoom-out floor per notch: 1 % of the model, never less than 5 cm
+        — as it always was — except closer than 2 cm to a small part, where
+        5 cm would throw it out of sight in one notch: there the 5 cm
+        shrinks with the distance (1.25 cm at the 5 mm close-up)."""
+        diag = self._model_diag()
+        if diag <= 0.0:
+            return self._ZOOM_OUT_STEP
+        from core.camera import MIN_DISTANCE_FAR
+        near = min(1.0, float(self.camera.distance) / MIN_DISTANCE_FAR)
+        return max(self._ZOOM_OUT_STEP * near, 0.01 * diag)
 
     def _model_diag(self) -> float:
         """The model's size, for the zoom step. On a huge model it comes

@@ -755,6 +755,18 @@ def _box_edge_vertices(corners):
     return coords
 
 
+def shown_guides(scene) -> list:
+    """The guides on screen: the ones whose layer is visible (a guide is
+    scaffolding on a layer like any dimension, so switching the layer off
+    takes its guides off the screen and out of the snap). A function of the
+    scene, so the snap of a stand-in viewport (tests) asks it too."""
+    guides = getattr(scene, "guides", None) or ()
+    visible = getattr(scene, "entity_visible", None)
+    if visible is None:
+        return list(guides)
+    return [g for g in guides if visible(g)]
+
+
 def _guide_vertices(guides, spacing: float, selection=(), centre=None,
                     reach: float = 0.0):
     """Guides as world-space DASHES for the GL pass, so they are hidden by
@@ -2212,13 +2224,13 @@ class Viewport(QOpenGLWidget):
         # depth-write off (scaffolding must not cull anything), and none on
         # a plan sheet or a styled composer frame — a printed lámina does
         # not carry the scaffolding, and that is also how it behaved before.
-        shown_guides = (self._shown_guides()
-                        if self.plano_style is None
-                        and self.style_override is None else [])
-        if shown_guides:
+        on_screen = (shown_guides(self.scene)
+                     if self.plano_style is None
+                     and self.style_override is None else [])
+        if on_screen:
             dist = max(float(self.camera.distance), 1e-3)
             g_coords, g_spans = _guide_vertices(
-                shown_guides, dist * 0.03, self.scene.selection,
+                on_screen, dist * 0.03, self.scene.selection,
                 centre=self.camera.target, reach=dist * 15.0)
             if g_spans:
                 data = g_coords.tobytes()
@@ -7661,7 +7673,7 @@ class Viewport(QOpenGLWidget):
         the depth buffer hides them behind geometry (issue #23). A cross is
         a screen-space mark a few pixels wide, not a line through the
         model, so it stays in the overlay where its size is in pixels."""
-        guides = self._shown_guides()
+        guides = shown_guides(self.scene)
         if not guides:
             return
         pen = QPen(QColor(70, 90, 120), 1, Qt.DashLine)
@@ -11465,7 +11477,7 @@ class Viewport(QOpenGLWidget):
         # used to kill on-line snapping in ordinary 3D views); guide POINTS
         # snap as degenerate pseudo-edges, exactly like survey points.
         lines = []
-        for g in self._shown_guides():
+        for g in shown_guides(self.scene):
             if g.is_line:
                 seg = self._guide_snap_segment(g)
                 if seg is not None:
@@ -11895,14 +11907,7 @@ class Viewport(QOpenGLWidget):
                           after[1] - before[1]) >= 0.5
 
     def _shown_guides(self) -> list:
-        """The guides on screen: the ones whose layer is visible (a guide
-        is scaffolding on a layer like any dimension, so switching the
-        layer off takes its guides off the screen and out of the snap)."""
-        guides = getattr(self.scene, "guides", None) or ()
-        visible = getattr(self.scene, "entity_visible", None)
-        if visible is None:
-            return list(guides)
-        return [g for g in guides if visible(g)]
+        return shown_guides(self.scene)
 
     def pick_guide(self, screen_x: float, screen_y: float):
         """Return the construction guide nearest the cursor within the pick

@@ -268,6 +268,11 @@ def test_with_no_layer_active_guides_and_dimensions_get_their_own_layers():
     assert layer_of(scene.dimensions[-1]) == "Dimensions"
     assert [ly.name for ly in scene.layers] == [
         DEFAULT_LAYER, "Guides", "Dimensions"]
+    # Guides never print: their layer is born «not printed», out of the
+    # sheets' legend; dimensions print.
+    assert not scene.layer("Guides").printable
+    assert scene.layer("Dimensions").printable
+    assert L.legend_rows(scene)[0] == [DEFAULT_LAYER, "Dimensions"]
     # The next ones join them: no second «Guides».
     history.execute(AddGuideCommand(Guide(V(3, 3, 0))))
     history.execute(AddDimensionCommand(_dimension(5)))

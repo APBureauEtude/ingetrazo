@@ -47,7 +47,9 @@ It sits in the side tray, next to the Browser. The first button of the
 | # | Entities on the layer | — | Sorts |
 
 Eye, padlock, target, colour, line, weight, transparency and printer act on
-**every selected row** when the clicked row is one of them.
+**every selected row** when the clicked row is one of them. A click on them
+never changes which rows are selected, and two quick clicks on an eye switch
+the layer off and on again.
 
 #### Choosing the columns
 
@@ -127,7 +129,9 @@ geometry are not affected.
 ## 3. Show, lock and isolate
 
 - **Hide** (eye) and **lock** (padlock). A locked layer is drawn faded and
-  cannot be picked.
+  cannot be picked. A hidden layer's guides are not drawn and nothing snaps
+  to them; a locked layer's guides still show and snap, but cannot be
+  picked or erased.
 - **Isolate** (target): only that layer, plus Layer 0, which holds the
   insides of every object. Moving the isolation to another layer and ending
   it brings back everything isolating hid; a layer hidden by hand stays
@@ -208,15 +212,26 @@ by default) and in the **F3** command search.
   **Isolate this layer**, **Make this layer active**.
 - Selecting something **highlights** its layer in the panel (a tint and a bar)
   and in the drop-down (a dot) — on a folded folder that holds it too.
-- **Entity info ▸ Layer** works as before.
+- **Entity info ▸ Layer** works as before, now also for **guides** and
+  **reference images**.
 - Back in the drawing, the rows picked in the panel let go.
 
 ---
 
-## 8. Section planes
+## 8. Section planes, guides and reference images
 
-A section plane can sit on a layer: hiding the layer hides the plane **and
-its cut**.
+- A **section plane** can sit on a layer: hiding the layer hides the plane
+  **and its cut**.
+- A **guide** (Tape Measure, Protractor) sits on a layer like a dimension.
+  With no layer active, new guides go onto **Guides** (see
+  [Active layer](#2-active-layer)), so all the scaffolding goes with one
+  eye. Hidden: not drawn, not snapped to, not picked. Locked: drawn and
+  snapped to, but not picked or erased. Guides never print, so «Guides» is
+  born **not printed** and stays out of the sheets' layer legend.
+- A **reference image** starts on its own **Images** layer; Entity info,
+  the right-click ▸ Layer and **Move the selection here** move it to any
+  other.
+- **Select content** of a layer picks its guides and images too.
 
 ---
 
@@ -286,8 +301,8 @@ back the drawing, not a name typed in between.
 ## 14. What the file keeps
 
 Layers with colour, line type, weight, transparency, «not printed»,
-visibility and lock; folders and their nesting; the active layer; each
-section plane's layer; «Colour by layer» in each scene's style; on each
+visibility and lock; folders and their nesting; the active layer; the
+layer of each section plane, guide, dimension, text and reference image; «Colour by layer» in each scene's style; on each
 sheet frame, «Lines in their layer's colour».
 
 ---
@@ -308,6 +323,7 @@ sheet frame, «Lines in their layer's colour».
 | Terreno | Locked |
 | Oculta a mano | Hidden |
 | Cotas y textos · Secciones | A dimension and a text · the «Corte A» plane |
+| Guías | A guide line along axis A and a guide point; not printed |
 | Capa 1, Capa 2, Capa 10 | Natural order |
 | Vacía 1, Vacía 2, Carpeta vacía | Purge and the «Unused» filter |
 

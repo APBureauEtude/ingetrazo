@@ -374,7 +374,7 @@
         ],
         "name": "Muro norte",
         "layer": "Muros",
-        "uid": "e15ff0240fe94774"
+        "uid": "df4375899fca416f"
       },
       {
         "edges": [
@@ -671,7 +671,7 @@
         ],
         "name": "Muro sur",
         "layer": "Muros",
-        "uid": "59e3e7b2c1dd4b6b"
+        "uid": "bb28e55ddd464753"
       },
       {
         "edges": [
@@ -968,7 +968,7 @@
         ],
         "name": "Muro oeste",
         "layer": "Muros",
-        "uid": "ab6dd44eedbe48ac"
+        "uid": "f7258c1703874aca"
       },
       {
         "edges": [
@@ -1265,7 +1265,7 @@
         ],
         "name": "Ventana",
         "layer": "Puertas y ventanas",
-        "uid": "5adf8c013a364459"
+        "uid": "590b2c5a36484f56"
       },
       {
         "edges": [
@@ -1562,7 +1562,7 @@
         ],
         "name": "Pilar 1",
         "layer": "Pilares",
-        "uid": "e64ef395de9f45fe"
+        "uid": "cd4f058b0b814de4"
       },
       {
         "edges": [
@@ -1859,7 +1859,7 @@
         ],
         "name": "Pilar 2",
         "layer": "Pilares",
-        "uid": "8833e40a54dd4c7e"
+        "uid": "4ee0c31ed3f0414b"
       },
       {
         "edges": [
@@ -2156,7 +2156,7 @@
         ],
         "name": "Viga",
         "layer": "Vigas",
-        "uid": "a9a6850acdc14ff6"
+        "uid": "af549f38ae7e4919"
       },
       {
         "edges": [
@@ -2453,7 +2453,7 @@
         ],
         "name": "Tubo de agua",
         "layer": "Agua",
-        "uid": "a0ef677cad464cc6"
+        "uid": "5c08c727de1d49d8"
       },
       {
         "edges": [
@@ -2750,7 +2750,7 @@
         ],
         "name": "Tubo de gas",
         "layer": "Gas",
-        "uid": "e18f49ec62ac422a"
+        "uid": "c6ff62274e7c4319"
       },
       {
         "edges": [
@@ -3047,7 +3047,7 @@
         ],
         "name": "Canaleta el\u00e9ctrica",
         "layer": "Electricidad",
-        "uid": "62b7e6ca58454864"
+        "uid": "bddded2e8cfd4376"
       },
       {
         "edges": [
@@ -3344,7 +3344,7 @@
         ],
         "name": "Eje A",
         "layer": "Ejes",
-        "uid": "b5812a3bb8664bc4"
+        "uid": "696792e7225f4bbe"
       },
       {
         "edges": [
@@ -3641,7 +3641,7 @@
         ],
         "name": "L\u00edmite de parcela",
         "layer": "L\u00edmites",
-        "uid": "bcf9c29799da41b4"
+        "uid": "a8bf6b1ae6554248"
       },
       {
         "edges": [
@@ -3938,7 +3938,7 @@
         ],
         "name": "Mesa",
         "layer": "Mobiliario",
-        "uid": "2d05cf9a9d874f58"
+        "uid": "b78038909ff94876"
       },
       {
         "edges": [
@@ -4235,7 +4235,7 @@
         ],
         "name": "Armario",
         "layer": "Mobiliario",
-        "uid": "b4b9f2961c5d4a98"
+        "uid": "013ce68467a94c13"
       },
       {
         "edges": [
@@ -4532,7 +4532,7 @@
         ],
         "name": "Silueta de referencia",
         "layer": "Referencia",
-        "uid": "e1c794ec8b094e2b"
+        "uid": "ae0f10a1eac94d26"
       },
       {
         "edges": [
@@ -4829,7 +4829,7 @@
         ],
         "name": "Talud",
         "layer": "Terreno",
-        "uid": "a98a58bd754145ab"
+        "uid": "6a4daee0a0054041"
       },
       {
         "edges": [
@@ -5126,7 +5126,7 @@
         ],
         "name": "Caja oculta",
         "layer": "Oculta a mano",
-        "uid": "49b00434828f4ef4"
+        "uid": "4e64d49bf1174d78"
       },
       {
         "edges": [
@@ -5423,7 +5423,7 @@
         ],
         "name": "Objeto Capa 1",
         "layer": "Capa 1",
-        "uid": "164d6fb4f16c438d"
+        "uid": "591f04619a5e41ef"
       },
       {
         "edges": [
@@ -5720,7 +5720,7 @@
         ],
         "name": "Objeto Capa 2",
         "layer": "Capa 2",
-        "uid": "e8c79fc96cb44d03"
+        "uid": "ced8f841301944e3"
       },
       {
         "edges": [
@@ -6017,7 +6017,7 @@
         ],
         "name": "Objeto Capa 10",
         "layer": "Capa 10",
-        "uid": "38b2e0cc474645ef"
+        "uid": "bd6a7524454b4ca6"
       },
       {
         "edges": [
@@ -6313,7 +6313,7 @@
           }
         ],
         "name": "Suelto en Layer 0",
-        "uid": "3a271fd33edb46e2"
+        "uid": "325c427e51f440eb"
       }
     ],
     "layers": [
@@ -6433,6 +6433,10 @@
       },
       {
         "name": "Cotas y textos"
+      },
+      {
+        "name": "Gu\u00edas",
+        "printable": false
       },
       {
         "name": "Secciones"
@@ -6888,6 +6892,34 @@
         ],
         "text": "Sala principal",
         "layer": "Cotas y textos"
+      }
+    ],
+    "guides": [
+      {
+        "point": [
+          0.0,
+          4.5,
+          0.0
+        ],
+        "direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "layer": "Gu\u00edas"
+      },
+      {
+        "point": [
+          12.0,
+          9.0,
+          3.0
+        ],
+        "origin": [
+          12.0,
+          0.0,
+          3.0
+        ],
+        "layer": "Gu\u00edas"
       }
     ]
   }

@@ -29,6 +29,7 @@ from core import layers as L  # noqa: E402
 from core.composition import Composicion, Leyenda, MarcoVista  # noqa: E402
 from core.dimension import Dimension  # noqa: E402
 from core.group import Group  # noqa: E402
+from core.guide import Guide  # noqa: E402
 from core.layers import DEFAULT_LAYER, Layer  # noqa: E402
 from core.mesh import Mesh  # noqa: E402
 from core.saved_views import SavedView  # noqa: E402
@@ -90,6 +91,7 @@ def build() -> Scene:
         Layer("Terreno", color=(0.45, 0.60, 0.35), locked=True),
         Layer("Oculta a mano", visible=False),
         Layer("Cotas y textos"),
+        Layer("Guías", printable=False),
         Layer("Secciones"),
         # Orden natural: «Capa 2» antes que «Capa 10».
         Layer("Capa 2"), Layer("Capa 10"), Layer("Capa 1"),
@@ -127,6 +129,11 @@ def build() -> Scene:
                                   layer="Cotas y textos"))
     s.text_labels.append(TextLabel(V(6, 4.5, 3), V(0, 0, 1),
                                    "Sala principal", layer="Cotas y textos"))
+
+    # ---- Guías en su capa: una línea por el eje A y un punto ----------
+    # Al apagar «Guías» desaparecen y el lápiz deja de engancharse a ellas.
+    s.guides.append(Guide(V(0, 4.5, 0), V(1, 0, 0), layer="Guías"))
+    s.guides.append(Guide(V(12, 9, 3), None, V(12, 0, 3), layer="Guías"))
 
     # ---- Plano de sección en su capa ----------------------------------
     plane = SectionPlane(V(6, 0, 0), V(1, 0, 0), name="Corte A",

@@ -619,12 +619,14 @@ def auto_layer(scene, english: str) -> str:
     """The automatic layer for ``english`` («Guides», «Dimensions»,
     «Texts») in the interface language, made the first time it is needed.
     One the user hid or locked hands back to the default layer: nothing
-    new is ever drawn straight into hiding, as with the active layer."""
+    new is ever drawn straight into hiding, as with the active layer.
+    «Guides» is born not printed: guides never reach a sheet, and a printed
+    layer would stand in every sheet's layer legend."""
     from core.i18n import tr
     name = tr(english)
     ly = scene.layer(name)
     if ly is None:
-        scene.layers.append(Layer(name))
+        scene.layers.append(Layer(name, printable=english != "Guides"))
         return name
     if not ly.visible or ly.locked:
         return DEFAULT_LAYER

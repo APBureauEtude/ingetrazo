@@ -2846,6 +2846,7 @@
  "Installed by hand, outside the extension manager.": "Установлено вручную, вне менеджера расширений.",
  "Replace with the catalog version": "Заменить версией из каталога",
  "Installed by hand · not in the catalog": "Установлено вручную · нет в каталоге",
+ "No longer in the catalog · version {version}": "Больше нет в каталоге · версия {version}",
  "«{name}» was installed by hand. Uninstalling sets it aside instead of deleting it: it is renamed with a dot in front, in the same folder, and IngeTrazo no longer loads it.": "«{name}» было установлено вручную. Удаление не стирает его, а откладывает: оно переименовывается с точкой в начале в той же папке, и IngeTrazo больше его не загружает.",
  "«{name}» is set aside as {folder}. Restart IngeTrazo to apply the change.": "«{name}» отложено как {folder}. Перезапустите IngeTrazo, чтобы применить изменение.",
  "Replace the copy of «{name}» installed by hand with the catalog version? The copy is set aside (renamed with a dot in front), not deleted, and the catalog version can then be updated, disabled and uninstalled from here.": "Заменить копию «{name}», установленную вручную, версией из каталога? Копия будет отложена (переименована с точкой в начале), а не удалена, и версию из каталога затем можно будет обновлять, отключать и удалять отсюда.",

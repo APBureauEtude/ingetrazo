@@ -2728,6 +2728,7 @@
  "Installed by hand, outside the extension manager.": "Dipasang manual, di luar pengelola ekstensi.",
  "Replace with the catalog version": "Ganti dengan versi katalog",
  "Installed by hand · not in the catalog": "Dipasang manual · tidak ada di katalog",
+ "No longer in the catalog · version {version}": "Tidak lagi ada di katalog · versi {version}",
  "«{name}» was installed by hand. Uninstalling sets it aside instead of deleting it: it is renamed with a dot in front, in the same folder, and IngeTrazo no longer loads it.": "«{name}» dipasang secara manual. Mencopotnya akan menyisihkannya, bukan menghapusnya: namanya diberi titik di depan, di folder yang sama, dan IngeTrazo tidak lagi memuatnya.",
  "«{name}» is set aside as {folder}. Restart IngeTrazo to apply the change.": "«{name}» disisihkan sebagai {folder}. Mulai ulang IngeTrazo untuk menerapkan perubahan.",
  "Replace the copy of «{name}» installed by hand with the catalog version? The copy is set aside (renamed with a dot in front), not deleted, and the catalog version can then be updated, disabled and uninstalled from here.": "Ganti salinan «{name}» yang dipasang manual dengan versi katalog? Salinan itu disisihkan (diberi titik di depan namanya), tidak dihapus, dan versi katalog nantinya bisa diperbarui, dinonaktifkan, dan dicopot dari sini.",

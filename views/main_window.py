@@ -1395,6 +1395,16 @@ class MainWindow(QMainWindow):
         for mode in ("parallel", "perspective", "two_point"):
             camera_menu.addAction(self._projection_actions[mode])
 
+        # The lens of the 3D view (#826, Alvaro Celis: «lo pongo en 70 para
+        # perspectivas más fugadas»). The document's camera and its scenes
+        # already keep the angle; the range is the composer's.
+        self._act_field_of_view = QAction(tr("Field of View…"), self)
+        self._act_field_of_view.setStatusTip(tr(
+            "Change the camera's angle of view, like a lens: wider takes "
+            "more in, narrower keeps the lines calm."))
+        self._act_field_of_view.triggered.connect(self._ask_field_of_view)
+        camera_menu.addAction(self._act_field_of_view)
+
         # Styles: the model's display look — face mode, edges,
         # background. Scenes remember the style; the composer's live-look
         # frames inherit it.
@@ -5515,6 +5525,40 @@ class MainWindow(QMainWindow):
                 except (TypeError, ValueError):
                     pass
         self.viewport.update()
+
+    #: The angles the field of view may take: the composer's frames use the
+    #: same range.
+    FOV_RANGE = (10.0, 120.0)
+
+    def set_field_of_view(self, degrees: float) -> bool:
+        """Give the perspective camera a new angle of view. The eye stays
+        where it is, so a wider angle takes more in around the same point.
+        A parallel view has no angle — there it would only zoom — so it is
+        refused with a word in the status bar."""
+        cam = self.viewport.camera
+        if not cam.perspective:
+            self.statusBar().showMessage(tr(
+                "Field of view applies to perspective; switch to "
+                "Perspective first."), 5000)
+            return False
+        lo, hi = self.FOV_RANGE
+        cam.fov_deg = float(min(hi, max(lo, degrees)))
+        self.viewport.update()
+        return True
+
+    def _ask_field_of_view(self) -> None:
+        cam = self.viewport.camera
+        if not cam.perspective:
+            self.set_field_of_view(cam.fov_deg)     # says why, changes nothing
+            return
+        from PySide6.QtWidgets import QInputDialog
+        lo, hi = self.FOV_RANGE
+        value, ok = QInputDialog.getDouble(
+            self, tr("Field of view"),
+            tr("Field of view in degrees (10–120):"),
+            float(cam.fov_deg), lo, hi, 0)
+        if ok:
+            self.set_field_of_view(value)
 
     def _reset_camera_home(self) -> None:
         """A new drawing opens on the default view (iso, 20 m out), not on

@@ -371,9 +371,15 @@ class OrbitCamera:
         if steps < 0 and min_step > 0.0 and new_distance < MAX_DISTANCE:
             moved = (self.eye() - eye_before).length()
             if moved < min_step:
-                back = self.eye() - self.target
-                if back.length() > 1e-9:
-                    self.target += back.normalized() * (min_step - moved)
+                # The eye backs off along the view by growing the DISTANCE,
+                # the target staying on what you look at — the same eye as
+                # pushing the target back, but the distance keeps meaning
+                # how far the model is. Pushing the target left a 2 cm
+                # distance tens of metres out after a deep zoom-in, and the
+                # near plane derived from it (0.4 mm) made every surface
+                # less than a metre from another flicker (#579).
+                self.distance = min(MAX_DISTANCE,
+                                    self.distance + (min_step - moved))
         if not self.is_finite():
             self.target, self.distance = before
 

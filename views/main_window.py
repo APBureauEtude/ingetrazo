@@ -4222,27 +4222,24 @@ class MainWindow(QMainWindow):
         lines (or always, if the user asked for it), all of them under
         «Extensions ▸». With the whole catalog installed the menu was
         taller than the screen and Qt split it in two columns (Marco,
-        18-10). An extension that raises is logged and skipped."""
-        import logging
+        18-10). An extension that raises, or takes longer than
+        :attr:`EXT_CONTEXT_BUDGET_S` to add its entries, is logged, left out
+        of the right-click menu for the rest of the session and named once
+        in the status bar: an extension broken by an update froze every
+        right-click for five seconds and nothing said which (#588)."""
         mode = self.extension_menu_mode()
-        fns = list(getattr(self, "_ext_context_menus", ()))
+        bad = self.__dict__.setdefault("_ext_context_off", set())
+        fns = [fn for fn in getattr(self, "_ext_context_menus", ())
+               if fn not in bad]
+        owners = self.__dict__.get("_ext_context_owner", {})
         if mode == "flat":
             for fn in fns:
-                try:
-                    fn(menu, sel)
-                except Exception:  # noqa: BLE001 — an extension's bug
-                    logging.getLogger(__name__).exception(
-                        "extension context menu failed")
+                self._run_extension_context_entry(fn, menu, sel, owners)
             return
-        owners = self.__dict__.get("_ext_context_owner", {})
         items = []                          # (holder, [its entries])
         for fn in fns:
             holder = QMenu(self._extension_name(owners.get(fn, "")), menu)
-            try:
-                fn(holder, sel)
-            except Exception:  # noqa: BLE001 — an extension's bug
-                logging.getLogger(__name__).exception(
-                    "extension context menu failed")
+            self._run_extension_context_entry(fn, holder, sel, owners)
             acts = list(holder.actions())
             while acts and acts[0].isSeparator():
                 acts.pop(0)
@@ -4289,6 +4286,36 @@ class MainWindow(QMainWindow):
                 pass
             self._ext_catalog_info = cat
         return cat
+
+    #: How long one extension may take to add its right-click entries.
+    EXT_CONTEXT_BUDGET_S = 1.0
+
+    def _run_extension_context_entry(self, fn, menu, sel, owners) -> None:
+        """Let one extension add its entries to ``menu``; a failure or a
+        slow one is switched off for the session (see
+        :meth:`_add_extension_context_entries`)."""
+        import logging
+        import time
+        t0 = time.monotonic()
+        failed = False
+        try:
+            fn(menu, sel)
+        except Exception:  # noqa: BLE001 — an extension's bug
+            logging.getLogger(__name__).exception(
+                "extension context menu failed")
+            failed = True
+        slow = time.monotonic() - t0 > self.EXT_CONTEXT_BUDGET_S
+        if not (failed or slow):
+            return
+        self.__dict__.setdefault("_ext_context_off", set()).add(fn)
+        name = self._extension_name(owners.get(fn, ""))
+        logging.getLogger(__name__).warning(
+            "extension %s %s its right-click entries; left out until "
+            "restart", name, "failed adding" if failed else "was slow adding")
+        self.statusBar().showMessage(tr(
+            "The extension «{name}» failed in the right-click menu and is "
+            "left out of it until IngeTrazo restarts. Update it or turn it "
+            "off in the Extension manager.", name=name), 15000)
 
     def _extension_name(self, key: str) -> str:
         """An extension's name for a submenu of its entries: the catalog's,

@@ -3004,5 +3004,6 @@
  "Each entry on its own": "Chaque entrée séparément",
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Comment les entrées des extensions s'affichent dans le menu du clic droit (immédiatement) et dans le menu Extensions (au prochain démarrage).",
  "Axes": "Axes",
- "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Affiche les axes de dessin rouge, vert et bleu du modèle. L'inférence le long des axes continue de fonctionner quand ils sont masqués."
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Affiche les axes de dessin rouge, vert et bleu du modèle. L'inférence le long des axes continue de fonctionner quand ils sont masqués.",
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "L'extension «{name}» a échoué dans le menu du clic droit et en est retirée jusqu'au redémarrage d'IngeTrazo. Mettez-la à jour ou désactivez-la dans le Gestionnaire d'extensions."
 }

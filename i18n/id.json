@@ -3007,5 +3007,6 @@
  "Each entry on its own": "Setiap entri terpisah",
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Cara entri ekstensi ditampilkan di menu klik kanan (langsung) dan di menu Ekstensi (saat dibuka lagi).",
  "Axes": "Sumbu",
- "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Menampilkan sumbu gambar merah, hijau, dan biru pada model. Inferensi di sepanjang sumbu tetap berfungsi saat sumbu disembunyikan."
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Menampilkan sumbu gambar merah, hijau, dan biru pada model. Inferensi di sepanjang sumbu tetap berfungsi saat sumbu disembunyikan.",
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "Ekstensi «{name}» gagal di menu klik kanan dan dikeluarkan darinya sampai IngeTrazo dimulai ulang. Perbarui atau matikan di Pengelola ekstensi."
 }

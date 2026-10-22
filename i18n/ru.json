@@ -3004,5 +3004,6 @@
  "Each entry on its own": "Каждый пункт отдельно",
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Как пункты расширений показываются в контекстном меню (сразу) и в меню «Расширения» (при следующем запуске).",
  "Axes": "Оси",
- "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Показывает красную, зелёную и синюю оси рисования модели. Привязки вдоль них работают, даже когда оси скрыты."
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Показывает красную, зелёную и синюю оси рисования модели. Привязки вдоль них работают, даже когда оси скрыты.",
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "Расширение «{name}» дало сбой в контекстном меню и исключено из него до перезапуска IngeTrazo. Обновите его или отключите в Менеджере расширений."
 }

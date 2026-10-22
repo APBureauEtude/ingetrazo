@@ -3012,5 +3012,6 @@
  "Each entry on its own": "Każda pozycja osobno",
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Jak pozycje rozszerzeń są wyświetlane w menu prawego przycisku (od razu) i w menu Rozszerzenia (po ponownym uruchomieniu).",
  "Axes": "Osie",
- "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Pokazuje czerwoną, zieloną i niebieską oś rysowania modelu. Przyciąganie wzdłuż osi działa nadal, gdy są ukryte."
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Pokazuje czerwoną, zieloną i niebieską oś rysowania modelu. Przyciąganie wzdłuż osi działa nadal, gdy są ukryte.",
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "Rozszerzenie «{name}» zawiodło w menu prawego przycisku i zostaje z niego usunięte do ponownego uruchomienia IngeTrazo. Zaktualizuj je lub wyłącz w Menedżerze rozszerzeń."
 }

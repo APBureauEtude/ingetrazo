@@ -3005,5 +3005,6 @@
  "Each entry on its own": "Ogni voce separata",
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Come appaiono le voci delle estensioni nel menu del tasto destro (subito) e nel menu Estensioni (al prossimo avvio).",
  "Axes": "Assi",
- "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Mostra gli assi di disegno rosso, verde e blu del modello. L'inferenza lungo gli assi continua a funzionare anche quando sono nascosti."
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Mostra gli assi di disegno rosso, verde e blu del modello. L'inferenza lungo gli assi continua a funzionare anche quando sono nascosti.",
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "L'estensione «{name}» non ha funzionato nel menu del clic destro e ne resta esclusa finché IngeTrazo non viene riavviato. Aggiornala o disattivala nel Gestore delle estensioni."
 }

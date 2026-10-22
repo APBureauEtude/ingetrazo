@@ -2847,6 +2847,7 @@
  "Installed by hand, outside the extension manager.": "手动安装，不在扩展管理器管理范围内。",
  "Replace with the catalog version": "替换为目录中的版本",
  "Installed by hand · not in the catalog": "手动安装 · 不在目录中",
+ "No longer in the catalog · version {version}": "已不在目录中 · 版本 {version}",
  "«{name}» was installed by hand. Uninstalling sets it aside instead of deleting it: it is renamed with a dot in front, in the same folder, and IngeTrazo no longer loads it.": "「{name}」是手动安装的。卸载时不会删除它，而是把它放到一边：在同一文件夹中将其重命名为以点开头的名称，IngeTrazo 不再加载它。",
  "«{name}» is set aside as {folder}. Restart IngeTrazo to apply the change.": "「{name}」已放到一边，名称为 {folder}。重新启动 IngeTrazo 以应用更改。",
  "Replace the copy of «{name}» installed by hand with the catalog version? The copy is set aside (renamed with a dot in front), not deleted, and the catalog version can then be updated, disabled and uninstalled from here.": "用目录中的版本替换手动安装的「{name}」？手动安装的副本会被放到一边（重命名为以点开头的名称），不会删除，之后目录中的版本可以在这里更新、停用和卸载。",

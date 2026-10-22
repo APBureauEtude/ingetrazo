@@ -2846,6 +2846,7 @@
  "Installed by hand, outside the extension manager.": "Instalada a mano, fuera del gestor de extensiones.",
  "Replace with the catalog version": "Reemplazar por la del catálogo",
  "Installed by hand · not in the catalog": "Instalada a mano · no está en el catálogo",
+ "No longer in the catalog · version {version}": "Ya no está en el catálogo · versión {version}",
  "«{name}» was installed by hand. Uninstalling sets it aside instead of deleting it: it is renamed with a dot in front, in the same folder, and IngeTrazo no longer loads it.": "«{name}» se instaló a mano. Desinstalarla la aparta en vez de borrarla: se renombra con un punto delante, en la misma carpeta, e IngeTrazo deja de cargarla.",
  "«{name}» is set aside as {folder}. Restart IngeTrazo to apply the change.": "«{name}» quedó apartada como {folder}. Reinicia IngeTrazo para aplicar el cambio.",
  "Replace the copy of «{name}» installed by hand with the catalog version? The copy is set aside (renamed with a dot in front), not deleted, and the catalog version can then be updated, disabled and uninstalled from here.": "¿Reemplazar la copia de «{name}» instalada a mano por la versión del catálogo? La copia se aparta (renombrada con un punto delante), no se borra, y la del catálogo podrá actualizarse, desactivarse y desinstalarse desde aquí.",

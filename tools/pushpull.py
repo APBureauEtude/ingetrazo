@@ -46,7 +46,7 @@ from PySide6.QtWidgets import QApplication
 
 from core.geometry import Face
 from core.i18n import tr
-from core.mesh import _STITCH_TOL, PAINT_KEYS, Mesh
+from core.mesh import _STITCH_TOL, PAINT_KEYS, Mesh, turn_face_over
 # MeshFace is core.mesh's Face — the class scene meshes are built from. The
 # geometry.Face imported above is a DIFFERENT legacy class; an isinstance
 # against IT is always False, so the preselection arm checks MeshFace.
@@ -74,11 +74,13 @@ from core.cap_rebuild import (
     seam_planes,
 )
 from core.topology import (
+    _faces_coplanar,
     _key,
     _mesh_is_flat,
     classify_push_edge,
     heal_overlapping_faces,
     loop_inside_face,
+    _segment_on_face_boundary,
     refine_loop_with_points,
 )
 from tools.base import Tool, ToolContext, ctrl_clause
@@ -173,6 +175,25 @@ def _swept_by_push(neighbour: Face, push_normal: QVector3D) -> bool:
         e = verts[(i + 1) % m] - verts[i]
         if e.length() > 1e-9 and abs(QVector3D.dotProduct(e.normalized(), n)) > 0.999:
             return True
+    return False
+
+
+def _corner_dragged(face: Face, rim: set, push_normal: QVector3D) -> bool:
+    """Whether a prism-cap translate moving the ``rim`` positions along
+    ``push_normal`` would bend ``face`` at one of them — any of its vertices
+    on the rim that isn't a straight-through point of an edge running with
+    the push."""
+    n = push_normal.normalized()
+    for loop in [face.vertices, *face.holes]:
+        m = len(loop)
+        for i, v in enumerate(loop):
+            if _key(v) not in rim:
+                continue
+            a, b = loop[i - 1] - v, loop[(i + 1) % m] - v
+            if (a.length() < 1e-9 or b.length() < 1e-9
+                    or abs(QVector3D.dotProduct(a.normalized(), n)) < 0.999
+                    or abs(QVector3D.dotProduct(b.normalized(), n)) < 0.999):
+                return True
     return False
 
 
@@ -1849,6 +1870,20 @@ class PushPullTool(Tool):
             kind == "perp" and nb is not None and _swept_by_push(nb, normal)
             for kind, nb in kinds
         )
+        if prism_cap:
+            # The translate moves every face carrying a rim position. A face
+            # that only touches the rim at a vertex — the next room's corner
+            # landing on a wall's edge — shares no edge with the cap, so it
+            # isn't a wall the push stretches: dragging its corner skews it.
+            # Unless the position only slides along a straight edge of it that
+            # runs with the push (a T-point on the host wall's top edge).
+            walls = {id(nb) for _, nb in kinds}
+            rim = {_key(p) for loop in [self.base_face.vertices]
+                   + self.base_face.holes for p in loop}
+            prism_cap = not any(
+                _corner_dragged(g, rim, normal)
+                for g in faces
+                if g is not self.base_face and id(g) not in walls)
         return attached, prism_cap
 
     def _commit(self, viewport) -> None:
@@ -2134,7 +2169,8 @@ class PushPullTool(Tool):
         # (welds, T-junctions, collinear) — no coplanar-merge, nothing new is
         # added. Ctrl ("push/pull a copy") must not translate: it stacks a new
         # segment, so it takes the extrude path below with the base kept.
-        if self._prism_cap and not self._keep_base:
+        if (self._prism_cap and not self._keep_base
+                and not self._cap_passes_a_wall_vertex(scene, face, d)):
             normal = self._normal if self._normal is not None else face.normal()
             translate_points(scene, {_key(p) for p in self._cap_positions},
                              normal * d)
@@ -2261,6 +2297,21 @@ class PushPullTool(Tool):
         before = set(scene.mesh.faces)
         self._cap_cmd = None
         base_attrs = dict(face.attrs)
+        if through is None and not attached_any and self._sweeps_a_free_sheet(
+                face, base, base_holes, faces):
+            # A sheet swept free has no outside to orient against until it is
+            # a block, and when it shares an edge with another sheet the block
+            # is part of an open piece the orientation pass leaves alone: the
+            # base stayed facing into the new block (#550). Wound outward by
+            # construction instead — the base faces away from the sweep, the
+            # cap and the sides along it.
+            if d > 0:
+                turn_face_over(face)
+            else:
+                base.reverse()
+                top.reverse()
+                for lp in (*base_holes, *top_holes):
+                    lp.reverse()
         if through is not None:
             commands = self._through_commands(face, base, through)
         else:
@@ -2326,6 +2377,53 @@ class PushPullTool(Tool):
                     or (touched and _component_is_closed(scene.mesh,
                                                          touched[0]))):
                 orient_outward(scene.mesh, only=touched)
+
+    def _cap_passes_a_wall_vertex(self, scene, face, d: float) -> bool:
+        """Whether shrinking the prism cap by ``d`` carries it past a vertex
+        partway up one of its walls — the next room's corner sitting on the
+        wall. The translate leaves that vertex where it is, so the wall would
+        fold into a spike around it (or a zero-area sliver at a full
+        collapse); the extrude path cuts the wall instead."""
+        if d >= 0:
+            return False
+        normal = self._normal if self._normal is not None else face.normal()
+        rim = {_key(p) for p in self._cap_positions}
+        origin = self._cap_positions[0] if self._cap_positions else None
+        if origin is None:
+            return False
+        walls = []
+        for g in scene.mesh.faces:
+            if g is face or not any(_key(v) in rim for v in g.vertices):
+                continue
+            walls.append([QVector3D.dotProduct(origin - v, normal)
+                          for v in g.vertices if _key(v) not in rim])
+        depths = [t for w in walls for t in w]
+        if not depths:
+            return False
+        far = max(depths)
+        if any(1e-6 < t < far - 1e-6 and t < -d + 1e-6 for t in depths):
+            return True
+        # A full collapse folds each wall onto its far edge. A wall whose far
+        # edge carries a third vertex (that corner again) folds into a
+        # zero-area sliver instead of vanishing.
+        return -d > far - 1e-6 and any(
+            sum(1 for t in w if t > far - 1e-6) > 2 for w in walls)
+
+    @staticmethod
+    def _sweeps_a_free_sheet(face, base, base_holes, faces) -> bool:
+        """Whether ``face`` is a sheet whose whole rim — outline and holes —
+        borders only other sheets on its plane or nothing at all: no face off
+        its plane (a room's wall beside it) stands on any rim edge."""
+        normal = face.normal()
+        off_plane = [g for g in faces if g is not face
+                     and not _faces_coplanar(normal, g.normal())]
+        for lp in (base, *base_holes):
+            m = len(lp)
+            for i in range(m):
+                a, b = lp[i], lp[(i + 1) % m]
+                if any(_segment_on_face_boundary(a, b, g) for g in off_plane):
+                    return False
+        return True
 
     @staticmethod
     def _touched_faces(mesh, seedkeys: set):

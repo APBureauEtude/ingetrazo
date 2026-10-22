@@ -1007,6 +1007,13 @@ def _face_geometry(f, memo, triangulate):
     return geom
 
 
+
+def _finite_point(p) -> bool:
+    """Whether ``p`` (a QVector3D or None) is a real point."""
+    import math
+    return p is not None and all(
+        math.isfinite(c) for c in (p.x(), p.y(), p.z()))
+
 class Viewport(QOpenGLWidget):
     """OpenGL viewport with orbital camera, grid, XYZ axes, tools and snapping."""
 
@@ -14883,8 +14890,17 @@ class Viewport(QOpenGLWidget):
         place. Returns ``None`` when the pixel casts no world point (the ray
         misses the plane / the point is behind the camera). A tool that does
         not snap (Select, Push/Pull) gets a ``"none"`` result instead - no
-        snap engine, no occlusion raycasts, no marker."""
-        return self.inference.snap(px_x, px_y, modifiers)
+        snap engine, no occlusion raycasts, no marker.
+
+        A point that is not finite counts as no point: a NaN that reached a
+        tool showed «nan m» in the length box and failed the Line's commit
+        with «AddEdgeCommand: cannot convert float NaN to integer» (#466,
+        #754). Whatever inference produced it, the cursor just gives
+        nothing for that pixel."""
+        snap = self.inference.snap(px_x, px_y, modifiers)
+        if snap is not None and not _finite_point(snap.point):
+            return None
+        return snap
 
     def _build_ctx(self, ev) -> Optional[ToolContext]:
         self._sync_axes()

@@ -1858,7 +1858,10 @@ def compute_snap(
         if pa is None or pb is None:
             continue
         d, t = _closest_on_segment_2d((cx, cy), pa, pb)
-        if d > et:
+        if d > et or t <= 0.0 or t >= 1.0:
+            # Past either end the nearest point is the endpoint itself: an
+            # «On edge» there named a point the endpoint snap had already
+            # turned down (#587, between its 9 px and the edge's 14 px).
             continue
         # The screen-space parameter ``t`` is NOT the world parameter under
         # perspective, so 3D-lerping it displaces the point by metres on a long,

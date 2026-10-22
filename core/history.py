@@ -3263,6 +3263,19 @@ class MakeGroupCommand(Command):
     def do(self, scene) -> None:
         m = scene.mesh
         self.snapshot = m.capture_state()
+        # Built once: a redo puts back the SAME group, the one the next
+        # commands (Explode, Move, paint…) hold — a fresh one each time
+        # left them pointing at a group no longer in the model, and
+        # their redo was lost (#737).
+        if self.group is None:
+            self.group = self._build(scene)
+        self._take_off_loose(scene)
+        scene.groups.append(self.group)
+        scene.selection.clear()
+        scene.selection.add(self.group)
+        scene.version += 1
+
+    def _build(self, scene) -> Group:
         # The group is a fresh copy built from the captured positions. A
         # COMPONENT shifts them into local coordinates around the origin.
         origin = QVector3D(0.0, 0.0, 0.0)
@@ -3320,19 +3333,23 @@ class MakeGroupCommand(Command):
                  if va is not None and vb is not None else None)
             if e is not None:
                 stamp_edge_flags(e, flags)
-        self.group = Group(gmesh, name=self._name)
+        group = Group(gmesh, name=self._name)
         if self._component:
             from PySide6.QtGui import QMatrix4x4
             if rot is not None:
                 from core.axes import frame_matrix
-                self.group.xform = frame_matrix(origin, *rot)
+                group.xform = frame_matrix(origin, *rot)
             else:
                 t = QMatrix4x4()
                 t.translate(origin)
-                self.group.xform = t
+                group.xform = t
         elif rot is not None:
             from core.axes import frame_matrix
-            self.group.axes = frame_matrix(corner, *rot)
+            group.axes = frame_matrix(corner, *rot)
+        return group
+
+    def _take_off_loose(self, scene) -> None:
+        m = scene.mesh
         # Remove the grouped geometry from the loose mesh.
         face_keysets = [frozenset(_key(p) for p in loop)
                         for loop, _h, _a in self._face_loops]
@@ -3349,10 +3366,6 @@ class MakeGroupCommand(Command):
                                 (_key(e.a) in grouped and _key(e.b) in grouped)):
                 m.remove_edge(e)
                 scene.selection.discard(e)
-        scene.groups.append(self.group)
-        scene.selection.clear()
-        scene.selection.add(self.group)
-        scene.version += 1
 
     def undo(self, scene) -> None:
         if self.group in scene.groups:

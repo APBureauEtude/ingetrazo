@@ -3171,6 +3171,16 @@ class MainWindow(QMainWindow):
         if meas is not None and meas != getattr(self, "_vcb_live", None):
             self._on_measurement(meas)
 
+    def _forget_coordinate(self) -> None:
+        """A new or opened document: the UTM readout of the one before
+        goes. The viewport only clears it on the next hover, so after File ▸
+        New the bar kept the previous model's easting/northing (#759)."""
+        self.viewport._last_coordinate = ""
+        self.viewport._last_coordinate_full = ""
+        self._status_pending.pop("coordinate", None)
+        self._coord_label.setText("")
+        self._coord_label.setToolTip("")
+
     def _on_measurement(self, text: str) -> None:
         self._vcb_live = text
         self._refresh_vcb()
@@ -5610,6 +5620,7 @@ class MainWindow(QMainWindow):
         scene.clear()
         scene.version += 1
         self.viewport.history.clear()
+        self._forget_coordinate()
         self._reset_camera_home()
         # Document boundary: the old drawing's textures go back to the driver.
         self.viewport.reset_texture_cache()
@@ -5783,6 +5794,7 @@ class MainWindow(QMainWindow):
                 return False
             self.viewport.history.clear()
             self.viewport.reset_texture_cache()
+            self._forget_coordinate()
             # The first paint of a huge model built its drawing data in one
             # go, long enough for the desktop to call the app «not
             # responding»: it is built here, under the same dialog (#158).

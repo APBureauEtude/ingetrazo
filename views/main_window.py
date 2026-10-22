@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from views import prompts as _prompts
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -452,7 +453,8 @@ class MainWindow(QMainWindow):
         (2026-09-20). Removing and adding a toolbar back drops the stored
         length for its size hint, which is all we ever want; nothing here
         lets a toolbar be stretched on purpose."""
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QTimer
+        was_maximized = bool(self.windowState() & Qt.WindowMaximized)
         areas = (Qt.LeftToolBarArea, Qt.RightToolBarArea,
                  Qt.TopToolBarArea, Qt.BottomToolBarArea)
         for area in areas:
@@ -474,6 +476,37 @@ class MainWindow(QMainWindow):
                 self.addToolBar(area, tb)
                 tb.setVisible(shown)
         self._wrap_toolbar_rows()
+        if was_maximized and sys.platform == "win32":
+            # Re-seating the bars can raise the window's minimum height above
+            # the normal size Qt still holds when Windows has just maximized
+            # it from Explorer; Qt then resizes to that minimum, drops the
+            # maximized state, and Windows puts the flag back on a window
+            # left 1296 × 901 in the corner (#800). Put it back, once the
+            # repack has settled and again after the platform has answered.
+            QTimer.singleShot(0, self, self._keep_maximized)
+            QTimer.singleShot(500, self, self._keep_maximized)
+            # Windows only: on Wayland a maximize lands asynchronously, so a
+            # window can be flagged maximized at its normal size for a moment
+            # at start-up and this would toggle it for nothing.
+
+    def _keep_maximized(self) -> None:
+        """Re-maximize a window that a toolbar repack left smaller than its
+        screen. A window that really fills the screen is left alone."""
+        from PySide6.QtCore import Qt
+        if not self.isVisible() or self.isFullScreen():
+            return
+        screen = self.screen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        frame = self.frameGeometry()
+        state = self.windowState()
+        if (state & Qt.WindowMaximized
+                and frame.width() >= 0.9 * avail.width()
+                and frame.height() >= 0.9 * avail.height()):
+            return
+        self.setWindowState(state & ~Qt.WindowMaximized)
+        self.setWindowState(state | Qt.WindowMaximized)
 
     def addToolBar(self, *args):  # noqa: N802 — Qt override
         """Every toolbar, the window's own and an extension's — at start-up

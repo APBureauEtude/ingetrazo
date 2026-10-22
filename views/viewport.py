@@ -741,6 +741,7 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
     caller can colour the selected ones without a second buffer. Guide
     points are not here — they stay screen-space crosses in the overlay.
     """
+    import numpy as np
     coords = array("f")
     spans: list[tuple[int, int, bool]] = []
     spacing = max(float(spacing), 1e-6)
@@ -790,10 +791,16 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
             g_sp, g_reach, g_dash = spacing * k, reach * k, dash * k
         t0 = tf - g_reach
         start = len(coords) // 3
-        for k in range(n):
-            a = p + d * (t0 + k * g_sp)
-            b = p + d * (t0 + k * g_sp + g_dash)
-            coords.extend([a.x(), a.y(), a.z(), b.x(), b.y(), b.z()])
+        # The n dashes in one NumPy pass: a Python loop of QVector3D maths
+        # here cost ~2 ms a guide on EVERY frame, so forty guides took a
+        # frame from 18 to 110 ms (#816).
+        ts = t0 + np.arange(n, dtype=np.float64) * g_sp
+        pv = np.array((p.x(), p.y(), p.z()), dtype=np.float64)
+        dv = np.array((d.x(), d.y(), d.z()), dtype=np.float64)
+        seg = np.empty((n, 2, 3), dtype=np.float32)
+        seg[:, 0] = pv + ts[:, None] * dv
+        seg[:, 1] = pv + (ts + g_dash)[:, None] * dv
+        coords.frombytes(seg.tobytes())
         count = len(coords) // 3 - start
         if count:
             spans.append((start, count, id(g) in sel))
@@ -1447,6 +1454,7 @@ class Viewport(QOpenGLWidget):
         # Axes rebuilt per frame (dash spacing scales with zoom), so dynamic.
         self._axes_vao, self._axes_vbo = self._create_dynamic()
         self._guides_vao, self._guides_vbo = self._create_dynamic()
+        self._guides_cache = None
         self._axes_spans: dict = {}
 
         self._sky_vao, self._sky_vbo = self._create_dynamic()
@@ -2200,16 +2208,34 @@ class Viewport(QOpenGLWidget):
         if (self.plano_style is None and self.style_override is None
                 and getattr(self.scene, "guides", None)):
             dist = max(float(self.camera.distance), 1e-3)
-            g_coords, g_spans = _guide_vertices(
-                self.scene.guides, dist * 0.03, self.scene.selection,
-                centre=self.camera.target, reach=dist * 15.0,
-                # Parallel: one scale at every depth, nothing to adjust.
-                eye=self.camera.eye() if self.camera.perspective else None)
+            eye = self.camera.eye() if self.camera.perspective else None
+            # The dashes only change with the camera, the guides or the
+            # selection; a hover repaint reuses them and their upload (#816).
+            v3 = lambda v: (None if v is None
+                            else (v.x(), v.y(), v.z()))  # noqa: E731
+            key = (dist, v3(self.camera.target), v3(eye),
+                   tuple((id(g), v3(g.point), v3(getattr(g, "direction",
+                                                         None)),
+                          v3(getattr(g, "origin", None)))
+                         for g in self.scene.guides),
+                   tuple(g in self.scene.selection
+                         for g in self.scene.guides))
+            cached = getattr(self, "_guides_cache", None)
+            if cached is not None and cached[0] == key:
+                g_spans = cached[1]
+            else:
+                g_coords, g_spans = _guide_vertices(
+                    self.scene.guides, dist * 0.03, self.scene.selection,
+                    centre=self.camera.target, reach=dist * 15.0,
+                    # Parallel: one scale at every depth, nothing to adjust.
+                    eye=eye)
+                self._guides_cache = (key, g_spans)
+                if g_spans:
+                    data = g_coords.tobytes()
+                    self._guides_vbo.bind()
+                    self._guides_vbo.allocate(data, len(data))
+                    self._guides_vbo.release()
             if g_spans:
-                data = g_coords.tobytes()
-                self._guides_vbo.bind()
-                self._guides_vbo.allocate(data, len(data))
-                self._guides_vbo.release()
                 self._guides_vao.bind()
                 self._gl.glDepthMask(GL_FALSE)
                 for start, count, selected in g_spans:
@@ -2232,6 +2258,7 @@ class Viewport(QOpenGLWidget):
         if box is not None:
             data = _box_edge_vertices(box).tobytes()
             if data:
+                self._guides_cache = None   # the guides' dashes are gone
                 self._guides_vbo.bind()
                 self._guides_vbo.allocate(data, len(data))
                 self._guides_vbo.release()

@@ -7632,7 +7632,13 @@ class Viewport(QOpenGLWidget):
                 painter.drawLine(QPointF(*pa), QPointF(*pb))
         green = QColor(60, 160, 60)
         red = QColor(220, 40, 40)
-        for pos, role in state["grips"]:
+        # Far grips first, so a grip at the front of the box is drawn over
+        # the one behind it rather than under it (#833).
+        eye = self.camera.eye()
+        fwd = self.camera.target - eye
+        grips = sorted(state["grips"], key=lambda g: -QVector3D.dotProduct(
+            g[0] - eye, fwd))
+        for pos, role in grips:
             px = self._world_to_pixel(pos)
             if px is None:
                 continue

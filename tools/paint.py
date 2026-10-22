@@ -236,6 +236,21 @@ class PaintTool(Tool):
         pick_obj = getattr(vp, "pick_group", None)
         return pick_obj(x, y) if pick_obj is not None else None
 
+    @staticmethod
+    def _every_face_painted(obj) -> bool:
+        """Whether every face of the group or component — nested
+        placements included — carries its own material, so painting it as
+        a whole shows no change."""
+        from core.group import iter_placements
+        from core.materials import has_own_material
+        seen = False
+        for g, _m in iter_placements(obj):
+            for f in g.mesh.faces:
+                seen = True
+                if not has_own_material(f.attrs):
+                    return False
+        return seen
+
     def on_hover(self, ctx: ToolContext) -> None:
         vp = ctx.viewport
         x, y = ctx.screen.x(), ctx.screen.y()
@@ -341,9 +356,18 @@ class PaintTool(Tool):
             ]))
             flash = getattr(vp, "flash_status", None)
             if callable(flash):
-                flash(tr("{name} painted as a whole; a face that already "
-                         "had its own material keeps it",
-                         name=getattr(obj, "name", "") or tr("Group")))
+                name = getattr(obj, "name", "") or tr("Group")
+                if self._every_face_painted(obj):
+                    # Nothing on screen changes: say why, and how (#807,
+                    # components from a .skp whose faces carry their own
+                    # material — the SketchUp rule, as in #408).
+                    flash(tr("{name}: every face has its own material, so "
+                             "nothing changed — open it and paint the "
+                             "faces", name=name))
+                else:
+                    flash(tr("{name} painted as a whole; a face that "
+                             "already had its own material keeps it",
+                             name=name))
             self._remember_current(vp)
             vp.update()
             return

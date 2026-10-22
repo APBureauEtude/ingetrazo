@@ -1290,7 +1290,16 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
         from core.group import reserve_group_names
         reserve_group_names(names)   # new groups never reuse a stored "Group N"
 
+    # Until #765 every open-and-save doubled the dimensions: a file can hold
+    # each one 128 times over (1024 entries for 8, reported). The copies
+    # are identical entry for entry, so an entry equal to one already read
+    # is dropped; two dimensions that differ in anything both stay.
+    seen_dims: set = set()
     for raw in payload.get("dimensions", []):
+        key = json.dumps(raw, sort_keys=True, default=str)
+        if key in seen_dims:
+            continue
+        seen_dims.add(key)
         dim = Dimension(
             QVector3D(*raw["a"]), QVector3D(*raw["b"]),
             QVector3D(*raw["offset"]), layer=raw.get("layer") or None,

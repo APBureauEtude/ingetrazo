@@ -231,3 +231,42 @@ def test_the_window_opens_another_file_without_the_old_planes(tmp_path):
         _close(ref)
     assert reused is not None and expected is not None
     assert reused == expected
+
+
+def test_a_file_already_doubled_opens_with_each_dimension_once(tmp_path):
+    # #765: files saved before the fix hold each dimension many times over
+    # (1024 entries for 8 in the report). Opening one heals it.
+    s = Scene()
+    _square(s, 2.0)
+    one = (QVector3D(0, 0, 0), QVector3D(1, 0, 0), QVector3D(0, -1, 0))
+    two = (QVector3D(0, 0, 0), QVector3D(0, 1, 0), QVector3D(-1, 0, 0))
+    for _ in range(8):
+        s.dimensions.append(Dimension(*one))
+        s.dimensions.append(Dimension(*two))
+    path = tmp_path / "doubled.igz"
+    igz.save_scene(s, path)
+    scene = Scene()
+    igz.load_into(scene, path)
+    assert sorted(_dimension_points(scene)) == sorted([
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, -1.0, 0.0)),
+        ((0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0)),
+    ])
+    # …and saving it again writes the healed list.
+    igz.save_scene(scene, path)
+    again = Scene()
+    igz.load_into(again, path)
+    assert len(again.dimensions) == 2
+
+
+def test_two_dimensions_that_differ_in_anything_both_stay(tmp_path):
+    s = Scene()
+    _square(s, 2.0)
+    a, b = QVector3D(0, 0, 0), QVector3D(1, 0, 0)
+    s.dimensions.append(Dimension(a, b, QVector3D(0, -1, 0)))
+    s.dimensions.append(Dimension(a, b, QVector3D(0, -2, 0)))   # farther out
+    s.dimensions.append(Dimension(a, b, QVector3D(0, -1, 0), text="A"))
+    path = tmp_path / "three.igz"
+    igz.save_scene(s, path)
+    scene = Scene()
+    igz.load_into(scene, path)
+    assert len(scene.dimensions) == 3

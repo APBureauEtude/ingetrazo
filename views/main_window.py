@@ -6704,7 +6704,8 @@ class MainWindow(QMainWindow):
                 return False
             if payload is not None:
                 cmd = SnapshotImport(
-                    lambda scene: skp_format.apply_payload(scene, payload))
+                    lambda scene: skp_format.apply_payload(scene, payload,
+                                                           progress=cb))
                 try:
                     self.viewport.history.execute(cmd)
                 except Exception as exc:  # noqa: BLE001

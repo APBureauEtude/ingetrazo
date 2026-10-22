@@ -1389,6 +1389,14 @@ class Viewport(QOpenGLWidget):
         self._loc_opacity = self._program.uniformLocation("u_opacity")
         self._loc_hard_cutout = self._program.uniformLocation("u_hard_cutout")
         self._loc_shade = self._program.uniformLocation("u_shade")
+        # Instanced pass: re-shade the prototype's baked tones for the
+        # rotation of each copy (#482), against the bake's own light.
+        self._loc_reshade = self._program.uniformLocation("u_reshade")
+        self._program.bind()
+        self._program.setUniformValue(self._loc_reshade, 0)
+        self._program.setUniformValue(
+            self._program.uniformLocation("u_light_fixed"), self._LIGHT)
+        self._program.release()
         # Per-instance model matrix columns (P2 instanced components).
         self._loc_inst = [self._program.attributeLocation(f"a_inst{i}")
                           for i in range(4)]
@@ -3417,6 +3425,8 @@ class Viewport(QOpenGLWidget):
             self._program.setUniformValue1f(self._loc_opacity,
                                             XRAY_FACE_OPACITY)
             self._gl.glDepthMask(GL_FALSE)
+        # The prototype's tones were baked for ITS orientation (#482).
+        self._program.setUniformValue(self._loc_reshade, 1)
         if mode in ("shaded", "textures") and _lean_instanced():
             self._draw_instanced_faces_lean(by_proto, mode, extra)
             by_proto = {}
@@ -3497,6 +3507,7 @@ class Viewport(QOpenGLWidget):
                     entry["dback_vao"].release()
                     self._gl.glDisable(GL_CULL_FACE)
         self._front_face(False)
+        self._program.setUniformValue(self._loc_reshade, 0)
         self._program.setUniformValue1f(self._loc_fade, 0.0)
         if mode == "xray":
             self._program.setUniformValue1f(self._loc_opacity, 1.0)
@@ -9191,6 +9202,63 @@ class Viewport(QOpenGLWidget):
             ln = np.linalg.norm(out, axis=1, keepdims=True)
             return out / np.where(ln > 1e-12, ln, 1.0)
 
+        # The prototype's tones were baked from ITS normals against the fixed
+        # world light: a rotated copy re-shades them for the faces as placed
+        # (#482), with the bake's own law (``_shade_factor``) per triangle.
+        light = np.array([self._LIGHT.x(), self._LIGHT.y(), self._LIGHT.z()])
+
+        # Only a turn (or a mirror, or an uneven scale) changes the light; a
+        # copy that is just moved or evenly scaled keeps the bake as it is.
+        diag = np.diag(L)
+        turned = not (np.allclose(L, np.diag(diag), atol=1e-9)
+                      and diag[0] > 0.0 and np.allclose(diag, diag[0]))
+
+        def matte(tri, quantise=False):  # (n, 3, 3) corners → shade (n,)
+            n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+            ln = np.linalg.norm(n, axis=1)
+            d = np.abs(n @ light) / np.where(ln > 1e-9, ln, 1.0)
+            f = 0.62 + 0.38 * d
+            if quantise:                 # a texture run's key, as baked
+                f = np.round(f * 32.0) / 32.0
+            return np.where(ln > 1e-9, f, 0.84375)
+
+        def tri_pos(raw, stride):
+            a = np.frombuffer(raw, np.float32).reshape(-1, 3, stride)
+            return a[:, :, :3].astype(np.float64)
+
+        def reshade6(raw, placed):      # pos(3)+rgb(3), local → placed
+            if (not turned or not raw or len(raw) % 72
+                    or len(placed) != len(raw)):
+                return placed
+            k = (matte(tri_pos(placed, 6), quantise=True)
+                 / matte(tri_pos(raw, 6), quantise=True))
+            a = np.frombuffer(placed, np.float32).reshape(-1, 3, 6).copy()
+            rgb = a[:, :, 3:6].astype(np.float64) * k[:, None, None]
+            a[:, :, 3:6] = np.round(np.minimum(rgb, 1.0) * 64.0) / 64.0
+            return a.tobytes()
+
+        def with_shade(key, s):
+            # The shade sits in the (path, shade) pair, at the front of
+            # the key or as its first element.
+            if isinstance(key[0], str):
+                return (key[0], s) + tuple(key[2:])
+            return ((key[0][0], s),) + tuple(key[1:])
+
+        def rekey5(placed):             # {key: pos(3)+uv(2)} by new shade
+            if not turned:
+                return placed
+            out: dict = {}
+            for key, raw in placed.items():
+                if not raw or len(raw) % 60:
+                    out[key] = out.get(key, b"") + raw
+                    continue
+                f = matte(tri_pos(raw, 5), quantise=True)
+                a = np.frombuffer(raw, np.float32).reshape(-1, 15)
+                for s in np.unique(f):
+                    nk = with_shade(key, float(s))
+                    out[nk] = out.get(nk, b"") + a[f == s].tobytes()
+            return out
+
         sp = base["soft_pts"]
         if sp is not None:
             s6 = sp.reshape(-1, 6).astype(np.float64)
@@ -9204,21 +9272,23 @@ class Viewport(QOpenGLWidget):
             "nv": base["nv"], "ne": base["ne"], "nf": base["nf"],
             "edges": tp32(base["edges"], 3, tris=False),
             "dback": tp32(base.get("dback", b""), 3),
-            "vcol": tp32(base["vcol"], 6),
-            "by_texture": {p: tp32(raw, 5)
-                           for p, raw in base["by_texture"].items()},
-            "tcol": {a: tp32(raw, 6)
+            "vcol": reshade6(base["vcol"], tp32(base["vcol"], 6)),
+            "by_texture": rekey5({p: tp32(raw, 5)
+                                  for p, raw in base["by_texture"].items()}),
+            "tcol": {a: reshade6(raw, tp32(raw, 6))
                      for a, raw in base.get("tcol", {}).items()},
-            "ttex": {k: tp32(raw, 5)
-                     for k, raw in base.get("ttex", {}).items()},
-            "back_vcol": tp32(base.get("back_vcol", b""), 6),
-            "back_tex": {k: tp32(raw, 5)
-                         for k, raw in base.get("back_tex", {}).items()},
-            "back_tcol": {k: tp32(raw, 6)
+            "ttex": rekey5({k: tp32(raw, 5)
+                            for k, raw in base.get("ttex", {}).items()}),
+            "back_vcol": reshade6(base.get("back_vcol", b""),
+                                  tp32(base.get("back_vcol", b""), 6)),
+            "back_tex": rekey5({k: tp32(raw, 5) for k, raw
+                                in base.get("back_tex", {}).items()}),
+            "back_tcol": {k: reshade6(raw, tp32(raw, 6))
                           for k, raw in base.get("back_tcol", {}).items()},
-            "back_ttex": {k: tp32(raw, 5)
-                          for k, raw in base.get("back_ttex", {}).items()},
-            "fvcol": tp32(base.get("fvcol", b""), 6),
+            "back_ttex": rekey5({k: tp32(raw, 5) for k, raw
+                                 in base.get("back_ttex", {}).items()}),
+            "fvcol": reshade6(base.get("fvcol", b""),
+                              tp32(base.get("fvcol", b""), 6)),
             "faces": base["faces"],
             "areas": base["areas"] * (abs(det) ** (2.0 / 3.0)),
             "v0": tp(base["v0"]) if base["v0"] is not None else None,

@@ -3001,5 +3001,10 @@
  "Always in submenus": "항상 하위 메뉴에",
  "Each entry on its own": "항목마다 따로",
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "확장 기능 항목이 오른쪽 클릭 메뉴(즉시)와 확장 기능 메뉴(다음 시작 시)에 표시되는 방식.",
- "Korean translation of the interface.": "인터페이스의 한국어 번역."
+ "Korean translation of the interface.": "인터페이스의 한국어 번역.",
+ "Axes": "좌표축",
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "모델의 빨강, 초록, 파랑 그리기 축을 표시합니다. 축을 따라 추론하는 기능은 축이 숨겨져 있어도 계속 작동합니다.",
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "확장 기능 «{name}»이(가) 오른쪽 클릭 메뉴에서 오류를 일으켜 IngeTrazo를 다시 시작할 때까지 메뉴에서 제외됩니다. 업데이트하거나 확장 기능 관리자에서 끄세요.",
+ "Ctrl+Enter to accept": "Ctrl+Enter를 눌러 확인",
+ "No longer in the catalog · version {version}": "카탈로그에서 더 이상 제공되지 않음 · 버전 {version}"
 }

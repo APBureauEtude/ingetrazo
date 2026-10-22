@@ -3814,6 +3814,36 @@ class Viewport(QOpenGLWidget):
         geometry being drawn on it."""
         return self.image_plane_at(screen_x, screen_y, selectable_only=True)
 
+    def image_in_front_of(self, face, screen_x: float, screen_y: float):
+        """A selectable reference image under the cursor that lies strictly
+        NEARER than ``face`` along the pixel ray, or ``None``. An image is
+        an underlay — a face on its plane, or above it, still wins the
+        click — but one behind it must not: with the top of a box hidden,
+        its bottom took every click meant for the image lying on top
+        (#426)."""
+        image = self.pick_image_plane(screen_x, screen_y)
+        if image is None or face is None:
+            return None
+        origin, direction = self._pixel_to_ray(screen_x, screen_y)
+        if origin is None or direction is None:
+            return None
+        verts = getattr(face, "vertices", None) or []
+        if not verts:
+            return None
+        n = face.normal()
+        denom = QVector3D.dotProduct(n, direction)
+        if abs(denom) < 1e-9:
+            return None
+        t_face = QVector3D.dotProduct(n, verts[0] - origin) / denom
+        ni = image.normal()
+        di = QVector3D.dotProduct(ni, direction)
+        if abs(di) < 1e-9:
+            return None
+        t_img = QVector3D.dotProduct(ni, image.center() - origin) / di
+        if 0.0 <= t_img < t_face - max(1e-4, 1e-5 * abs(t_face)):
+            return image
+        return None
+
     def pick_locked_image_plane(self, screen_x: float, screen_y: float):
         """The right-click's last resort: a LOCKED image under the cursor
         (its layer still visible and unlocked). A locked image refuses
@@ -13283,13 +13313,17 @@ class Viewport(QOpenGLWidget):
                   or self.pick_text_label(x, y)
                   or self.pick_section_plane(x, y)
                   or self.pick_guide(x, y)
-                  or self.pick_face(x, y)
+                  or self._face_or_image_in_front(x, y)
                   or self.pick_image_plane(x, y)
                   or self.pick_locked_image_plane(x, y))
         if picked is not None and picked not in self.scene.selection:
             self.scene.select([picked])
             self.update()
         return picked
+
+    def _face_or_image_in_front(self, x: float, y: float):
+        face = self.pick_face(x, y)
+        return self.image_in_front_of(face, x, y) or face
 
     # ---- A side-tray tab dropped here: the window moves it to that side ----
     def _dock_drag(self, ev) -> bool:

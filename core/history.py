@@ -66,6 +66,7 @@ from core.topology import (
     find_containing_face,
     fold_nonplanar_faces,
     heal_overlapping_faces,
+    hole_merged_with_loop,
     loop_inside_face,
     new_defects,
     orient_coplanar_faces,
@@ -571,6 +572,7 @@ class AddFaceCommand(Command):
         self.face: Optional[Face] = None
         # (face_that_gained_a_hole, the vertex loop punched) for undo.
         self._punches: list[tuple[Face, list]] = []
+        self._hole_swaps: list = []
         self._subdiv_mother: Optional[Face] = None
         self._subdiv_remainder: Optional[list] = None
 
@@ -624,8 +626,16 @@ class AddFaceCommand(Command):
         # gains the new loop as a hole.
         mother = find_containing_face(m.faces, self.face.vertices, exclude=self.face)
         if mother is not None:
-            loop = m.add_hole(mother, self.face.vertices)
-            self._punches.append((mother, loop))
+            grown = hole_merged_with_loop(mother, self.face.vertices)
+            if grown is not None:
+                idx, outline = grown
+                old_loop = mother.hole_loops[idx]
+                m.remove_hole(mother, old_loop)
+                loop = m.add_hole(mother, outline)
+                self._hole_swaps.append((mother, old_loop, loop))
+            else:
+                loop = m.add_hole(mother, self.face.vertices)
+                self._punches.append((mother, loop))
             _inherit_paint(self.face, mother)
 
         # Direction B: the new face encloses existing smaller faces → it gains
@@ -639,7 +649,7 @@ class AddFaceCommand(Command):
 
         # Direction C: drawn against an existing face's boundary (corner / edge
         # rectangle) → carve a connected sub-region. Only when no hole applied.
-        if not self._punches:
+        if not self._punches and not self._hole_swaps:
             for other in list(m.faces):
                 if other is self.face:
                     continue
@@ -685,6 +695,15 @@ class AddFaceCommand(Command):
         for face, loop in self._punches:
             m.remove_hole(face, loop)
         self._punches = []
+        for face, old_loop, loop in reversed(self._hole_swaps):
+            m.remove_hole(face, loop)
+            face.hole_loops.append(old_loop)
+            n = len(old_loop)
+            for i in range(n):
+                edge = m.find_edge(old_loop[i], old_loop[(i + 1) % n])
+                if edge is not None and face not in edge.faces:
+                    edge.faces.append(face)
+        self._hole_swaps = []
         if self.face is not None:
             m.remove_face(self.face)
             # The edges and corners this face brought with it go too, when

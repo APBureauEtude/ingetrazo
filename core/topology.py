@@ -447,6 +447,49 @@ def _loops_cross_2d(a: list, b: list) -> bool:
     return False
 
 
+def hole_merged_with_loop(face: Face, loop: list[QVector3D]):
+    """``(hole_index, merged)`` when ``loop`` — already known to lie inside
+    ``face`` — runs along part of one of its holes' rims: the rectangle
+    drawn on a ring's top against the opening. That is no second hole (two
+    openings sharing an edge triangulate into slivers over both, #489): the
+    opening grows to take it in, ``merged`` being its new outline. ``None``
+    when the loop shares no stretch of rim with any hole."""
+    from core.arrangement import _signed_area
+    from core.cap_rebuild import _union_outline
+    from core.triangulate import plane_axes
+
+    normal = face.normal()
+    origin = face.vertices[0]
+    u, w = plane_axes(normal)
+    back: dict = {}
+
+    def proj(pts):
+        out = []
+        for p in pts:
+            rel = p - origin
+            xy = (QVector3D.dotProduct(rel, u), QVector3D.dotProduct(rel, w))
+            back[xy] = QVector3D(p)
+            out.append(xy)
+        return out
+
+    for idx, hole in enumerate(face.holes):
+        h3 = refine_loop_with_points(list(hole), loop)
+        l3 = refine_loop_with_points(list(loop), hole)
+        shared = set(_loop_edges(h3)) & set(_loop_edges(l3))
+        if not shared:
+            continue
+        rings = []
+        for ring in (proj(h3), proj(l3)):
+            if _signed_area(ring) < 0:
+                ring = ring[::-1]
+            rings.append((ring, []))
+        merged = _union_outline(rings)
+        if len(merged) != 1 or merged[0][1]:
+            return None
+        return idx, [back[xy] for xy in merged[0][0]]
+    return None
+
+
 def find_containing_face(
     faces: Iterable[Face], loop: list[QVector3D], exclude: Optional[Face] = None
 ) -> Optional[Face]:

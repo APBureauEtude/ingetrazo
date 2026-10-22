@@ -6808,8 +6808,12 @@ class Viewport(QOpenGLWidget):
             and snap.kind in ("axis", "axis_inference", "reference", "extension",
                               "through_point", "perp_face")
         )
+        lock = getattr(snap, "lock_color", None) if snap is not None else None
         if forced is not None:
             color = forced
+        elif lock is not None:
+            # A point found ON a lock line keeps the lock's colour (#711).
+            color = (lock[0], lock[1], lock[2], 1.0)
         elif snap is not None and snap.kind == "axis":
             r, g, b = snap.color
             color = (r, g, b, 1.0)

@@ -8768,7 +8768,21 @@ class Viewport(QOpenGLWidget):
         This is what makes Z-axis locks actually let you draw vertical
         lines — moving the mouse up/down on screen slides the projected
         point along the Z line.
+
+        The cursor is first dropped square onto the line as the screen
+        shows it, so only motion ALONG the line changes the length. In
+        perspective the closest point to the cursor's own ray also moved
+        with the cursor's sideways position (#769).
         """
+        step = max(float(getattr(self.camera, "distance", 1.0)) * 0.25, 1e-3)
+        pa = self._world_to_pixel(start)
+        pb = self._world_to_pixel(start + lock_dir.normalized() * step)
+        if pa is not None and pb is not None:
+            dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+            dd = dx * dx + dy * dy
+            if dd > 1.0:
+                s = ((pixel_x - pa[0]) * dx + (pixel_y - pa[1]) * dy) / dd
+                pixel_x, pixel_y = pa[0] + dx * s, pa[1] + dy * s
         ray_origin, ray_dir = self._pixel_to_ray(pixel_x, pixel_y)
         if ray_origin is None or ray_dir is None:
             return start

@@ -327,6 +327,7 @@ class Scene:
                     and group in (getattr(self.edit_group, "children", None) or ()))
         if self.edit_group is not None and not anidando:
             self.end_group_edit()
+        self._refresh_dimension_holds()
         anterior = self.mesh
         self._edit_share = None
         # The context's own axes (issue #44), read BEFORE anything below
@@ -368,8 +369,18 @@ class Scene:
              "frame": frame, "definition": definition})
         self.mesh = group.mesh
         self.edit_group = group
+        self._refresh_dimension_holds()
         self.selection.clear()
         self.version += 1
+
+    def _refresh_dimension_holds(self) -> None:
+        """Read every dimension's endpoints once, either side of an edit
+        context swapping a group's mesh (#621). Before the swap, the last
+        known spots are made current; after it, a hold on the mesh that
+        went away finds the vertex now standing there — before any edit
+        can move it out from under that spot."""
+        for d in self.dimensions:
+            d.a, d.b
 
     @staticmethod
     def _bake_container_xform(group) -> None:
@@ -417,6 +428,7 @@ class Scene:
     def _leave_level(self) -> None:
         if not self._edit_stack:
             return
+        self._refresh_dimension_holds()
         nivel = self._edit_stack.pop()
         share = nivel["share"]
         nivel["share"] = None
@@ -434,6 +446,7 @@ class Scene:
                            else None)
         if not self._edit_stack:
             self._loose_mesh = None
+        self._refresh_dimension_holds()
         self.selection.clear()
         self.version += 1
 

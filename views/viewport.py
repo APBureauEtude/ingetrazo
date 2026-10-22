@@ -5061,17 +5061,24 @@ class Viewport(QOpenGLWidget):
         self._preview_matrix = QMatrix4x4(m)
         self.update()
 
+    def _groups_preview_transform(self) -> QMatrix4x4:
+        """The world transform the groups preview draws its movers through:
+        the full matrix (Rotate/Scale) or the translation (Move)."""
+        m = getattr(self, "_preview_matrix", None)
+        if m is not None:
+            return QMatrix4x4(m)
+        m = QMatrix4x4()
+        off = getattr(self, "_preview_offset", None)
+        if off is not None:
+            m.translate(off)
+        return m
+
     def _draw_groups_preview(self, mvp) -> None:
         """Draw the frozen scratch copies of the moving groups at the
         current preview offset: one translated MVP, zero array churn."""
         if not getattr(self, "_preview_groups", None):
             return
-        m = getattr(self, "_preview_matrix", None)
-        if m is None:
-            m = QMatrix4x4()
-            off = getattr(self, "_preview_offset", None)
-            if off is not None:
-                m.translate(off)
+        m = self._groups_preview_transform()
         self._program.setUniformValue(self._loc_mvp, mvp * m)
         n = getattr(self, "_pv_vcol_count", 0)
         if n:
@@ -7916,11 +7923,20 @@ class Viewport(QOpenGLWidget):
         font = QFont()
         font.setPointSize(int(style.get("font_size", 9)))
         font.setBold(True)
+        # A groups preview (Move/Rotate) moves no geometry until the commit:
+        # the dimensions held by the movers' vertices are drawn where the
+        # commit will put them, or they lagged behind the whole drag (#621).
+        riders = getattr(self, "_preview_groups", None)
+        carry = self._groups_preview_transform() if riders else None
         for dim in dims:
             if not self.scene.entity_visible(dim):      # hidden layer
                 continue
             ink = (sel_ink if (dim in selection or dim is self._hover_entity)
                    else default_ink)
+            if riders:
+                ends = dim.ends_riding(riders)
+                if ends:
+                    dim = dim.carried(carry, ends)
             ap, bp = dim.line_points()
             pap = self._world_to_pixel(ap)
             pbp = self._world_to_pixel(bp)

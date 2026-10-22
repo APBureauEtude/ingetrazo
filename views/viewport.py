@@ -14958,16 +14958,25 @@ class Viewport(QOpenGLWidget):
             # typed length must drop the lock exactly like the second click.
             history = getattr(self, "history", None)
             _before = len(history.undo_stack) if history is not None else 0
+            _top = history.undo_stack[-1] if _before else None
             typed = self._value_buffer
             self.active_tool.on_value(self, value)
             _drew = history is not None and len(history.undo_stack) > _before
+            # A hot retype (Push/Pull, Move, Rotate… typed right after a
+            # commit) undoes the last command and commits it again: the
+            # stack keeps its length but its top is a new command. That
+            # also changed the model, and the box went on showing the
+            # value from before the retype (tutorial video, #859).
+            _redrew = (not _drew and _before > 0
+                       and len(history.undo_stack) == _before
+                       and history.undo_stack[-1] is not _top)
             self._set_value_buffer("")
             # The box falls back to the live reading, which only refreshes on
             # a mouse move: it went on showing the preview from BEFORE the
             # Enter, as if the typed size had been ignored (#607). What was
             # drawn is what was typed, read as the canvas showed it. Nothing
             # drawn: the preview the box shows is still the live one.
-            if _drew:
+            if _drew or _redrew:
                 unitless = getattr(self.active_tool, "value_is_unitless", None)
                 self.measurementChanged.emit(
                     typed if callable(unitless) and unitless()

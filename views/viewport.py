@@ -13167,7 +13167,15 @@ class Viewport(QOpenGLWidget):
 
         «Under the cursor» is what the cursor SHOWS: a group behind a
         selected loose face used to take the right-click and drop the
-        selection, and «Make Group» with it (#378)."""
+        selection, and «Make Group» with it (#378).
+
+        Something already selected under the cursor wins outright: loose
+        geometry flush on a group (a block standing on it, a face drawn on
+        its surface) is coplanar with the group there, and the group took
+        the click (#744)."""
+        mine = self.pick_edge(x, y) or self.pick_face(x, y)
+        if mine is not None and mine in self.scene.selection:
+            return mine
         picked = (self.pick_text_label(x, y, rect_only=True)
                   or self.pick_group(x, y) or self.pick_edge(x, y)
                   or self.pick_geopath(x, y) or self.pick_dimension(x, y)

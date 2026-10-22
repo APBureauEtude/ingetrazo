@@ -707,7 +707,7 @@ def _box_edge_vertices(corners):
 
 
 def _guide_vertices(guides, spacing: float, selection=(), centre=None,
-                    reach: float = 0.0):
+                    reach: float = 0.0, eye=None):
     """Guides as world-space DASHES for the GL pass, so they are hidden by
     the geometry in front of them like any other line (issue #23,
     @pacaeiro: «guide lines are always in front of other objects, even if
@@ -729,6 +729,13 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
     whole length instead, under any sane cap, gave 27-metre dashes with
     22-metre gaps: at a 16-metre view the guide fell in a gap and vanished.
 
+    With ``eye`` given, each guide LINE scales ``spacing`` and ``reach``
+    by how much farther from the eye its looked-at stretch lies than the
+    camera's own distance (never less): a guide 30 m away while the view
+    sits a metre from a detail drew 3 cm dashes — under a pixel — over
+    15 m, and read as faint or gone on big models (#481); and a 2 cm orbit
+    distance left after a deep zoom (#579) did the same to every guide.
+
     Returns ``(coords, spans)``: a flat float array and
     ``[(first_vertex, count, selected)]``, one entry per guide LINE, so the
     caller can colour the selected ones without a second buffer. Guide
@@ -742,6 +749,9 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
     origin = QVector3D(centre) if centre is not None else QVector3D(0, 0, 0)
     sel = {id(g) for g in (selection or ())}
     n = max(1, min(int(2.0 * reach / spacing), 4000))
+    # The camera distance the spacing was made for (eye to centre).
+    base_dist = ((QVector3D(eye) - origin).length()
+                 if eye is not None else 0.0)
     for g in guides or ():
         if not getattr(g, "is_line", False):
             # A guide POINT measured from a vertex draws its guide SEGMENT
@@ -773,11 +783,16 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
             continue
         # Foot of the perpendicular from the centre: the stretch of guide
         # the camera is actually looking at.
-        t0 = QVector3D.dotProduct(origin - p, d) - reach
+        tf = QVector3D.dotProduct(origin - p, d)
+        g_sp, g_reach, g_dash = spacing, reach, dash
+        if eye is not None and base_dist > 0.0:
+            k = max(1.0, (p + d * tf - eye).length() / base_dist)
+            g_sp, g_reach, g_dash = spacing * k, reach * k, dash * k
+        t0 = tf - g_reach
         start = len(coords) // 3
         for k in range(n):
-            a = p + d * (t0 + k * spacing)
-            b = p + d * (t0 + k * spacing + dash)
+            a = p + d * (t0 + k * g_sp)
+            b = p + d * (t0 + k * g_sp + g_dash)
             coords.extend([a.x(), a.y(), a.z(), b.x(), b.y(), b.z()])
         count = len(coords) // 3 - start
         if count:
@@ -2187,7 +2202,9 @@ class Viewport(QOpenGLWidget):
             dist = max(float(self.camera.distance), 1e-3)
             g_coords, g_spans = _guide_vertices(
                 self.scene.guides, dist * 0.03, self.scene.selection,
-                centre=self.camera.target, reach=dist * 15.0)
+                centre=self.camera.target, reach=dist * 15.0,
+                # Parallel: one scale at every depth, nothing to adjust.
+                eye=self.camera.eye() if self.camera.perspective else None)
             if g_spans:
                 data = g_coords.tobytes()
                 self._guides_vbo.bind()

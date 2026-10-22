@@ -656,6 +656,55 @@ def _collect_direct(dae: _Dae, node_el, m: QMatrix4x4, out: list) -> None:
                 out.append(([world[i] for i in lp], color, tex))
 
 
+def _prim_segments(prim_el, count: int) -> list:
+    """Index pairs of one ``lines`` / ``linestrips`` primitive."""
+    v_off, _uv, _src, stride = _prim_inputs(prim_el)
+    pairs: list = []
+    strips = ([prim_el.find(f"{_NS}p")] if _tag(prim_el) == "lines"
+              else prim_el.findall(f"{_NS}p"))
+    for p in strips:
+        idx = _ints(p.text if p is not None else "")
+        verts = [idx[k + v_off] for k in range(0, len(idx) - stride + 1,
+                                               stride)]
+        if _tag(prim_el) == "lines":
+            pairs.extend(zip(verts[0::2], verts[1::2]))
+        else:
+            pairs.extend(zip(verts, verts[1:]))
+    return [(a, b) for a, b in pairs
+            if a != b and 0 <= a < count and 0 <= b < count]
+
+
+def _collect_lines(dae: _Dae, node_el, xform: QMatrix4x4, out: list,
+                   depth: int = 0) -> None:
+    """The loose lines (``lines`` / ``linestrips``) of a node tree, as
+    world ``(a, b)`` segments — a drawing's 2D lines, which the polygon
+    walk never read, so they were dropped on import (#633)."""
+    if depth > 32:
+        return
+    m = xform * _node_matrix(node_el)
+    for el in node_el:
+        t = _tag(el)
+        if t == "instance_geometry":
+            geom = dae.ref(el.get("url"))
+            mesh_el = geom.find(f"{_NS}mesh") if geom is not None else None
+            if mesh_el is None:
+                continue
+            prims = [pr for pr in mesh_el
+                     if _tag(pr) in ("lines", "linestrips")]
+            if not prims:
+                continue
+            world = [m.map(p) for p in _positions(dae, mesh_el)]
+            for pr in prims:
+                for a, b in _prim_segments(pr, len(world)):
+                    out.append((world[a], world[b]))
+        elif t == "node":
+            _collect_lines(dae, el, m, out, depth)
+        elif t == "instance_node":
+            target = dae.ref(el.get("url"))
+            if target is not None:
+                _collect_lines(dae, target, m, out, depth + 1)
+
+
 def _image_has_cutout(dae: _Dae, path: str) -> bool:
     """Whether the image carries REAL transparency (some pixels see-through)
     — the signature of a photo sprite (a person/animal/tree cutout PNG),
@@ -1235,6 +1284,20 @@ def _adopt_geolocation(scene, root) -> None:
     scene.georef = SceneDatum(lat, lon, alt)
 
 
+def _add_lines(mesh, dae: _Dae, lines: list) -> None:
+    """Add the file's loose lines to ``mesh`` (Z-up). Only the small,
+    editable import takes them: in the reference import (big files) an
+    exporter that writes every edge as a line would double the model."""
+    for a, b in lines:
+        a, b = dae.to_zup(a), dae.to_zup(b)
+        if (a - b).length() < 1e-6:
+            continue
+        try:
+            mesh.add_edge(a, b)
+        except Exception:  # noqa: BLE001 — skip a degenerate line
+            continue
+
+
 def load_dae(scene, path, progress=None):
     """See :func:`_load_dae_inner`. Wrapped to run with the generational GC off —
     mass vertex/edge/face construction ahead (see formats.skp.apply_payload);
@@ -1372,7 +1435,9 @@ def _load_dae_inner(scene, path, progress=None):
 
     pending: list = []
     faceme: list = []
+    lines: list = []
     for node in top_nodes:
+        _collect_lines(dae, node, QMatrix4x4(), lines)
         sub: list = []
         _collect(dae, node, QMatrix4x4(), sub, faceme=faceme)
         if sub and _looks_faceme(dae, sub):
@@ -1410,7 +1475,8 @@ def _load_dae_inner(scene, path, progress=None):
                         pending.append(([positions[i] for i in lp],
                                         None, None))
     if not pending:
-        if faceme:
+        if faceme or lines:
+            _add_lines(scene.mesh, dae, lines)
             scene.version += 1
             tick(1.0, "Done")
             return offset
@@ -1463,5 +1529,8 @@ def _load_dae_inner(scene, path, progress=None):
     # (Big models took the reference-group path above with the fast fusion.)
     run_stitch(scene.mesh, seed, new_faces, coplanar_merge=True)
     orient_outward(scene.mesh)
+    # Loose lines after the faces: one lying on a face edge is that edge
+    # (add_edge finds it), the rest stay as the drawing's own lines.
+    _add_lines(scene.mesh, dae, lines)
     scene.version += 1
     return offset

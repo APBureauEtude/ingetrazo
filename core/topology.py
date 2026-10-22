@@ -12,6 +12,7 @@ decimal places (≈ 0.1 mm at metric scale) are treated as the same node.
 """
 from __future__ import annotations
 
+import math
 from collections import deque
 from typing import Iterable, Optional
 
@@ -172,22 +173,31 @@ def is_planar(vertices: list[QVector3D], tolerance: float = _PLANAR_TOLERANCE) -
         e2 = vertices[2] - vertices[0]
         return QVector3D.crossProduct(e1, e2).length() > 1e-6
 
-    v0 = vertices[0]
-    plane_normal: Optional[QVector3D] = None
-    for i in range(1, n - 1):
-        for j in range(i + 1, n):
-            cross = QVector3D.crossProduct(vertices[i] - v0, vertices[j] - v0)
-            if cross.length() > 1e-6:
-                plane_normal = cross.normalized()
-                break
-        if plane_normal is not None:
-            break
-    if plane_normal is None:
-        return False
-    for v in vertices:
-        if abs(QVector3D.dotProduct(plane_normal, v - v0)) > tolerance:
-            return False
-    return True
+    # The plane is the one through the first vertex and the two that span
+    # the widest triangle with it, worked out in double precision. It used
+    # to be the first pair whose cross product passed 1e-6 — on a circle,
+    # two neighbours nearly in line — in single precision, so the plane
+    # tilted with the distance from the origin and at 1000 m a third of
+    # flat tilted circles came out "not planar" (#571). Measuring against
+    # a plane through real vertices, and not a best-fit one, keeps what is
+    # refused: a best fit would share a corner lifted 1.5 mm out as
+    # ±0.4 mm and call the warped quad flat.
+    pts = [(v.x(), v.y(), v.z()) for v in vertices]
+    ax, ay, az = pts[0]
+    rel = [(x - ax, y - ay, z - az) for x, y, z in pts]
+    ux, uy, uz = max(rel, key=lambda p: p[0] * p[0] + p[1] * p[1] + p[2] * p[2])
+    nx = ny = nz = 0.0
+    best = 0.0
+    for vx, vy, vz in rel:
+        cx, cy, cz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+        size = cx * cx + cy * cy + cz * cz
+        if size > best:
+            best, nx, ny, nz = size, cx, cy, cz
+    length = math.sqrt(best)
+    if length <= 1e-6:
+        return False                      # every vertex in one line
+    nx, ny, nz = nx / length, ny / length, nz / length
+    return all(abs(nx * x + ny * y + nz * z) <= tolerance for x, y, z in rel)
 
 
 def segment_intersection(

@@ -1403,6 +1403,11 @@ class PushPullTool(Tool):
         # push (−n has a component out of it) overflows at any depth — the
         # long wall of a triangular prism can't move inward at all without
         # boolean subtraction. Limit 0 (the push becomes a no-op).
+        # The lean is judged in metres, not as a bare cosine: how far the
+        # wall's far end strays from square. Coordinates saved in single
+        # precision tilt a narrow wall's normal by ~2e-5 — the 15 mm top of a
+        # board read as leaning away and its corner could not be cut through
+        # (#710) — while the strayed distance is a fraction of a micron.
         direction = -n
         mesh = scene.mesh
         for loop in [self.base_face.loop] + self.base_face.hole_loops:
@@ -1417,7 +1422,13 @@ class PushPullTool(Tool):
                     gn = g.normal().normalized()
                     if abs(QVector3D.dotProduct(gn, n)) > 0.999:
                         continue  # parallel/coplanar: not a lateral wall
-                    if QVector3D.dotProduct(direction, gn) > 1e-6:
+                    lean = QVector3D.dotProduct(direction, gn)
+                    if lean <= 1e-6:
+                        continue
+                    root = loop[i].position
+                    depth = max(QVector3D.dotProduct(v - root, direction)
+                                for v in g.vertices)
+                    if lean * depth > _STITCH_TOL:
                         self._limit_in = 0.0
                         return
 

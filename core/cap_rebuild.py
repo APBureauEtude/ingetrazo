@@ -283,6 +283,32 @@ def _union_outline(solid_regions_xy, keep_segs=None) -> list:
         if net > 0:
             survivors[(ka, kb)] += net
 
+    # A crease that ends inside the union bounds nothing: the trace would run
+    # out along it and back, a spur that splits no face and triangulates into
+    # slivers facing the wrong way. It happens where a perpendicular face only
+    # touches the plane along a dead-end line — a pocket corner meeting the
+    # outer wall of a step pushed up beside it (#570). The edge stays in the
+    # mesh for the faces that stand on it; it just isn't part of this outline.
+    links: dict = defaultdict(set)
+    for (ka, kb), c in survivors.items():
+        if c > 0:
+            links[ka].add(kb)
+            links[kb].add(ka)
+    stack = [k for k, ns in links.items() if len(ns) == 1]
+    while stack:
+        k = stack.pop()
+        if len(links[k]) != 1:
+            continue
+        other = next(iter(links[k]))
+        if not _is_crease(k, other):
+            continue
+        survivors[(k, other)] = 0
+        survivors[(other, k)] = 0
+        links[k].discard(other)
+        links[other].discard(k)
+        if len(links[other]) == 1:
+            stack.append(other)
+
     # Trace the surviving directed edges into closed loops, choosing at each
     # junction the next edge *clockwise* from the arrival direction — the same
     # DCEL rule as ``core.arrangement._trace_faces``. An arbitrary choice can

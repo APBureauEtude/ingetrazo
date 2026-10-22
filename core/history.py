@@ -4830,6 +4830,7 @@ class ChangeAxesCommand(Command):
         self._old_axes = None
         self._d = None
         self._instances: list = []
+        self._inst_axes: list = []
 
     def _siblings(self, scene) -> list:
         from core.group import iter_placements
@@ -4873,8 +4874,13 @@ class ChangeAxesCommand(Command):
             return
         self._instances = self._siblings(scene)
         self._reexpress(g, self._d)
+        # An instance's frame is ``xform · axes``: axes it carried from its
+        # classic-group days would turn the new frame again (#484), so the
+        # re-expressed definition's own axes are the instances' now.
+        self._inst_axes = [inst.axes for inst in self._instances]
         for inst in self._instances:
             inst.xform = inst.xform * d_inv
+            inst.axes = None
         scene.version += 1
 
     def undo(self, scene) -> None:
@@ -4887,8 +4893,9 @@ class ChangeAxesCommand(Command):
             return
         d_inv, _ok = self._d.inverted()
         self._reexpress(g, d_inv)
-        for inst in self._instances:
+        for inst, axes in zip(self._instances, self._inst_axes):
             inst.xform = inst.xform * self._d
+            inst.axes = axes
         scene.version += 1
 
     @staticmethod

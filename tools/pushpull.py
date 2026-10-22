@@ -65,6 +65,7 @@ from core.arrangement import _interior_point, _point_in_polygon, plane_basis
 from core.orient import _ray_triangle, is_closed, orient_outward
 from core.cap_rebuild import (
     RebuildCache,
+    _canon_loop,
     apply_rebuild,
     crack_planes,
     edges_along,
@@ -251,6 +252,16 @@ def _faces_window(faces):
     m = 0.01 + 1e-6 * max(abs(c) for c in lo + hi)
     return (lo[0] - m, lo[1] - m, lo[2] - m, hi[0] + m, hi[1] + m, hi[2] + m)
 
+
+
+def _face_shape(face) -> tuple:
+    """Which way round a face is wound does not matter here: whether the
+    rebuild handed back the same face, outline and holes."""
+    def loop(pts):
+        pts = list(pts)
+        return min(_canon_loop(pts), _canon_loop(pts[::-1]))
+    return (loop(face.vertices), frozenset(loop(h) for h in face.holes),
+            face.interior)
 
 class PushPullTool(Tool):
     name = "Push / Pull"
@@ -2395,7 +2406,15 @@ class PushPullTool(Tool):
                 if apply_rebuild(mesh, origin, plane_n, fresh, keep_mode,
                                  removing, op=op_rims, cache=cache):
                     changed = True
-                    fresh |= set(mesh.faces) - before_faces
+                    # A rebuild replaces every face of the plane, so the
+                    # user's own faces there come back as new objects. One
+                    # that comes back unchanged is still the user's, not the
+                    # op's: counted as fresh, the next round read a free
+                    # sheet (a triangle drawn on the ground beside the
+                    # solid) as op debris and deleted it (#552).
+                    kept = {_face_shape(f) for f in before_faces - fresh}
+                    fresh |= {f for f in set(mesh.faces) - before_faces
+                              if _face_shape(f) not in kept}
             if not changed:
                 break
             fresh = {f for f in fresh if f in mesh.faces}

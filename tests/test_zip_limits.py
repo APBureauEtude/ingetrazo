@@ -62,10 +62,23 @@ def test_a_bomb_hidden_in_a_texture_is_refused_too(tmp_path):
 
 
 def test_too_much_in_all_is_refused_even_when_each_member_is_fine(tmp_path, monkeypatch):
+    # Many small members, each under RATIO_FROM, that together inflate far
+    # more than RATIO times.
+    path = tmp_path / "many.igz"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for i in range(8):
+            z.writestr(f"t{i}.bin", b"\0" * (1 << 20))
+    monkeypatch.setattr(zip_limits, "MAX_TOTAL", 4 << 20)
+    with zipfile.ZipFile(path) as z, pytest.raises(zip_limits.ArchiveTooLarge):
+        zip_limits.check(z)
+
+
+def test_a_big_real_document_is_not_refused_for_its_size(tmp_path, monkeypatch):
+    # Past MAX_TOTAL but compressed like a real model (SPR.igz: 3.2 GB at
+    # 20 times): it must still open.
     path = _document(tmp_path)
     monkeypatch.setattr(zip_limits, "MAX_TOTAL", 10)
-    with pytest.raises(zip_limits.ArchiveTooLarge):
-        igz.load_into(Scene(), path)
+    igz.load_into(Scene(), path)
 
 
 @pytest.mark.parametrize("name", ["arco-yanque.igz", "pileta-fuente-yanque.igz",

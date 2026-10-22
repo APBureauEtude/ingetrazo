@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import zipfile
 
-#: Everything an archive may unpack to, all its members together.
+#: Everything an archive may unpack to, all its members together, unless
+#: it is no more than RATIO times its compressed size: a real document as
+#: big as SPR.igz (14 M faces) unpacks to 3.2 GB at 20 times, and a bigger
+#: one must still open.
 MAX_TOTAL = 4 << 30
 #: A member this big must not be more compressed than RATIO times.
 RATIO_FROM = 32 << 20
@@ -30,18 +33,19 @@ class ArchiveTooLarge(zipfile.BadZipFile):
 
 def check(archive: zipfile.ZipFile, name: str = "") -> None:
     """Raise :class:`ArchiveTooLarge` when ``archive`` would unpack to more
-    than :data:`MAX_TOTAL`, or holds a member over :data:`RATIO_FROM` more
+    than :data:`MAX_TOTAL` at more than :data:`RATIO` times, or holds a member over :data:`RATIO_FROM` more
     compressed than :data:`RATIO` times."""
     label = name or "the archive"
-    total = 0
+    total = packed = 0
     for info in archive.infolist():
         total += info.file_size
+        packed += info.compress_size
         if info.file_size > RATIO_FROM and \
                 info.file_size > RATIO * max(info.compress_size, 1):
             raise ArchiveTooLarge(
                 f"{label}: {info.filename} unpacks to {info.file_size} bytes "
                 f"from {info.compress_size}; refused.")
-    if total > MAX_TOTAL:
+    if total > MAX_TOTAL and total > RATIO * max(packed, 1):
         raise ArchiveTooLarge(
             f"{label} unpacks to {total} bytes, more than {MAX_TOTAL}; refused.")
 
@@ -50,9 +54,8 @@ def read(archive: zipfile.ZipFile, member: str) -> bytes:
     """``archive.read(member)``, refused like :func:`check` when that one
     member is too big (for readers that take one member of an archive)."""
     info = archive.getinfo(member)
-    if info.file_size > MAX_TOTAL or (
-            info.file_size > RATIO_FROM
-            and info.file_size > RATIO * max(info.compress_size, 1)):
+    if info.file_size > RATIO_FROM and \
+            info.file_size > RATIO * max(info.compress_size, 1):
         raise ArchiveTooLarge(
             f"{member} unpacks to {info.file_size} bytes from "
             f"{info.compress_size}; refused.")

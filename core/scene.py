@@ -208,11 +208,40 @@ class Scene:
     def _layer_state(self, entity) -> tuple[bool, bool]:
         """(visible, locked) of the layer ``entity`` carries; unknown layer
         names read as the default (visible, unlocked)."""
-        from core.layers import layer_of
-        ly = self.layer(layer_of(entity))
+        from core.layers import DEFAULT_LAYER, layer_of
+        name = layer_of(entity)
+        if name == DEFAULT_LAYER and self._edit_stack:
+            name = self._open_group_layer(entity) or name
+        ly = self.layer(name)
         if ly is None:
             return True, False
         return ly.visible, ly.locked
+
+    def _open_group_layer(self, entity):
+        """The layer a face or edge with none of its own follows while its
+        group is open: the open group's, or the nearest enclosing group's
+        that has one. Closed, the group's layer already decides for
+        everything in it; open, its geometry is drawn and picked as loose
+        geometry, and hiding the default layer took the contents of a
+        group on another layer with it (#366)."""
+        if hasattr(entity, "children") or not (
+                hasattr(entity, "attrs") or hasattr(entity, "v0")):
+            return None
+        group_layer = None
+        for level in reversed(self._edit_stack):
+            group_layer = getattr(level["group"], "layer", None)
+            if group_layer:
+                break
+        if not group_layer:
+            return None
+        key = (id(self.mesh), self.version, len(self.mesh.faces),
+               len(self.mesh.edges))
+        memo = getattr(self, "_open_mesh_ids", None)
+        if memo is None or memo[0] != key:
+            ids = {id(f) for f in self.mesh.faces}
+            ids.update(id(e) for e in self.mesh.edges)
+            memo = self._open_mesh_ids = (key, ids)
+        return group_layer if id(entity) in memo[1] else None
 
     @staticmethod
     def _object_hidden(entity) -> bool:

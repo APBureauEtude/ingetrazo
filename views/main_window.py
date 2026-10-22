@@ -2728,17 +2728,15 @@ class MainWindow(QMainWindow):
     def _on_open_plugins_folder(self) -> None:
         """Open (creating if needed) the per-user plugins directory — drop
         a .py here and its tools appear in Extensions on next start."""
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
+        from core.desktop_open import open_url
         from core.extensions import user_plugins_dir
         folder = user_plugins_dir()
         folder.mkdir(parents=True, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        open_url(folder)
 
     def _on_develop_plugin(self) -> None:
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-        QDesktopServices.openUrl(QUrl(self.PLUGIN_GUIDE_URL))
+        from core.desktop_open import open_url
+        open_url(self.PLUGIN_GUIDE_URL)
 
     # ---- Extension panels (views.extension_api.ExtensionApp.add_panel) -------
     def _register_extension_dock(self, dock) -> None:

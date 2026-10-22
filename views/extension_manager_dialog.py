@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import (QEvent, QObject, QPoint, QRunnable, Qt,
                             QStandardPaths,
                             QThreadPool, QTimer, QUrl, Signal)
-from PySide6.QtGui import QDesktopServices, QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.desktop_open import open_url
 from core.i18n import current_language, tr
 from core.extension_manager import (
     Extension,
@@ -750,7 +751,7 @@ class ExtensionManagerDialog(QDialog):
             repository.hide()
         repository.clicked.connect(
             lambda _checked=False, url=extension.repository:
-            QDesktopServices.openUrl(QUrl(url)))
+            open_url(url))
         author_row.addWidget(repository)
         image_column.addLayout(author_row)
         tags_row = FlowLayout(spacing=5)
@@ -941,12 +942,11 @@ class ExtensionManagerDialog(QDialog):
         folder = user_plugins_dir() / ident
         if not folder.exists():
             folder = user_plugins_dir()
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        open_url(folder)
 
     def _open_logs_folder(self, _checked=False) -> None:
         from core.paths import user_log_dir
-        QDesktopServices.openUrl(
-            QUrl.fromLocalFile(str(user_log_dir())))
+        open_url(user_log_dir())
 
 
     def _screenshot_cache(self, extension: Extension) -> Path | None:

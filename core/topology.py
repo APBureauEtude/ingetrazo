@@ -412,11 +412,39 @@ def loop_inside_face(mother: Face, loop: list[QVector3D],
     if not all(_strictly_inside_2d(proj(v), poly2) for v in loop):
         return False
     if outside_holes:
+        loop2 = [proj(v) for v in loop]
         for hole in mother.holes:
             hole2 = [proj(p) for p in hole]
-            if any(_strictly_inside_2d(proj(v), hole2) for v in loop):
+            if any(_strictly_inside_2d(q, hole2) for q in loop2):
+                return False
+            # A loop that wraps or straddles the hole without a corner in
+            # it overlaps the opening all the same; punched as a second hole
+            # the two crossed, the face triangulated over its own opening
+            # and the next rebuild filled it (#519).
+            if (any(_strictly_inside_2d(q, loop2) for q in hole2)
+                    or _loops_cross_2d(loop2, hole2)):
                 return False
     return True
+
+
+def _loops_cross_2d(a: list, b: list) -> bool:
+    """Whether an edge of polygon ``a`` properly crosses one of ``b``
+    (touching at an end or running along it does not count)."""
+    def side(p, q, r):
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+    eps = 1e-12
+    for i in range(len(a)):
+        p1, p2 = a[i], a[(i + 1) % len(a)]
+        for j in range(len(b)):
+            q1, q2 = b[j], b[(j + 1) % len(b)]
+            d1, d2 = side(q1, q2, p1), side(q1, q2, p2)
+            d3, d4 = side(p1, p2, q1), side(p1, p2, q2)
+            if (((d1 > eps and d2 < -eps) or (d1 < -eps and d2 > eps))
+                    and ((d3 > eps and d4 < -eps)
+                         or (d3 < -eps and d4 > eps))):
+                return True
+    return False
 
 
 def find_containing_face(

@@ -1447,6 +1447,7 @@ def compute_snap(
     axis_in_plane: bool = False,
     hover_lock_edge=None,
     hover_lock_plane: Optional[tuple] = None,
+    face_crossing: Optional[Callable[[], Optional[tuple]]] = None,
 ) -> SnapResult:
     # Linear-inference toggle (Alt): "all" = every inference, "off" =
     # point snaps only, "parallel_perp" = keep only parallel/perpendicular. The

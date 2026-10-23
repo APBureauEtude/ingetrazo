@@ -542,6 +542,14 @@ class _GlTape:
             fn(*args)
 
 
+def _callable_proc(addr: int) -> bool:
+    """Whether a context's ``getProcAddress`` answer can be called: some
+    Windows drivers' wglGetProcAddress hand back 1, 2, 3 or -1 for an entry
+    they do not have, instead of null — none of which GlReplay may jump to
+    (the tapes then replay through the PySide wrappers)."""
+    return 0x10000 <= addr < 1 << 63
+
+
 #: The GL entry points GlReplay calls, in _GlTape's opcode order.
 _TAPE_FUNCS = (b"glDrawArraysInstanced", b"glBindVertexArray",
                b"glUniform1i", b"glUniform1f", b"glUniform4f", b"glEnable",
@@ -3736,8 +3744,9 @@ class Viewport(QOpenGLWidget):
         mod = _native.native
         if mod is not None and hasattr(mod, "GlReplay") and ctx is not None:
             try:
-                replay = mod.GlReplay([int(ctx.getProcAddress(n) or 0)
-                                       for n in _TAPE_FUNCS])
+                addrs = [int(ctx.getProcAddress(n) or 0) for n in _TAPE_FUNCS]
+                if all(_callable_proc(a) for a in addrs):
+                    replay = mod.GlReplay(addrs)
             except Exception:  # noqa: BLE001 — a missing entry: Python
                 replay = None
         self._gl_replay_memo = (ctx, replay)

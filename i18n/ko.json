@@ -3006,5 +3006,10 @@
  "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "모델의 빨강, 초록, 파랑 그리기 축을 표시합니다. 축을 따라 추론하는 기능은 축이 숨겨져 있어도 계속 작동합니다.",
  "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "확장 기능 «{name}»이(가) 오른쪽 클릭 메뉴에서 오류를 일으켜 IngeTrazo를 다시 시작할 때까지 메뉴에서 제외됩니다. 업데이트하거나 확장 기능 관리자에서 끄세요.",
  "Ctrl+Enter to accept": "Ctrl+Enter를 눌러 확인",
- "No longer in the catalog · version {version}": "카탈로그에서 더 이상 제공되지 않음 · 버전 {version}"
+ "No longer in the catalog · version {version}": "카탈로그에서 더 이상 제공되지 않음 · 버전 {version}",
+ "Field of View…": "화각…",
+ "Change the camera's angle of view, like a lens: wider takes more in, narrower keeps the lines calm.": "렌즈처럼 카메라의 화각을 바꿉니다: 넓으면 더 많이 담고, 좁으면 선이 차분해집니다.",
+ "Field of view in degrees (10–120):": "화각(도) (10–120):",
+ "Field of view applies to perspective; switch to Perspective first.": "화각은 원근에 적용됩니다. 먼저 원근으로 전환하세요.",
+ "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: 모든 면에 자체 재질이 있어 아무것도 바뀌지 않았습니다 — 안으로 들어가 면을 칠하세요"
 }

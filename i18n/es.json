@@ -2981,6 +2981,7 @@
  "French translation of the interface.": "Traducción de la interfaz al francés.",
  "Polish translation of the interface.": "Traducción de la interfaz al polaco.",
  "Russian translation of the interface.": "Traducción de la interfaz al ruso.",
+ "Korean translation of the interface.": "Traducción al coreano de la interfaz.",
  "Sheet dimensions and level marks in the document's units, and sheets made from the AI bridge undone in one step.": "Cotas y niveles de lámina en las unidades del documento, y láminas hechas desde el puente de IA que se deshacen en un paso.",
  "Fixes for the location map, Move's rotation grips and typed values.": "Arreglos en el mapa de ubicación, los agarres de giro de Mover y los valores tecleados.",
  "A fix for the AI Assistant crash in the Flatpak.": "Un arreglo para el cierre del Asistente IA en el Flatpak.",
@@ -3003,8 +3004,12 @@
  "Always in submenus": "Siempre en submenús",
  "Each entry on its own": "Cada entrada por separado",
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Cómo se muestran las entradas de las extensiones en el menú del botón derecho (al instante) y en el menú Extensiones (al volver a abrir).",
- "Korean translation of the interface.": "Traducción al coreano de la interfaz.",
-  "Axes": "Ejes",
-  "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Muestra los ejes de dibujo rojo, verde y azul del modelo. La inferencia sobre ellos sigue funcionando aunque estén ocultos.",
-  "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "La extensión «{name}» falló en el menú del clic derecho y queda fuera de él hasta que se reinicie IngeTrazo. Actualícela o desactívela en el Gestor de extensiones."
+ "Axes": "Ejes",
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Muestra los ejes de dibujo rojo, verde y azul del modelo. La inferencia sobre ellos sigue funcionando aunque estén ocultos.",
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "La extensión «{name}» falló en el menú del clic derecho y queda fuera de él hasta que se reinicie IngeTrazo. Actualícela o desactívela en el Gestor de extensiones.",
+ "Field of View…": "Campo de visión…",
+ "Change the camera's angle of view, like a lens: wider takes more in, narrower keeps the lines calm.": "Cambia el ángulo de visión de la cámara, como un objetivo: más abierto abarca más, más cerrado deja las líneas tranquilas.",
+ "Field of view in degrees (10–120):": "Campo de visión en grados (10–120):",
+ "Field of view applies to perspective; switch to Perspective first.": "El campo de visión es de la perspectiva; cambie primero a Perspectiva.",
+ "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: todas sus caras tienen material propio, así que no cambió nada; entre en él y pinte las caras"
 }

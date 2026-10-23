@@ -99,6 +99,11 @@ class SnapResult:
     #: The ScreenTip's own words, already translated — what an extension's
     #: inference says («Level PA»); wins over the kind's built-in label.
     label: Optional[str] = None
+    #: The colour of the lock the point was found under (an arrow-key or
+    #: Shift axis, a reference): the draw line keeps it while the point
+    #: snaps to a corner on that line — locked to red, the line stays red
+    #: (#711, BastelBaus: «keep line color»).
+    lock_color: Optional[tuple[float, float, float]] = None
 
 
 # ---- Helpers ---------------------------------------------------------------
@@ -1103,13 +1108,16 @@ def _from_point_snap(
         return None
     _, foot, ref, kind, color = best
     # The guide runs perpendicular to the draw, from the corner to the foot —
-    # colour it by the axis it most aligns with (red/green/blue).
+    # coloured by its axis when it RUNS along one (red/green/blue), grey
+    # when it does not: a guide across the axes painted blue read as «along
+    # blue» (#711).
     guide_color = None
     if kind == "from_point":
         gdn = (foot - ref).normalized()
         gaxis = max(_AXIS_VECTORS,
                     key=lambda k: abs(QVector3D.dotProduct(gdn, _AXIS_VECTORS[k])))
-        guide_color = AXIS_COLORS[gaxis]
+        along = abs(QVector3D.dotProduct(gdn, _AXIS_VECTORS[gaxis]))
+        guide_color = AXIS_COLORS[gaxis] if along > 0.999 else COLOR_EXTENSION
     return SnapResult(foot, kind, color, guide=(ref, foot),
                       guide_color=guide_color)
 
@@ -1452,6 +1460,7 @@ def compute_snap(
             project_onto_line,
         )
         if hit is not None:
+            hit.lock_color = AXIS_COLORS[axis_lock]
             return hit
         return SnapResult(locked, "axis", AXIS_COLORS[axis_lock], axis=axis_lock)
 
@@ -1483,9 +1492,10 @@ def compute_snap(
             threshold_px, is_occluded, acquired_point, chain_first_point,
             project_onto_line,
         )
-        if hit is not None:
-            return hit
         color = shift_lock_color if shift_lock_color is not None else COLOR_REFERENCE
+        if hit is not None:
+            hit.lock_color = color
+            return hit
         return SnapResult(locked, "reference", color)
 
     # 2. Reference edge lock (Down arrow + edge under cursor).
@@ -1508,6 +1518,7 @@ def compute_snap(
                 project_onto_line,
             )
             if hit is not None:
+                hit.lock_color = COLOR_REFERENCE
                 return hit
             return SnapResult(locked, "reference", COLOR_REFERENCE)
 
@@ -1533,6 +1544,7 @@ def compute_snap(
                 project_onto_line,
             )
             if hit is not None:
+                hit.lock_color = AXIS_COLORS[inferred]
                 return hit
             return SnapResult(locked, "axis", AXIS_COLORS[inferred], axis=inferred)
 
@@ -1858,7 +1870,10 @@ def compute_snap(
         if pa is None or pb is None:
             continue
         d, t = _closest_on_segment_2d((cx, cy), pa, pb)
-        if d > et:
+        if d > et or t <= 0.0 or t >= 1.0:
+            # Past either end the nearest point is the endpoint itself: an
+            # «On edge» there named a point the endpoint snap had already
+            # turned down (#587, between its 9 px and the edge's 14 px).
             continue
         # The screen-space parameter ``t`` is NOT the world parameter under
         # perspective, so 3D-lerping it displaces the point by metres on a long,

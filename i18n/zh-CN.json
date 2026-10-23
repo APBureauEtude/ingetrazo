@@ -2982,6 +2982,7 @@
  "French translation of the interface.": "界面的法语翻译。",
  "Polish translation of the interface.": "界面的波兰语翻译。",
  "Russian translation of the interface.": "界面的俄语翻译。",
+ "Korean translation of the interface.": "界面韩语翻译。",
  "Sheet dimensions and level marks in the document's units, and sheets made from the AI bridge undone in one step.": "图纸尺寸与标高采用文档单位；通过 AI 桥创建的图纸可一步撤销。",
  "Fixes for the location map, Move's rotation grips and typed values.": "修复位置地图、移动工具的旋转手柄和输入数值的问题。",
  "A fix for the AI Assistant crash in the Flatpak.": "修复 Flatpak 中 AI 助手崩溃的问题。",
@@ -3004,8 +3005,12 @@
  "Always in submenus": "始终放在子菜单中",
  "Each entry on its own": "每个条目单独显示",
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "扩展的条目在右键菜单（立即生效）和扩展菜单（下次启动时生效）中的显示方式。",
- "Korean translation of the interface.": "界面韩语翻译。",
-  "Axes": "坐标轴",
-  "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "显示模型的红、绿、蓝绘图轴。隐藏后，沿坐标轴的推断仍然有效。",
-  "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "扩展「{name}」在右键菜单中出错,在 IngeTrazo 重新启动前不再出现在该菜单中。请在扩展管理器中更新或停用它。"
+ "Axes": "坐标轴",
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "显示模型的红、绿、蓝绘图轴。隐藏后，沿坐标轴的推断仍然有效。",
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "扩展「{name}」在右键菜单中出错,在 IngeTrazo 重新启动前不再出现在该菜单中。请在扩展管理器中更新或停用它。",
+ "Field of View…": "视野…",
+ "Change the camera's angle of view, like a lens: wider takes more in, narrower keeps the lines calm.": "像镜头一样改变相机的视角：越宽看到越多，越窄线条越平稳。",
+ "Field of view in degrees (10–120):": "视野角度（10–120）：",
+ "Field of view applies to perspective; switch to Perspective first.": "视野仅适用于透视；请先切换到透视。",
+ "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}：每个面都有自己的材质，所以没有变化——请进入其中并为各个面上色"
 }

@@ -2982,6 +2982,7 @@
  "French translation of the interface.": "Traduzione francese dell’interfaccia.",
  "Polish translation of the interface.": "Traduzione polacca dell’interfaccia.",
  "Russian translation of the interface.": "Traduzione russa dell’interfaccia.",
+ "Korean translation of the interface.": "Traduzione in coreano dell'interfaccia.",
  "Sheet dimensions and level marks in the document's units, and sheets made from the AI bridge undone in one step.": "Quote e livelli di tavola nelle unità del documento, e tavole create dal ponte IA annullabili in un solo passo.",
  "Fixes for the location map, Move's rotation grips and typed values.": "Correzioni alla mappa di posizione, alle maniglie di rotazione di Sposta e ai valori digitati.",
  "A fix for the AI Assistant crash in the Flatpak.": "Una correzione per il crash dell’Assistente IA nel Flatpak.",
@@ -3004,8 +3005,12 @@
  "Always in submenus": "Sempre in sottomenu",
  "Each entry on its own": "Ogni voce separata",
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "Come appaiono le voci delle estensioni nel menu del tasto destro (subito) e nel menu Estensioni (al prossimo avvio).",
- "Korean translation of the interface.": "Traduzione in coreano dell'interfaccia.",
-  "Axes": "Assi",
-  "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Mostra gli assi di disegno rosso, verde e blu del modello. L'inferenza lungo gli assi continua a funzionare anche quando sono nascosti.",
-  "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "L'estensione «{name}» non ha funzionato nel menu del clic destro e ne resta esclusa finché IngeTrazo non viene riavviato. Aggiornala o disattivala nel Gestore delle estensioni."
+ "Axes": "Assi",
+ "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "Mostra gli assi di disegno rosso, verde e blu del modello. L'inferenza lungo gli assi continua a funzionare anche quando sono nascosti.",
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "L'estensione «{name}» non ha funzionato nel menu del clic destro e ne resta esclusa finché IngeTrazo non viene riavviato. Aggiornala o disattivala nel Gestore delle estensioni.",
+ "Field of View…": "Campo visivo…",
+ "Change the camera's angle of view, like a lens: wider takes more in, narrower keeps the lines calm.": "Cambia l'angolo di visione della fotocamera, come un obiettivo: più ampio inquadra di più, più stretto mantiene le linee calme.",
+ "Field of view in degrees (10–120):": "Campo visivo in gradi (10–120):",
+ "Field of view applies to perspective; switch to Perspective first.": "Il campo visivo vale per la prospettiva; passa prima a Prospettiva.",
+ "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: ogni faccia ha il proprio materiale, quindi non è cambiato nulla — aprilo e dipingi le facce"
 }

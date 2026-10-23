@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from views import prompts as _prompts
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -452,7 +453,8 @@ class MainWindow(QMainWindow):
         (2026-09-20). Removing and adding a toolbar back drops the stored
         length for its size hint, which is all we ever want; nothing here
         lets a toolbar be stretched on purpose."""
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QTimer
+        was_maximized = bool(self.windowState() & Qt.WindowMaximized)
         areas = (Qt.LeftToolBarArea, Qt.RightToolBarArea,
                  Qt.TopToolBarArea, Qt.BottomToolBarArea)
         for area in areas:
@@ -474,6 +476,37 @@ class MainWindow(QMainWindow):
                 self.addToolBar(area, tb)
                 tb.setVisible(shown)
         self._wrap_toolbar_rows()
+        if was_maximized and sys.platform == "win32":
+            # Re-seating the bars can raise the window's minimum height above
+            # the normal size Qt still holds when Windows has just maximized
+            # it from Explorer; Qt then resizes to that minimum, drops the
+            # maximized state, and Windows puts the flag back on a window
+            # left 1296 × 901 in the corner (#800). Put it back, once the
+            # repack has settled and again after the platform has answered.
+            QTimer.singleShot(0, self, self._keep_maximized)
+            QTimer.singleShot(500, self, self._keep_maximized)
+            # Windows only: on Wayland a maximize lands asynchronously, so a
+            # window can be flagged maximized at its normal size for a moment
+            # at start-up and this would toggle it for nothing.
+
+    def _keep_maximized(self) -> None:
+        """Re-maximize a window that a toolbar repack left smaller than its
+        screen. A window that really fills the screen is left alone."""
+        from PySide6.QtCore import Qt
+        if not self.isVisible() or self.isFullScreen():
+            return
+        screen = self.screen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        frame = self.frameGeometry()
+        state = self.windowState()
+        if (state & Qt.WindowMaximized
+                and frame.width() >= 0.9 * avail.width()
+                and frame.height() >= 0.9 * avail.height()):
+            return
+        self.setWindowState(state & ~Qt.WindowMaximized)
+        self.setWindowState(state | Qt.WindowMaximized)
 
     def addToolBar(self, *args):  # noqa: N802 — Qt override
         """Every toolbar, the window's own and an extension's — at start-up
@@ -1394,6 +1427,16 @@ class MainWindow(QMainWindow):
         # Standard Views bar, so a shortcut given to one is the other's.
         for mode in ("parallel", "perspective", "two_point"):
             camera_menu.addAction(self._projection_actions[mode])
+
+        # The lens of the 3D view (#826, Alvaro Celis: «lo pongo en 70 para
+        # perspectivas más fugadas»). The document's camera and its scenes
+        # already keep the angle; the range is the composer's.
+        self._act_field_of_view = QAction(tr("Field of View…"), self)
+        self._act_field_of_view.setStatusTip(tr(
+            "Change the camera's angle of view, like a lens: wider takes "
+            "more in, narrower keeps the lines calm."))
+        self._act_field_of_view.triggered.connect(self._ask_field_of_view)
+        camera_menu.addAction(self._act_field_of_view)
 
         # Styles: the model's display look — face mode, edges,
         # background. Scenes remember the style; the composer's live-look
@@ -2666,17 +2709,28 @@ class MainWindow(QMainWindow):
         _shortcuts.apply_user_shortcuts(self)
 
         if self._defer_extensions and set(self.findChildren(QToolBar)) - bars_before:
-            st = QSettings()
-            state = st.value("ui/window_state")
-            if state:
-                self.restoreState(state)
-                self._show_default_trays(st)
-                self._place_new_toolbars(st)
-                self._pack_toolbars()
-            else:
+            if not self.restore_late_toolbars():
                 self._wrap_toolbar_rows()
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self, self._fit_docks_to_screen)
+
+    def restore_late_toolbars(self) -> bool:
+        """Put toolbars that arrived after the window was laid out where the
+        saved layout had them: the saved state again, the trays that start
+        shown, new bars placed, then every bar re-seated to its own length
+        (a raw restoreState brings back the stored lengths and the gaps
+        they leave). False, and nothing touched, without a saved layout.
+        The extensions' setup takes this path, and so does an extension
+        whose worker adds its bars later (ExtensionApp.restore_toolbar_layout)."""
+        st = QSettings()
+        state = st.value("ui/window_state")
+        if not state:
+            return False
+        restored = bool(self.restoreState(state))
+        self._show_default_trays(st)
+        self._place_new_toolbars(st)
+        self._pack_toolbars()
+        return restored
 
     def _fit_docks_to_screen(self) -> None:
         """Give the tallest side panels a scroll bar while the window
@@ -2728,17 +2782,15 @@ class MainWindow(QMainWindow):
     def _on_open_plugins_folder(self) -> None:
         """Open (creating if needed) the per-user plugins directory — drop
         a .py here and its tools appear in Extensions on next start."""
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
+        from core.desktop_open import open_url
         from core.extensions import user_plugins_dir
         folder = user_plugins_dir()
         folder.mkdir(parents=True, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        open_url(folder)
 
     def _on_develop_plugin(self) -> None:
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-        QDesktopServices.openUrl(QUrl(self.PLUGIN_GUIDE_URL))
+        from core.desktop_open import open_url
+        open_url(self.PLUGIN_GUIDE_URL)
 
     # ---- Extension panels (views.extension_api.ExtensionApp.add_panel) -------
     def _register_extension_dock(self, dock) -> None:
@@ -5518,6 +5570,40 @@ class MainWindow(QMainWindow):
                     pass
         self.viewport.update()
 
+    #: The angles the field of view may take: the composer's frames use the
+    #: same range.
+    FOV_RANGE = (10.0, 120.0)
+
+    def set_field_of_view(self, degrees: float) -> bool:
+        """Give the perspective camera a new angle of view. The eye stays
+        where it is, so a wider angle takes more in around the same point.
+        A parallel view has no angle — there it would only zoom — so it is
+        refused with a word in the status bar."""
+        cam = self.viewport.camera
+        if not cam.perspective:
+            self.statusBar().showMessage(tr(
+                "Field of view applies to perspective; switch to "
+                "Perspective first."), 5000)
+            return False
+        lo, hi = self.FOV_RANGE
+        cam.fov_deg = float(min(hi, max(lo, degrees)))
+        self.viewport.update()
+        return True
+
+    def _ask_field_of_view(self) -> None:
+        cam = self.viewport.camera
+        if not cam.perspective:
+            self.set_field_of_view(cam.fov_deg)     # says why, changes nothing
+            return
+        from PySide6.QtWidgets import QInputDialog
+        lo, hi = self.FOV_RANGE
+        value, ok = QInputDialog.getDouble(
+            self, tr("Field of view"),
+            tr("Field of view in degrees (10–120):"),
+            float(cam.fov_deg), lo, hi, 0)
+        if ok:
+            self.set_field_of_view(value)
+
     def _reset_camera_home(self) -> None:
         """A new drawing opens on the default view (iso, 20 m out), not on
         wherever the previous one was left (issue #60)."""
@@ -6483,8 +6569,10 @@ class MainWindow(QMainWindow):
         relay.deleteLater()
         return result.get("payload"), result.get("exc")
 
-    def _parse_stl_threaded(self, path, scale, simplify_mode, cb):
-        """Parse an STL on a worker while delivering progress on the UI thread."""
+    def _parse_stl_threaded(self, path, scale, simplify_mode, cb,
+                            report=None):
+        """Parse an STL on a worker while delivering progress on the UI thread.
+        ``report`` receives the survey offset (``stl.parse_stl``)."""
         from PySide6.QtCore import QEventLoop, QObject, QThread, Qt, Signal
         from formats import stl as stl_format
 
@@ -6496,7 +6584,8 @@ class MainWindow(QMainWindow):
                 try:
                     mesh = stl_format.parse_stl(
                         path, progress=lambda f, t: self.progressed.emit(f, t),
-                        scale=scale, simplify_mode=simplify_mode)
+                        scale=scale, simplify_mode=simplify_mode,
+                        report=report)
                     self.finished.emit(mesh, None)
                 except Exception as exc:  # noqa: BLE001 — reported to caller
                     self.finished.emit(None, exc)
@@ -6559,8 +6648,12 @@ class MainWindow(QMainWindow):
     def _import_glb_path(self, path: Path) -> None:
         from formats import glb as glb_format
         dlg, cb = self._import_progress(tr("Importing {name}…", name=path.name))
-        cmd = SnapshotImport(
-            lambda scene: glb_format.load_glb(scene, path, progress=cb))
+        moved: dict = {}
+
+        def load(scene):
+            moved["offset"] = glb_format.load_glb(scene, path, progress=cb)
+
+        cmd = SnapshotImport(load)
         try:
             self.viewport.history.execute(cmd)
         except Exception as exc:  # noqa: BLE001
@@ -6572,12 +6665,16 @@ class MainWindow(QMainWindow):
         self.viewport.update()
         self._import_name = path.name
         self._update_title()
-        self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
+        self._report_import(path.name, moved.get("offset"))
 
     def _import_dae_path(self, path: Path) -> None:
         dlg, cb = self._import_progress(tr("Importing {name}…", name=path.name))
-        cmd = SnapshotImport(
-            lambda scene: dae_format.load_dae(scene, path, progress=cb))
+        moved: dict = {}
+
+        def load(scene):
+            moved["offset"] = dae_format.load_dae(scene, path, progress=cb)
+
+        cmd = SnapshotImport(load)
         try:
             self.viewport.history.execute(cmd)
         except Exception as exc:  # noqa: BLE001
@@ -6589,7 +6686,7 @@ class MainWindow(QMainWindow):
         self.viewport.update()
         self._import_name = path.name
         self._update_title()
-        self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
+        self._report_import(path.name, moved.get("offset"))
 
     # ---- SKP import: IngeTrazo's own reader (formats/skp.py) -----------------
     def import_skp_path(self, skp: Path) -> bool:
@@ -6618,7 +6715,8 @@ class MainWindow(QMainWindow):
                 return False
             if payload is not None:
                 cmd = SnapshotImport(
-                    lambda scene: skp_format.apply_payload(scene, payload))
+                    lambda scene: skp_format.apply_payload(scene, payload,
+                                                           progress=cb))
                 try:
                     self.viewport.history.execute(cmd)
                 except Exception as exc:  # noqa: BLE001
@@ -6787,6 +6885,26 @@ class MainWindow(QMainWindow):
             PlaceGroupTool(comp, anchor=origin).place_at(self.viewport, point)
         return comp
 
+    @staticmethod
+    def _survey_note(offset) -> str:
+        """The status-bar note for a file moved near the origin on import
+        (formats/recenter.py), or ``""`` when it was read where it is."""
+        if not offset:
+            return ""
+        return "  ·  " + tr(
+            "moved near the origin (survey coordinates); offset "
+            "{x:,.0f}, {y:,.0f} m", x=offset[0], y=offset[1])
+
+    def _report_import(self, name: str, offset=None) -> None:
+        """«Imported name», plus the offset when the file was moved near the
+        origin — then the model is framed, since it now sits elsewhere than
+        its coordinates say."""
+        if offset:
+            self._on_zoom_extents()
+        self.statusBar().showMessage(
+            tr("Imported {name}", name=name) + self._survey_note(offset),
+            8000 if offset else 3000)
+
     def _on_import_obj(self) -> None:
         path_str, _ = file_dialogs.getOpenFileName(
             self, tr("Import OBJ"), "", tr("Wavefront OBJ (*.obj);;All files (*)"))
@@ -6797,9 +6915,13 @@ class MainWindow(QMainWindow):
         if scale is None:
             return
         dlg, cb = self._import_progress(tr("Importing {name}…", name=path.name))
-        cmd = SnapshotImport(
-            lambda scene: obj_format.load_obj(scene, path, progress=cb,
-                                              scale=scale))
+        moved: dict = {}
+
+        def load(scene):
+            moved["offset"] = obj_format.load_obj(scene, path, progress=cb,
+                                                  scale=scale)
+
+        cmd = SnapshotImport(load)
         try:
             self.viewport.history.execute(cmd)
         except Exception as exc:  # noqa: BLE001
@@ -6811,7 +6933,7 @@ class MainWindow(QMainWindow):
         self.viewport.update()
         self._import_name = path.name
         self._update_title()
-        self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
+        self._report_import(path.name, moved.get("offset"))
 
     def _on_import_stl(self) -> None:
         from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
@@ -6865,8 +6987,9 @@ class MainWindow(QMainWindow):
         settings.setValue("import/stl_simplify_mode", simplify_mode)
         dlg, cb = self._import_progress(
             tr("Importing {name}…", name=path.name))
+        moved: dict = {}
         target, exc = self._parse_stl_threaded(
-            path, scale, simplify_mode, cb)
+            path, scale, simplify_mode, cb, report=moved)
         if exc is not None:
             dlg.close()
             QMessageBox.critical(self, tr("Import STL failed"), str(exc))
@@ -6884,7 +7007,7 @@ class MainWindow(QMainWindow):
         self.viewport.update()
         self._import_name = path.name
         self._update_title()
-        self.statusBar().showMessage(tr("Imported {name}", name=path.name), 3000)
+        self._report_import(path.name, moved.get("offset"))
 
     def _on_import_image(self) -> None:
         """Import a picture to trace over (``Import ▸ image``).
@@ -7246,11 +7369,7 @@ class MainWindow(QMainWindow):
         msg = tr("Imported {name}: {edges} edges in {groups} tagged groups",
                  name=shown.name, edges=stats.get("edges", 0),
                  groups=stats.get("groups", 0))
-        offset = stats.get("offset")
-        if offset:
-            msg += "  ·  " + tr(
-                "moved near the origin (survey coordinates); offset "
-                "{x:,.0f}, {y:,.0f} m", x=offset[0], y=offset[1])
+        msg += self._survey_note(stats.get("offset"))
         self.statusBar().showMessage(msg, 8000)
         return True
 

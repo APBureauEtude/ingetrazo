@@ -707,7 +707,7 @@ def _box_edge_vertices(corners):
 
 
 def _guide_vertices(guides, spacing: float, selection=(), centre=None,
-                    reach: float = 0.0):
+                    reach: float = 0.0, eye=None):
     """Guides as world-space DASHES for the GL pass, so they are hidden by
     the geometry in front of them like any other line (issue #23,
     @pacaeiro: «guide lines are always in front of other objects, even if
@@ -729,11 +729,19 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
     whole length instead, under any sane cap, gave 27-metre dashes with
     22-metre gaps: at a 16-metre view the guide fell in a gap and vanished.
 
+    With ``eye`` given, each guide LINE scales ``spacing`` and ``reach``
+    by how much farther from the eye its looked-at stretch lies than the
+    camera's own distance (never less): a guide 30 m away while the view
+    sits a metre from a detail drew 3 cm dashes — under a pixel — over
+    15 m, and read as faint or gone on big models (#481); and a 2 cm orbit
+    distance left after a deep zoom (#579) did the same to every guide.
+
     Returns ``(coords, spans)``: a flat float array and
     ``[(first_vertex, count, selected)]``, one entry per guide LINE, so the
     caller can colour the selected ones without a second buffer. Guide
     points are not here — they stay screen-space crosses in the overlay.
     """
+    import numpy as np
     coords = array("f")
     spans: list[tuple[int, int, bool]] = []
     spacing = max(float(spacing), 1e-6)
@@ -742,6 +750,9 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
     origin = QVector3D(centre) if centre is not None else QVector3D(0, 0, 0)
     sel = {id(g) for g in (selection or ())}
     n = max(1, min(int(2.0 * reach / spacing), 4000))
+    # The camera distance the spacing was made for (eye to centre).
+    base_dist = ((QVector3D(eye) - origin).length()
+                 if eye is not None else 0.0)
     for g in guides or ():
         if not getattr(g, "is_line", False):
             # A guide POINT measured from a vertex draws its guide SEGMENT
@@ -773,12 +784,23 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
             continue
         # Foot of the perpendicular from the centre: the stretch of guide
         # the camera is actually looking at.
-        t0 = QVector3D.dotProduct(origin - p, d) - reach
+        tf = QVector3D.dotProduct(origin - p, d)
+        g_sp, g_reach, g_dash = spacing, reach, dash
+        if eye is not None and base_dist > 0.0:
+            k = max(1.0, (p + d * tf - eye).length() / base_dist)
+            g_sp, g_reach, g_dash = spacing * k, reach * k, dash * k
+        t0 = tf - g_reach
         start = len(coords) // 3
-        for k in range(n):
-            a = p + d * (t0 + k * spacing)
-            b = p + d * (t0 + k * spacing + dash)
-            coords.extend([a.x(), a.y(), a.z(), b.x(), b.y(), b.z()])
+        # The n dashes in one NumPy pass: a Python loop of QVector3D maths
+        # here cost ~2 ms a guide on EVERY frame, so forty guides took a
+        # frame from 18 to 110 ms (#816).
+        ts = t0 + np.arange(n, dtype=np.float64) * g_sp
+        pv = np.array((p.x(), p.y(), p.z()), dtype=np.float64)
+        dv = np.array((d.x(), d.y(), d.z()), dtype=np.float64)
+        seg = np.empty((n, 2, 3), dtype=np.float32)
+        seg[:, 0] = pv + ts[:, None] * dv
+        seg[:, 1] = pv + (ts + g_dash)[:, None] * dv
+        coords.frombytes(seg.tobytes())
         count = len(coords) // 3 - start
         if count:
             spans.append((start, count, id(g) in sel))
@@ -1389,6 +1411,14 @@ class Viewport(QOpenGLWidget):
         self._loc_opacity = self._program.uniformLocation("u_opacity")
         self._loc_hard_cutout = self._program.uniformLocation("u_hard_cutout")
         self._loc_shade = self._program.uniformLocation("u_shade")
+        # Instanced pass: re-shade the prototype's baked tones for the
+        # rotation of each copy (#482), against the bake's own light.
+        self._loc_reshade = self._program.uniformLocation("u_reshade")
+        self._program.bind()
+        self._program.setUniformValue(self._loc_reshade, 0)
+        self._program.setUniformValue(
+            self._program.uniformLocation("u_light_fixed"), self._LIGHT)
+        self._program.release()
         # Per-instance model matrix columns (P2 instanced components).
         self._loc_inst = [self._program.attributeLocation(f"a_inst{i}")
                           for i in range(4)]
@@ -1424,6 +1454,7 @@ class Viewport(QOpenGLWidget):
         # Axes rebuilt per frame (dash spacing scales with zoom), so dynamic.
         self._axes_vao, self._axes_vbo = self._create_dynamic()
         self._guides_vao, self._guides_vbo = self._create_dynamic()
+        self._guides_cache = None
         self._axes_spans: dict = {}
 
         self._sky_vao, self._sky_vbo = self._create_dynamic()
@@ -2177,14 +2208,34 @@ class Viewport(QOpenGLWidget):
         if (self.plano_style is None and self.style_override is None
                 and getattr(self.scene, "guides", None)):
             dist = max(float(self.camera.distance), 1e-3)
-            g_coords, g_spans = _guide_vertices(
-                self.scene.guides, dist * 0.03, self.scene.selection,
-                centre=self.camera.target, reach=dist * 15.0)
+            eye = self.camera.eye() if self.camera.perspective else None
+            # The dashes only change with the camera, the guides or the
+            # selection; a hover repaint reuses them and their upload (#816).
+            v3 = lambda v: (None if v is None
+                            else (v.x(), v.y(), v.z()))  # noqa: E731
+            key = (dist, v3(self.camera.target), v3(eye),
+                   tuple((id(g), v3(g.point), v3(getattr(g, "direction",
+                                                         None)),
+                          v3(getattr(g, "origin", None)))
+                         for g in self.scene.guides),
+                   tuple(g in self.scene.selection
+                         for g in self.scene.guides))
+            cached = getattr(self, "_guides_cache", None)
+            if cached is not None and cached[0] == key:
+                g_spans = cached[1]
+            else:
+                g_coords, g_spans = _guide_vertices(
+                    self.scene.guides, dist * 0.03, self.scene.selection,
+                    centre=self.camera.target, reach=dist * 15.0,
+                    # Parallel: one scale at every depth, nothing to adjust.
+                    eye=eye)
+                self._guides_cache = (key, g_spans)
+                if g_spans:
+                    data = g_coords.tobytes()
+                    self._guides_vbo.bind()
+                    self._guides_vbo.allocate(data, len(data))
+                    self._guides_vbo.release()
             if g_spans:
-                data = g_coords.tobytes()
-                self._guides_vbo.bind()
-                self._guides_vbo.allocate(data, len(data))
-                self._guides_vbo.release()
                 self._guides_vao.bind()
                 self._gl.glDepthMask(GL_FALSE)
                 for start, count, selected in g_spans:
@@ -2207,6 +2258,7 @@ class Viewport(QOpenGLWidget):
         if box is not None:
             data = _box_edge_vertices(box).tobytes()
             if data:
+                self._guides_cache = None   # the guides' dashes are gone
                 self._guides_vbo.bind()
                 self._guides_vbo.allocate(data, len(data))
                 self._guides_vbo.release()
@@ -3417,6 +3469,8 @@ class Viewport(QOpenGLWidget):
             self._program.setUniformValue1f(self._loc_opacity,
                                             XRAY_FACE_OPACITY)
             self._gl.glDepthMask(GL_FALSE)
+        # The prototype's tones were baked for ITS orientation (#482).
+        self._program.setUniformValue(self._loc_reshade, 1)
         if mode in ("shaded", "textures") and _lean_instanced():
             self._draw_instanced_faces_lean(by_proto, mode, extra)
             by_proto = {}
@@ -3497,6 +3551,7 @@ class Viewport(QOpenGLWidget):
                     entry["dback_vao"].release()
                     self._gl.glDisable(GL_CULL_FACE)
         self._front_face(False)
+        self._program.setUniformValue(self._loc_reshade, 0)
         self._program.setUniformValue1f(self._loc_fade, 0.0)
         if mode == "xray":
             self._program.setUniformValue1f(self._loc_opacity, 1.0)
@@ -3785,6 +3840,36 @@ class Viewport(QOpenGLWidget):
         locked images, so a click on an aligned scan falls through to the
         geometry being drawn on it."""
         return self.image_plane_at(screen_x, screen_y, selectable_only=True)
+
+    def image_in_front_of(self, face, screen_x: float, screen_y: float):
+        """A selectable reference image under the cursor that lies strictly
+        NEARER than ``face`` along the pixel ray, or ``None``. An image is
+        an underlay — a face on its plane, or above it, still wins the
+        click — but one behind it must not: with the top of a box hidden,
+        its bottom took every click meant for the image lying on top
+        (#426)."""
+        image = self.pick_image_plane(screen_x, screen_y)
+        if image is None or face is None:
+            return None
+        origin, direction = self._pixel_to_ray(screen_x, screen_y)
+        if origin is None or direction is None:
+            return None
+        verts = getattr(face, "vertices", None) or []
+        if not verts:
+            return None
+        n = face.normal()
+        denom = QVector3D.dotProduct(n, direction)
+        if abs(denom) < 1e-9:
+            return None
+        t_face = QVector3D.dotProduct(n, verts[0] - origin) / denom
+        ni = image.normal()
+        di = QVector3D.dotProduct(ni, direction)
+        if abs(di) < 1e-9:
+            return None
+        t_img = QVector3D.dotProduct(ni, image.center() - origin) / di
+        if 0.0 <= t_img < t_face - max(1e-4, 1e-5 * abs(t_face)):
+            return image
+        return None
 
     def pick_locked_image_plane(self, screen_x: float, screen_y: float):
         """The right-click's last resort: a LOCKED image under the cursor
@@ -6750,8 +6835,12 @@ class Viewport(QOpenGLWidget):
             and snap.kind in ("axis", "axis_inference", "reference", "extension",
                               "through_point", "perp_face")
         )
+        lock = getattr(snap, "lock_color", None) if snap is not None else None
         if forced is not None:
             color = forced
+        elif lock is not None:
+            # A point found ON a lock line keeps the lock's colour (#711).
+            color = (lock[0], lock[1], lock[2], 1.0)
         elif snap is not None and snap.kind == "axis":
             r, g, b = snap.color
             color = (r, g, b, 1.0)
@@ -7570,7 +7659,13 @@ class Viewport(QOpenGLWidget):
                 painter.drawLine(QPointF(*pa), QPointF(*pb))
         green = QColor(60, 160, 60)
         red = QColor(220, 40, 40)
-        for pos, role in state["grips"]:
+        # Far grips first, so a grip at the front of the box is drawn over
+        # the one behind it rather than under it (#833).
+        eye = self.camera.eye()
+        fwd = self.camera.target - eye
+        grips = sorted(state["grips"], key=lambda g: -QVector3D.dotProduct(
+            g[0] - eye, fwd))
+        for pos, role in grips:
             px = self._world_to_pixel(pos)
             if px is None:
                 continue
@@ -8768,7 +8863,21 @@ class Viewport(QOpenGLWidget):
         This is what makes Z-axis locks actually let you draw vertical
         lines — moving the mouse up/down on screen slides the projected
         point along the Z line.
+
+        The cursor is first dropped square onto the line as the screen
+        shows it, so only motion ALONG the line changes the length. In
+        perspective the closest point to the cursor's own ray also moved
+        with the cursor's sideways position (#769).
         """
+        step = max(float(getattr(self.camera, "distance", 1.0)) * 0.25, 1e-3)
+        pa = self._world_to_pixel(start)
+        pb = self._world_to_pixel(start + lock_dir.normalized() * step)
+        if pa is not None and pb is not None:
+            dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+            dd = dx * dx + dy * dy
+            if dd > 1.0:
+                s = ((pixel_x - pa[0]) * dx + (pixel_y - pa[1]) * dy) / dd
+                pixel_x, pixel_y = pa[0] + dx * s, pa[1] + dy * s
         ray_origin, ray_dir = self._pixel_to_ray(pixel_x, pixel_y)
         if ray_origin is None or ray_dir is None:
             return start
@@ -9177,6 +9286,63 @@ class Viewport(QOpenGLWidget):
             ln = np.linalg.norm(out, axis=1, keepdims=True)
             return out / np.where(ln > 1e-12, ln, 1.0)
 
+        # The prototype's tones were baked from ITS normals against the fixed
+        # world light: a rotated copy re-shades them for the faces as placed
+        # (#482), with the bake's own law (``_shade_factor``) per triangle.
+        light = np.array([self._LIGHT.x(), self._LIGHT.y(), self._LIGHT.z()])
+
+        # Only a turn (or a mirror, or an uneven scale) changes the light; a
+        # copy that is just moved or evenly scaled keeps the bake as it is.
+        diag = np.diag(L)
+        turned = not (np.allclose(L, np.diag(diag), atol=1e-9)
+                      and diag[0] > 0.0 and np.allclose(diag, diag[0]))
+
+        def matte(tri, quantise=False):  # (n, 3, 3) corners → shade (n,)
+            n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+            ln = np.linalg.norm(n, axis=1)
+            d = np.abs(n @ light) / np.where(ln > 1e-9, ln, 1.0)
+            f = 0.62 + 0.38 * d
+            if quantise:                 # a texture run's key, as baked
+                f = np.round(f * 32.0) / 32.0
+            return np.where(ln > 1e-9, f, 0.84375)
+
+        def tri_pos(raw, stride):
+            a = np.frombuffer(raw, np.float32).reshape(-1, 3, stride)
+            return a[:, :, :3].astype(np.float64)
+
+        def reshade6(raw, placed):      # pos(3)+rgb(3), local → placed
+            if (not turned or not raw or len(raw) % 72
+                    or len(placed) != len(raw)):
+                return placed
+            k = (matte(tri_pos(placed, 6), quantise=True)
+                 / matte(tri_pos(raw, 6), quantise=True))
+            a = np.frombuffer(placed, np.float32).reshape(-1, 3, 6).copy()
+            rgb = a[:, :, 3:6].astype(np.float64) * k[:, None, None]
+            a[:, :, 3:6] = np.round(np.minimum(rgb, 1.0) * 64.0) / 64.0
+            return a.tobytes()
+
+        def with_shade(key, s):
+            # The shade sits in the (path, shade) pair, at the front of
+            # the key or as its first element.
+            if isinstance(key[0], str):
+                return (key[0], s) + tuple(key[2:])
+            return ((key[0][0], s),) + tuple(key[1:])
+
+        def rekey5(placed):             # {key: pos(3)+uv(2)} by new shade
+            if not turned:
+                return placed
+            out: dict = {}
+            for key, raw in placed.items():
+                if not raw or len(raw) % 60:
+                    out[key] = out.get(key, b"") + raw
+                    continue
+                f = matte(tri_pos(raw, 5), quantise=True)
+                a = np.frombuffer(raw, np.float32).reshape(-1, 15)
+                for s in np.unique(f):
+                    nk = with_shade(key, float(s))
+                    out[nk] = out.get(nk, b"") + a[f == s].tobytes()
+            return out
+
         sp = base["soft_pts"]
         if sp is not None:
             s6 = sp.reshape(-1, 6).astype(np.float64)
@@ -9190,21 +9356,23 @@ class Viewport(QOpenGLWidget):
             "nv": base["nv"], "ne": base["ne"], "nf": base["nf"],
             "edges": tp32(base["edges"], 3, tris=False),
             "dback": tp32(base.get("dback", b""), 3),
-            "vcol": tp32(base["vcol"], 6),
-            "by_texture": {p: tp32(raw, 5)
-                           for p, raw in base["by_texture"].items()},
-            "tcol": {a: tp32(raw, 6)
+            "vcol": reshade6(base["vcol"], tp32(base["vcol"], 6)),
+            "by_texture": rekey5({p: tp32(raw, 5)
+                                  for p, raw in base["by_texture"].items()}),
+            "tcol": {a: reshade6(raw, tp32(raw, 6))
                      for a, raw in base.get("tcol", {}).items()},
-            "ttex": {k: tp32(raw, 5)
-                     for k, raw in base.get("ttex", {}).items()},
-            "back_vcol": tp32(base.get("back_vcol", b""), 6),
-            "back_tex": {k: tp32(raw, 5)
-                         for k, raw in base.get("back_tex", {}).items()},
-            "back_tcol": {k: tp32(raw, 6)
+            "ttex": rekey5({k: tp32(raw, 5)
+                            for k, raw in base.get("ttex", {}).items()}),
+            "back_vcol": reshade6(base.get("back_vcol", b""),
+                                  tp32(base.get("back_vcol", b""), 6)),
+            "back_tex": rekey5({k: tp32(raw, 5) for k, raw
+                                in base.get("back_tex", {}).items()}),
+            "back_tcol": {k: reshade6(raw, tp32(raw, 6))
                           for k, raw in base.get("back_tcol", {}).items()},
-            "back_ttex": {k: tp32(raw, 5)
-                          for k, raw in base.get("back_ttex", {}).items()},
-            "fvcol": tp32(base.get("fvcol", b""), 6),
+            "back_ttex": rekey5({k: tp32(raw, 5) for k, raw
+                                 in base.get("back_ttex", {}).items()}),
+            "fvcol": reshade6(base.get("fvcol", b""),
+                              tp32(base.get("fvcol", b""), 6)),
             "faces": base["faces"],
             "areas": base["areas"] * (abs(det) ** (2.0 / 3.0)),
             "v0": tp(base["v0"]) if base["v0"] is not None else None,
@@ -13167,20 +13335,32 @@ class Viewport(QOpenGLWidget):
 
         «Under the cursor» is what the cursor SHOWS: a group behind a
         selected loose face used to take the right-click and drop the
-        selection, and «Make Group» with it (#378)."""
+        selection, and «Make Group» with it (#378).
+
+        Something already selected under the cursor wins outright: loose
+        geometry flush on a group (a block standing on it, a face drawn on
+        its surface) is coplanar with the group there, and the group took
+        the click (#744)."""
+        mine = self.pick_edge(x, y) or self.pick_face(x, y)
+        if mine is not None and mine in self.scene.selection:
+            return mine
         picked = (self.pick_text_label(x, y, rect_only=True)
                   or self.pick_group(x, y) or self.pick_edge(x, y)
                   or self.pick_geopath(x, y) or self.pick_dimension(x, y)
                   or self.pick_text_label(x, y)
                   or self.pick_section_plane(x, y)
                   or self.pick_guide(x, y)
-                  or self.pick_face(x, y)
+                  or self._face_or_image_in_front(x, y)
                   or self.pick_image_plane(x, y)
                   or self.pick_locked_image_plane(x, y))
         if picked is not None and picked not in self.scene.selection:
             self.scene.select([picked])
             self.update()
         return picked
+
+    def _face_or_image_in_front(self, x: float, y: float):
+        face = self.pick_face(x, y)
+        return self.image_in_front_of(face, x, y) or face
 
     # ---- A side-tray tab dropped here: the window moves it to that side ----
     def _dock_drag(self, ev) -> bool:
@@ -14489,6 +14669,9 @@ class Viewport(QOpenGLWidget):
         self._mark_plane_for_shift()
         snap = self.last_snap
         tool = self.active_tool
+        owns = getattr(tool, "owns_shift_lock", None)
+        if owns is not None and owns():
+            return  # the tool reads the cursor's motion itself
         start = getattr(tool, "start_point", None) if tool is not None else None
         if snap is None or start is None or snap.kind not in self._SHIFT_LOCKABLE:
             return

@@ -376,6 +376,61 @@ def _ray_aabb(o, d, lo, hi, reach=float("inf")) -> bool:
 _chunk_uid = itertools.count(1)
 
 
+class _LazyChunk(dict):
+    """A chunk whose draw-only fields are computed on first use: a component
+    placement baked for the pick index (#158's lazy placements, hundreds per
+    pointer move) needs its triangles, edges and box, never its colours,
+    texture runs and re-shading — the dearer two thirds of the bake. Each
+    field comes from the same function on the same inputs whenever it is
+    asked for, so what is drawn is what the eager bake gave."""
+    __slots__ = ("_later",)
+
+    def __init__(self, data, later):
+        super().__init__(data)
+        self._later = later              # field -> callable making it
+
+    def __missing__(self, key):
+        make = self._later.pop(key, None)
+        if make is None:
+            raise KeyError(key)
+        value = make()
+        dict.__setitem__(self, key, value)
+        return value
+
+    def __setitem__(self, key, value):
+        self._later.pop(key, None)
+        dict.__setitem__(self, key, value)
+
+    def __contains__(self, key):
+        return dict.__contains__(self, key) or key in self._later
+
+    def get(self, key, default=None):
+        return self[key] if key in self else default
+
+    def _made(self):
+        for key in list(self._later):
+            self[key]                    # noqa: B018 — makes it
+        return self
+
+    def keys(self):
+        return dict.keys(self._made())
+
+    def items(self):
+        return dict.items(self._made())
+
+    def values(self):
+        return dict.values(self._made())
+
+    def __iter__(self):
+        return dict.__iter__(self._made())
+
+    def __len__(self):
+        return dict.__len__(self._made())
+
+    def copy(self):
+        return dict(self.items())
+
+
 #: The recorded, state-tracking instanced passes: ``None`` follows the
 #: experimental engine (on with it, off without — they change how the GPU
 #: is fed, and drivers differ); True/False force them (tests draw both).
@@ -9482,51 +9537,59 @@ class Viewport(QOpenGLWidget):
                     out[nk] = out.get(nk, b"") + a[f == s].tobytes()
             return out
 
-        sp = base["soft_pts"]
-        if sp is not None:
-            s6 = sp.reshape(-1, 6).astype(np.float64)
-            s6[:, 0:3] = tp(s6[:, 0:3])
-            s6[:, 3:6] = tp(s6[:, 3:6])
-            sp = s6.astype(np.float32)
-        entry = {
+        def soft_pts():
+            sp = base["soft_pts"]
+            if sp is not None:
+                s6 = sp.reshape(-1, 6).astype(np.float64)
+                s6[:, 0:3] = tp(s6[:, 0:3])
+                s6[:, 3:6] = tp(s6[:, 3:6])
+                sp = s6.astype(np.float32)
+            return sp
+
+        # What the pick index reads is made now; what only drawing reads
+        # waits until something draws it (see _LazyChunk).
+        entry = _LazyChunk({
             "ikey": key,
             "uid": next(_chunk_uid),
             "rev": (cur["rev"] + 1) if cur is not None else 0,
             "nv": base["nv"], "ne": base["ne"], "nf": base["nf"],
             "edges": tp32(base["edges"], 3, tris=False),
-            "dback": tp32(base.get("dback", b""), 3),
-            "vcol": reshade6(base["vcol"], tp32(base["vcol"], 6)),
-            "by_texture": rekey5({p: tp32(raw, 5)
-                                  for p, raw in base["by_texture"].items()}),
-            "tcol": {a: reshade6(raw, tp32(raw, 6))
-                     for a, raw in base.get("tcol", {}).items()},
-            "ttex": rekey5({k: tp32(raw, 5)
-                            for k, raw in base.get("ttex", {}).items()}),
-            "back_vcol": reshade6(base.get("back_vcol", b""),
-                                  tp32(base.get("back_vcol", b""), 6)),
-            "back_tex": rekey5({k: tp32(raw, 5) for k, raw
-                                in base.get("back_tex", {}).items()}),
-            "back_tcol": {k: reshade6(raw, tp32(raw, 6))
-                          for k, raw in base.get("back_tcol", {}).items()},
-            "back_ttex": rekey5({k: tp32(raw, 5) for k, raw
-                                 in base.get("back_ttex", {}).items()}),
-            "fvcol": reshade6(base.get("fvcol", b""),
-                              tp32(base.get("fvcol", b""), 6)),
             "faces": base["faces"],
             "areas": base["areas"] * (abs(det) ** (2.0 / 3.0)),
             "v0": tp(base["v0"]) if base["v0"] is not None else None,
             "e1": tv(base["e1"]) if base["e1"] is not None else None,
             "e2": tv(base["e2"]) if base["e2"] is not None else None,
             "tri_ent": base["tri_ent"],
-            "soft_pts": sp,
-            "soft_n0": tn(base["soft_n0"]),
-            "soft_c0": (tp(base["soft_c0"]) if len(base["soft_c0"])
-                        else base["soft_c0"]),
-            "soft_n1": tn(base["soft_n1"]),
-            "soft_c1": (tp(base["soft_c1"]) if len(base["soft_c1"])
-                        else base["soft_c1"]),
             "soft_single": base["soft_single"],
-        }
+        }, {
+            "dback": lambda: tp32(base.get("dback", b""), 3),
+            "vcol": lambda: reshade6(base["vcol"], tp32(base["vcol"], 6)),
+            "by_texture": lambda: rekey5(
+                {p: tp32(raw, 5) for p, raw in base["by_texture"].items()}),
+            "tcol": lambda: {a: reshade6(raw, tp32(raw, 6))
+                             for a, raw in base.get("tcol", {}).items()},
+            "ttex": lambda: rekey5({k: tp32(raw, 5) for k, raw
+                                    in base.get("ttex", {}).items()}),
+            "back_vcol": lambda: reshade6(
+                base.get("back_vcol", b""),
+                tp32(base.get("back_vcol", b""), 6)),
+            "back_tex": lambda: rekey5({k: tp32(raw, 5) for k, raw
+                                        in base.get("back_tex", {}).items()}),
+            "back_tcol": lambda: {
+                k: reshade6(raw, tp32(raw, 6))
+                for k, raw in base.get("back_tcol", {}).items()},
+            "back_ttex": lambda: rekey5({k: tp32(raw, 5) for k, raw in
+                                         base.get("back_ttex", {}).items()}),
+            "fvcol": lambda: reshade6(base.get("fvcol", b""),
+                                      tp32(base.get("fvcol", b""), 6)),
+            "soft_pts": soft_pts,
+            "soft_n0": lambda: tn(base["soft_n0"]),
+            "soft_c0": lambda: (tp(base["soft_c0"]) if len(base["soft_c0"])
+                                else base["soft_c0"]),
+            "soft_n1": lambda: tn(base["soft_n1"]),
+            "soft_c1": lambda: (tp(base["soft_c1"]) if len(base["soft_c1"])
+                                else base["soft_c1"]),
+        })
         bb = base.get("bbox")
         if bb is not None:
             corners = np.array([(x, y, z)

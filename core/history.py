@@ -383,6 +383,21 @@ class DeleteEdgesCommand(Command):
         scene.version += 1
 
 
+def _single_coplanar_pair(faces) -> Optional[tuple]:
+    """The one pair of ``faces`` that face the same way (they share an edge,
+    so that makes them coplanar), or ``None`` when there is no such pair,
+    more than one, or another face lies in their plane too."""
+    pairs = [(a, b) for i, a in enumerate(faces) for b in faces[i + 1:]
+             if QVector3D.dotProduct(a.normal(), b.normal()) > 0.999]
+    if len(pairs) != 1:
+        return None
+    n = pairs[0][0].normal()
+    if any(abs(QVector3D.dotProduct(n, f.normal())) > 0.999
+           for f in faces if f not in pairs[0]):
+        return None
+    return pairs[0]
+
+
 class EraseSelectionCommand(Command):
     """Erase selected edges and faces, the usual way.
 
@@ -428,6 +443,7 @@ class EraseSelectionCommand(Command):
             _index_face(f)
         dead_faces: set = set()
         slit_planes: list = []
+        across: list = []
         for a, b in self._edge_endpoints:
             v0 = m.vertex_at(a)
             v1 = m.vertex_at(b)
@@ -456,6 +472,22 @@ class EraseSelectionCommand(Command):
                 if merged is not None:
                     dead_faces.update(id(f) for f in faces)
                     _index_face(merged)
+            elif len(faces) > 2:
+                # A wall raised against a taller neighbour leaves its inner
+                # side faces on the line too, so the front's split line had
+                # four faces and the cascade took the whole front (#356).
+                # Reunite the one coplanar pair as above; the faces across
+                # the line are re-derived on their plane below, so what
+                # still closes (the jamb above the sill) stays and the
+                # inner partitions, open now, go.
+                pair = _single_coplanar_pair(faces)
+                if pair is not None:
+                    merged = m.dissolve_coplanar_region(pair)
+                if merged is not None:
+                    dead_faces.update(id(f) for f in pair)
+                    _index_face(merged)
+                    across.extend(f for f in faces if f not in pair)
+                    m.remove_edge(edge)
             if merged is None:
                 # Cascade: the edge and every face bounding it (a face can't
                 # outlive a bounding edge) go away.
@@ -480,6 +512,17 @@ class EraseSelectionCommand(Command):
                 continue
             done_planes.append((origin, nn))
             RebuildPlaneFacesCommand(origin, nn).do(scene)
+        # The faces across a reunited line, each plane from its own faces'
+        # remaining edges: the line's other faces may span past it (the
+        # jamb above the sill) and only what still closes comes back.
+        while across:
+            f = across[0]
+            o, n = QVector3D(f.vertices[0]), f.normal()
+            same = [g for g in across if abs(QVector3D.dotProduct(
+                n, g.normal())) > 0.999 and abs(QVector3D.dotProduct(
+                QVector3D(g.vertices[0]) - o, n)) < 1e-4]
+            across = [g for g in across if g not in same]
+            RebuildPlaneFacesCommand(o, n, faces=same).do(scene)
         # Deleting a curved surface takes its hidden seams with it: a soft edge
         # left bordering no face is a dangling curve segment (a cylinder side's
         # vertical seam) — prune it so no stray vertical lines remain. Hard
@@ -4741,7 +4784,8 @@ class RebuildPlaneFacesCommand(Command):
 
     _TOL = 1e-4
 
-    def __init__(self, origin: QVector3D, normal: QVector3D) -> None:
+    def __init__(self, origin: QVector3D, normal: QVector3D,
+                 faces: Optional[Iterable] = None) -> None:
         self.origin = QVector3D(origin)
         # Normalised by hand: QVector3D.normalized() nulls anything shorter
         # than 1e-5, and a zero normal here means "rebuild the plane of
@@ -4749,6 +4793,9 @@ class RebuildPlaneFacesCommand(Command):
         n = QVector3D(normal)
         length = n.length()
         self.normal = n / length if length > 1e-9 else QVector3D()
+        # Given faces: rebuild only them, from their own remaining edges --
+        # the rest of the plane is not this edit's business (#356).
+        self.faces = None if faces is None else list(faces)
         self.snapshot: Optional[dict] = None
         self.rebuilt = 0
 
@@ -4766,15 +4813,31 @@ class RebuildPlaneFacesCommand(Command):
             # whole mesh — which is how a 3 mm² sliver erased 447 faces.
             return
         mesh = scene.mesh
-        plane_edges = [e for e in mesh.edges
-                       if self._on_plane(e.a) and self._on_plane(e.b)]
+        if self.faces is not None:
+            live = set(map(id, mesh.faces))
+            plane_faces = [f for f in self.faces if id(f) in live]
+            plane_edges = []
+            for f in plane_faces:
+                for loop in (f.loop, *f.hole_loops):
+                    for a, b in zip(loop, loop[1:] + loop[:1]):
+                        e = mesh.find_edge(a, b)
+                        if e is not None and e not in plane_edges:
+                            plane_edges.append(e)
+        else:
+            plane_edges = [e for e in mesh.edges
+                           if self._on_plane(e.a) and self._on_plane(e.b)]
         if not plane_edges:
+            if self.faces is not None:
+                for f in plane_faces:
+                    mesh.remove_face(f)
             return
-        plane_faces = [
-            f for f in mesh.faces
-            if all(self._on_plane(v.position) for v in f.loop)
-            and all(self._on_plane(v.position) for h in f.hole_loops for v in h)
-        ]
+        if self.faces is None:
+            plane_faces = [
+                f for f in mesh.faces
+                if all(self._on_plane(v.position) for v in f.loop)
+                and all(self._on_plane(v.position)
+                        for h in f.hole_loops for v in h)
+            ]
         old = [([tuple(t) for t in f.triangulate()], f.normal(), dict(f.attrs))
                for f in plane_faces]
         segments = [(QVector3D(e.a), QVector3D(e.b)) for e in plane_edges]

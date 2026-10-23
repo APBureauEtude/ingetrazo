@@ -56,6 +56,7 @@ from core.i18n import tr
 from views.theme import style as theme_style
 from views.filedialogs import file_dialogs
 from core.mesh import Edge, Face
+from core.bim import face_net_area
 from core.group import Group
 from core.dimension import Dimension
 from core.textlabel import TextLabel
@@ -3503,7 +3504,7 @@ class EntityInfoPanel(QWidget):
             e = sel[0]
             if isinstance(e, Face):
                 mat = self._material_of(e)
-                return (f"<b>{tr('Face')}</b><br>{tr('Area')}: {fmt_area(e.area())}<br>"
+                return (f"<b>{tr('Face')}</b><br>{tr('Area')}: {fmt_area(face_net_area(e))}<br>"
                         f"{tr('Vertices')}: {len(e.vertices)}<br>"
                         f"{tr('Material')}: {mat}")
             if isinstance(e, Edge):
@@ -3552,7 +3553,8 @@ class EntityInfoPanel(QWidget):
         # every selection change would slow the panel down.
         if len(sel) <= self.TOTALS_UP_TO:
             if counts["faces"]:
-                area = sum(e.area() for e in sel if isinstance(e, Face))
+                area = sum(face_net_area(e) for e in sel
+                           if isinstance(e, Face))
                 text += f"<br>{tr('Area')}: {fmt_area(area)}"
             if counts["edges"]:
                 length = sum((e.b - e.a).length() for e in sel
@@ -4213,16 +4215,29 @@ class BimPanel(QWidget):
             self.active_check.blockSignals(True)
             self.active_check.setChecked(False)
             self.active_check.blockSignals(False)
-        self._objects = collect_objects(self._scene())
+        # The takeoff reads geometry and tags, never the selection: a
+        # view-only change (a click, a box selection) keeps the last one.
+        # Re-measuring 238 rebar bars on every selection took 25 s (#857).
+        scene = self._scene()
+        key = (id(scene), scene.content_version)
+        if key == getattr(self, "_takeoff_key", None):
+            return
+        self._takeoff_key = key
+        # A memo per panel: an edit re-measures only the objects it touched.
+        memo = self.__dict__.setdefault("_takeoff_memo", {})
+        self._objects = collect_objects(scene, memo)
         self.tree.clear()
         for obj in self._objects:
-            faces = obj.get("faces")
-            if faces is None:
-                faces = list(obj["group"].mesh.faces)
-            # The takeoff column shows the class's budget measure (wall face
-            # m², column m³, pile m, door und) — the number the IFC/CSV
-            # export carries to IngePresupuestos, not the shell area.
-            _, _, (metrado, unit) = class_quantities(obj["class"], faces)
+            if "metrado" not in obj:
+                faces = obj.get("faces")
+                if faces is None:
+                    faces = list(obj["group"].mesh.faces)
+                # The takeoff column shows the class's budget measure (wall
+                # face m², column m³, pile m, door und) — the number the
+                # IFC/CSV export carries to IngePresupuestos, not the shell
+                # area. Kept on the object, so a memoised one reuses it.
+                obj["metrado"] = class_quantities(obj["class"], faces)[2]
+            metrado, unit = obj["metrado"]
             pretty = {"m2": "m²", "m3": "m³"}.get(unit, unit)
             if metrado is None:
                 met = "—"

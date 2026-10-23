@@ -707,7 +707,7 @@ def _box_edge_vertices(corners):
 
 
 def _guide_vertices(guides, spacing: float, selection=(), centre=None,
-                    reach: float = 0.0):
+                    reach: float = 0.0, eye=None):
     """Guides as world-space DASHES for the GL pass, so they are hidden by
     the geometry in front of them like any other line (issue #23,
     @pacaeiro: «guide lines are always in front of other objects, even if
@@ -729,11 +729,19 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
     whole length instead, under any sane cap, gave 27-metre dashes with
     22-metre gaps: at a 16-metre view the guide fell in a gap and vanished.
 
+    With ``eye`` given, each guide LINE scales ``spacing`` and ``reach``
+    by how much farther from the eye its looked-at stretch lies than the
+    camera's own distance (never less): a guide 30 m away while the view
+    sits a metre from a detail drew 3 cm dashes — under a pixel — over
+    15 m, and read as faint or gone on big models (#481); and a 2 cm orbit
+    distance left after a deep zoom (#579) did the same to every guide.
+
     Returns ``(coords, spans)``: a flat float array and
     ``[(first_vertex, count, selected)]``, one entry per guide LINE, so the
     caller can colour the selected ones without a second buffer. Guide
     points are not here — they stay screen-space crosses in the overlay.
     """
+    import numpy as np
     coords = array("f")
     spans: list[tuple[int, int, bool]] = []
     spacing = max(float(spacing), 1e-6)
@@ -742,6 +750,9 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
     origin = QVector3D(centre) if centre is not None else QVector3D(0, 0, 0)
     sel = {id(g) for g in (selection or ())}
     n = max(1, min(int(2.0 * reach / spacing), 4000))
+    # The camera distance the spacing was made for (eye to centre).
+    base_dist = ((QVector3D(eye) - origin).length()
+                 if eye is not None else 0.0)
     for g in guides or ():
         if not getattr(g, "is_line", False):
             # A guide POINT measured from a vertex draws its guide SEGMENT
@@ -773,12 +784,23 @@ def _guide_vertices(guides, spacing: float, selection=(), centre=None,
             continue
         # Foot of the perpendicular from the centre: the stretch of guide
         # the camera is actually looking at.
-        t0 = QVector3D.dotProduct(origin - p, d) - reach
+        tf = QVector3D.dotProduct(origin - p, d)
+        g_sp, g_reach, g_dash = spacing, reach, dash
+        if eye is not None and base_dist > 0.0:
+            k = max(1.0, (p + d * tf - eye).length() / base_dist)
+            g_sp, g_reach, g_dash = spacing * k, reach * k, dash * k
+        t0 = tf - g_reach
         start = len(coords) // 3
-        for k in range(n):
-            a = p + d * (t0 + k * spacing)
-            b = p + d * (t0 + k * spacing + dash)
-            coords.extend([a.x(), a.y(), a.z(), b.x(), b.y(), b.z()])
+        # The n dashes in one NumPy pass: a Python loop of QVector3D maths
+        # here cost ~2 ms a guide on EVERY frame, so forty guides took a
+        # frame from 18 to 110 ms (#816).
+        ts = t0 + np.arange(n, dtype=np.float64) * g_sp
+        pv = np.array((p.x(), p.y(), p.z()), dtype=np.float64)
+        dv = np.array((d.x(), d.y(), d.z()), dtype=np.float64)
+        seg = np.empty((n, 2, 3), dtype=np.float32)
+        seg[:, 0] = pv + ts[:, None] * dv
+        seg[:, 1] = pv + (ts + g_dash)[:, None] * dv
+        coords.frombytes(seg.tobytes())
         count = len(coords) // 3 - start
         if count:
             spans.append((start, count, id(g) in sel))
@@ -1006,6 +1028,13 @@ def _face_geometry(f, memo, triangulate):
         memo[id(f)] = geom
     return geom
 
+
+
+def _finite_point(p) -> bool:
+    """Whether ``p`` (a QVector3D or None) is a real point."""
+    import math
+    return p is not None and all(
+        math.isfinite(c) for c in (p.x(), p.y(), p.z()))
 
 class Viewport(QOpenGLWidget):
     """OpenGL viewport with orbital camera, grid, XYZ axes, tools and snapping."""
@@ -1385,6 +1414,14 @@ class Viewport(QOpenGLWidget):
         self._loc_opacity = self._program.uniformLocation("u_opacity")
         self._loc_hard_cutout = self._program.uniformLocation("u_hard_cutout")
         self._loc_shade = self._program.uniformLocation("u_shade")
+        # Instanced pass: re-shade the prototype's baked tones for the
+        # rotation of each copy (#482), against the bake's own light.
+        self._loc_reshade = self._program.uniformLocation("u_reshade")
+        self._program.bind()
+        self._program.setUniformValue(self._loc_reshade, 0)
+        self._program.setUniformValue(
+            self._program.uniformLocation("u_light_fixed"), self._LIGHT)
+        self._program.release()
         # Per-instance model matrix columns (P2 instanced components).
         self._loc_inst = [self._program.attributeLocation(f"a_inst{i}")
                           for i in range(4)]
@@ -1420,6 +1457,7 @@ class Viewport(QOpenGLWidget):
         # Axes rebuilt per frame (dash spacing scales with zoom), so dynamic.
         self._axes_vao, self._axes_vbo = self._create_dynamic()
         self._guides_vao, self._guides_vbo = self._create_dynamic()
+        self._guides_cache = None
         self._axes_spans: dict = {}
 
         self._sky_vao, self._sky_vbo = self._create_dynamic()
@@ -2140,8 +2178,12 @@ class Viewport(QOpenGLWidget):
         # stays stable across zoom. Depth-write OFF so the ground axes don't cull
         # geometry sitting on z=0; drawn BEFORE user edges so an edge along an
         # axis wins the LEQUAL depth test. Rubber-band stays on top (drawn last).
-        if self.plano_style is None and self.style_override is None:
-            # No axes on a plan sheet / styled composer frame.
+        from core import axes as _axes
+        if (self.plano_style is None and self.style_override is None
+                and (getattr(self.scene, "show_axes", True)
+                     or not _axes.is_world())):
+            # No axes on a plan sheet / styled composer frame, nor the
+            # world's once Camera ▸ Axes is off (an open group keeps its own).
             spacing = max(self.camera.distance * 0.008, 1e-4)
             axes_coords, self._axes_spans = _axes_vertices(spacing)
             data = axes_coords.tobytes()
@@ -2169,14 +2211,34 @@ class Viewport(QOpenGLWidget):
         if (self.plano_style is None and self.style_override is None
                 and getattr(self.scene, "guides", None)):
             dist = max(float(self.camera.distance), 1e-3)
-            g_coords, g_spans = _guide_vertices(
-                self.scene.guides, dist * 0.03, self.scene.selection,
-                centre=self.camera.target, reach=dist * 15.0)
+            eye = self.camera.eye() if self.camera.perspective else None
+            # The dashes only change with the camera, the guides or the
+            # selection; a hover repaint reuses them and their upload (#816).
+            v3 = lambda v: (None if v is None
+                            else (v.x(), v.y(), v.z()))  # noqa: E731
+            key = (dist, v3(self.camera.target), v3(eye),
+                   tuple((id(g), v3(g.point), v3(getattr(g, "direction",
+                                                         None)),
+                          v3(getattr(g, "origin", None)))
+                         for g in self.scene.guides),
+                   tuple(g in self.scene.selection
+                         for g in self.scene.guides))
+            cached = getattr(self, "_guides_cache", None)
+            if cached is not None and cached[0] == key:
+                g_spans = cached[1]
+            else:
+                g_coords, g_spans = _guide_vertices(
+                    self.scene.guides, dist * 0.03, self.scene.selection,
+                    centre=self.camera.target, reach=dist * 15.0,
+                    # Parallel: one scale at every depth, nothing to adjust.
+                    eye=eye)
+                self._guides_cache = (key, g_spans)
+                if g_spans:
+                    data = g_coords.tobytes()
+                    self._guides_vbo.bind()
+                    self._guides_vbo.allocate(data, len(data))
+                    self._guides_vbo.release()
             if g_spans:
-                data = g_coords.tobytes()
-                self._guides_vbo.bind()
-                self._guides_vbo.allocate(data, len(data))
-                self._guides_vbo.release()
                 self._guides_vao.bind()
                 self._gl.glDepthMask(GL_FALSE)
                 for start, count, selected in g_spans:
@@ -2199,6 +2261,7 @@ class Viewport(QOpenGLWidget):
         if box is not None:
             data = _box_edge_vertices(box).tobytes()
             if data:
+                self._guides_cache = None   # the guides' dashes are gone
                 self._guides_vbo.bind()
                 self._guides_vbo.allocate(data, len(data))
                 self._guides_vbo.release()
@@ -3409,6 +3472,8 @@ class Viewport(QOpenGLWidget):
             self._program.setUniformValue1f(self._loc_opacity,
                                             XRAY_FACE_OPACITY)
             self._gl.glDepthMask(GL_FALSE)
+        # The prototype's tones were baked for ITS orientation (#482).
+        self._program.setUniformValue(self._loc_reshade, 1)
         if mode in ("shaded", "textures") and _lean_instanced():
             self._draw_instanced_faces_lean(by_proto, mode, extra)
             by_proto = {}
@@ -3489,6 +3554,7 @@ class Viewport(QOpenGLWidget):
                     entry["dback_vao"].release()
                     self._gl.glDisable(GL_CULL_FACE)
         self._front_face(False)
+        self._program.setUniformValue(self._loc_reshade, 0)
         self._program.setUniformValue1f(self._loc_fade, 0.0)
         if mode == "xray":
             self._program.setUniformValue1f(self._loc_opacity, 1.0)
@@ -3777,6 +3843,36 @@ class Viewport(QOpenGLWidget):
         locked images, so a click on an aligned scan falls through to the
         geometry being drawn on it."""
         return self.image_plane_at(screen_x, screen_y, selectable_only=True)
+
+    def image_in_front_of(self, face, screen_x: float, screen_y: float):
+        """A selectable reference image under the cursor that lies strictly
+        NEARER than ``face`` along the pixel ray, or ``None``. An image is
+        an underlay — a face on its plane, or above it, still wins the
+        click — but one behind it must not: with the top of a box hidden,
+        its bottom took every click meant for the image lying on top
+        (#426)."""
+        image = self.pick_image_plane(screen_x, screen_y)
+        if image is None or face is None:
+            return None
+        origin, direction = self._pixel_to_ray(screen_x, screen_y)
+        if origin is None or direction is None:
+            return None
+        verts = getattr(face, "vertices", None) or []
+        if not verts:
+            return None
+        n = face.normal()
+        denom = QVector3D.dotProduct(n, direction)
+        if abs(denom) < 1e-9:
+            return None
+        t_face = QVector3D.dotProduct(n, verts[0] - origin) / denom
+        ni = image.normal()
+        di = QVector3D.dotProduct(ni, direction)
+        if abs(di) < 1e-9:
+            return None
+        t_img = QVector3D.dotProduct(ni, image.center() - origin) / di
+        if 0.0 <= t_img < t_face - max(1e-4, 1e-5 * abs(t_face)):
+            return image
+        return None
 
     def pick_locked_image_plane(self, screen_x: float, screen_y: float):
         """The right-click's last resort: a LOCKED image under the cursor
@@ -5064,17 +5160,24 @@ class Viewport(QOpenGLWidget):
         self._preview_matrix = QMatrix4x4(m)
         self.update()
 
+    def _groups_preview_transform(self) -> QMatrix4x4:
+        """The world transform the groups preview draws its movers through:
+        the full matrix (Rotate/Scale) or the translation (Move)."""
+        m = getattr(self, "_preview_matrix", None)
+        if m is not None:
+            return QMatrix4x4(m)
+        m = QMatrix4x4()
+        off = getattr(self, "_preview_offset", None)
+        if off is not None:
+            m.translate(off)
+        return m
+
     def _draw_groups_preview(self, mvp) -> None:
         """Draw the frozen scratch copies of the moving groups at the
         current preview offset: one translated MVP, zero array churn."""
         if not getattr(self, "_preview_groups", None):
             return
-        m = getattr(self, "_preview_matrix", None)
-        if m is None:
-            m = QMatrix4x4()
-            off = getattr(self, "_preview_offset", None)
-            if off is not None:
-                m.translate(off)
+        m = self._groups_preview_transform()
         self._program.setUniformValue(self._loc_mvp, mvp * m)
         n = getattr(self, "_pv_vcol_count", 0)
         if n:
@@ -6735,8 +6838,12 @@ class Viewport(QOpenGLWidget):
             and snap.kind in ("axis", "axis_inference", "reference", "extension",
                               "through_point", "perp_face")
         )
+        lock = getattr(snap, "lock_color", None) if snap is not None else None
         if forced is not None:
             color = forced
+        elif lock is not None:
+            # A point found ON a lock line keeps the lock's colour (#711).
+            color = (lock[0], lock[1], lock[2], 1.0)
         elif snap is not None and snap.kind == "axis":
             r, g, b = snap.color
             color = (r, g, b, 1.0)
@@ -6980,9 +7087,10 @@ class Viewport(QOpenGLWidget):
             self.camera.target = focus
         frac = max(bw / max(self.width(), 1), bh / max(self.height(), 1))
         frac = max(frac, 0.04)        # don't zoom past a sane limit in one go
-        from core.camera import MAX_DISTANCE, MIN_DISTANCE
+        from core.camera import MAX_DISTANCE
         self.camera.distance = max(
-            MIN_DISTANCE, min(self.camera.distance * frac, MAX_DISTANCE))
+            self.camera.min_distance(),
+            min(self.camera.distance * frac, MAX_DISTANCE))
         self.update()
 
     def _draw_snap_indicator(self, painter: QPainter, snap: SnapResult) -> None:
@@ -7554,7 +7662,13 @@ class Viewport(QOpenGLWidget):
                 painter.drawLine(QPointF(*pa), QPointF(*pb))
         green = QColor(60, 160, 60)
         red = QColor(220, 40, 40)
-        for pos, role in state["grips"]:
+        # Far grips first, so a grip at the front of the box is drawn over
+        # the one behind it rather than under it (#833).
+        eye = self.camera.eye()
+        fwd = self.camera.target - eye
+        grips = sorted(state["grips"], key=lambda g: -QVector3D.dotProduct(
+            g[0] - eye, fwd))
+        for pos, role in grips:
             px = self._world_to_pixel(pos)
             if px is None:
                 continue
@@ -7918,11 +8032,20 @@ class Viewport(QOpenGLWidget):
         font = QFont()
         font.setPointSize(int(style.get("font_size", 9)))
         font.setBold(True)
+        # A groups preview (Move/Rotate) moves no geometry until the commit:
+        # the dimensions held by the movers' vertices are drawn where the
+        # commit will put them, or they lagged behind the whole drag (#621).
+        riders = getattr(self, "_preview_groups", None)
+        carry = self._groups_preview_transform() if riders else None
         for dim in dims:
             if not self.scene.entity_visible(dim):      # hidden layer
                 continue
             ink = (sel_ink if (dim in selection or dim is self._hover_entity)
                    else default_ink)
+            if riders:
+                ends = dim.ends_riding(riders)
+                if ends:
+                    dim = dim.carried(carry, ends)
             ap, bp = dim.line_points()
             pap = self._world_to_pixel(ap)
             pbp = self._world_to_pixel(bp)
@@ -8639,6 +8762,145 @@ class Viewport(QOpenGLWidget):
                     return fp
         return base
 
+    def _front_face_at(self, x: float, y: float):
+        """``(face, placement)`` of the front-most selectable face on the ray
+        through pixel ``(x, y)``, or ``None``. A bare pass with no memo:
+        the face-crossing search asks it at pixels around the cursor, and
+        :meth:`pick_face_any`'s memo holds the cursor's own answer."""
+        o, d = self._pixel_to_ray(x, y)
+        if o is None or d is None:
+            return None
+        import numpy as np
+        idx = self._pick_index(near=("px", x, y))
+        if not idx.entities:
+            return None
+        t = self._ray_hits(idx, o, d, idx.ent_sel)
+        if t is None or len(t) == 0:
+            return None
+        i = int(np.argmin(t))
+        if not np.isfinite(t[i]):
+            return None
+        face, owner = idx.entities[i]
+        pidx = getattr(idx, "ent_place_idx", None)
+        if pidx is not None and i < len(pidx) and pidx[i] >= 0:
+            return face, idx.ent_placements[int(pidx[i])]
+        return face, owner
+
+    #: How far from the cursor (px) a face crossing snaps, and how far
+    #: either side of the crossing the search checks that each face shows.
+    _CROSSING_RING_PX = 8.0
+    _CROSSING_SIDE_PX = 3.0
+
+    def _face_crossing_point(self, px: float, py: float):
+        """Where the face under the cursor meets another face that crosses
+        it with no edge between them — a box sunk into the floor, a beam
+        through a wall: ``(world point, context)`` or ``None`` (#819,
+        SketchUp's «Intersection»). A face that goes THROUGH the one in
+        front is met by the cursor's own ray a little behind it, so the
+        candidates come free from that ray's hits (already cast for this
+        hover); a crossing counts only if, either side of it on screen,
+        one face shows and then the other — the two really meet there, in
+        view, and neither is merely in front of the other. ``context`` is
+        "group" / "component" when one of them is inside one, for the
+        «in group» tip."""
+        if _active_cut(self.scene) is not None:
+            return None
+        f_face, f_place = self.pick_face_placement(px, py)   # memoised
+        if f_face is None:
+            return None
+        o, d = self._pixel_to_ray(px, py)
+        if o is None or d is None:
+            return None
+        import numpy as np
+        idx = self._pick_index(near=("px", px, py))
+        face_t = self._hover_face_t(idx, o, d)                # memoised
+        if face_t is None or not np.isfinite(face_t).any():
+            return None
+        t_f = float(face_t.min())
+        r = self._CROSSING_RING_PX
+        o2, d2 = self._pixel_to_ray(px + r, py)
+        if o2 is None or d2 is None:
+            return None
+        reach = ((o2 + d2 * t_f) - (o + d * t_f)).length() * 50.0
+        # ``>=``: with the cursor right on the crossing both faces are hit
+        # at the same depth (the face itself is skipped below).
+        cand = np.where((face_t >= t_f) & (face_t <= t_f + reach))[0]
+        if len(cand) == 0:
+            return None
+        cand = cand[np.argsort(face_t[cand], kind="stable")][:7]
+        from core.snap import face_plane_world
+        p_f, n_f = face_plane_world(f_face, getattr(f_place, "xform", None))
+        pidx = getattr(idx, "ent_place_idx", None)
+        for i in cand:
+            i = int(i)
+            g_face, g_owner = idx.entities[i]
+            g_place = g_owner
+            if pidx is not None and i < len(pidx) and pidx[i] >= 0:
+                g_place = idx.ent_placements[int(pidx[i])]
+            if g_face is f_face and g_place is f_place:
+                continue
+            p_g, n_g = face_plane_world(g_face, getattr(g_place, "xform", None))
+            u = QVector3D.crossProduct(n_f, n_g)
+            if u.length() < 0.02:               # (near) coplanar: no crossing
+                continue
+            found = self._crossing_on_screen(
+                px, py, o, d, (f_face, f_place, p_f, n_f),
+                (g_face, g_place, p_g, n_g, u))
+            if found is not None:
+                return found
+        return None
+
+    def _crossing_on_screen(self, px, py, o, d, f, g):
+        """The crossing of plane ``f`` with plane ``g`` nearest the cursor
+        ray, if it is within reach on screen and shows face ``f`` on one
+        side and face ``g`` on the other (see :meth:`_face_crossing_point`)."""
+        f_face, f_place, p_f, n_f = f
+        g_face, g_place, p_g, n_g, u = g
+        r = self._CROSSING_RING_PX
+        # The crossing line: the point of both planes nearest the origin…
+        d_f = QVector3D.dotProduct(n_f, p_f)
+        d_g = QVector3D.dotProduct(n_g, p_g)
+        uu = QVector3D.dotProduct(u, u)
+        l0 = (QVector3D.crossProduct(n_g, u) * d_f
+              + QVector3D.crossProduct(u, n_f) * d_g) / uu
+        # …then its point nearest the cursor ray.
+        un = u / math.sqrt(uu)
+        w0 = l0 - o
+        b = QVector3D.dotProduct(un, d)
+        den = 1.0 - b * b
+        if den < 1e-9:                          # the line runs along the ray
+            return None
+        s = (b * QVector3D.dotProduct(w0, d) - QVector3D.dotProduct(w0, un)) / den
+        x = l0 + un * s
+        pix = self._world_to_pixel(x)
+        if pix is None or math.hypot(pix[0] - px, pix[1] - py) > max(
+                self.edge_snap_threshold_px, r):
+            return None
+        # Either side of the crossing on screen: one face, then the other.
+        q = self._world_to_pixel(x + un * max(1e-3, (x - o).length() * 1e-2))
+        if q is None:
+            return None
+        sx, sy = q[0] - pix[0], q[1] - pix[1]
+        ln = math.hypot(sx, sy)
+        if ln < 1e-9:
+            return None
+        nx, ny = -sy / ln * self._CROSSING_SIDE_PX, sx / ln * self._CROSSING_SIDE_PX
+        sides = [self._front_face_at(pix[0] + nx, pix[1] + ny),
+                 self._front_face_at(pix[0] - nx, pix[1] - ny)]
+        ids = {(id(h[0]), id(h[1])) for h in sides if h is not None}
+        if ids != {(id(f_face), id(f_place)), (id(g_face), id(g_place))}:
+            return None
+        context = None
+        for place in (f_place, g_place):
+            if place is None:
+                continue
+            owner = self._owner_of(place)
+            is_comp = getattr(owner, "is_instance", None)
+            context = ("component" if is_comp is not None and is_comp()
+                       else "group")
+            break
+        return x, context
+
     def _still_face_under(self, px: float, py: float) -> bool:
         """Whether a face the drag is NOT bending is under the cursor —
         the «On face» cue never names the face being moved."""
@@ -8743,7 +9005,21 @@ class Viewport(QOpenGLWidget):
         This is what makes Z-axis locks actually let you draw vertical
         lines — moving the mouse up/down on screen slides the projected
         point along the Z line.
+
+        The cursor is first dropped square onto the line as the screen
+        shows it, so only motion ALONG the line changes the length. In
+        perspective the closest point to the cursor's own ray also moved
+        with the cursor's sideways position (#769).
         """
+        step = max(float(getattr(self.camera, "distance", 1.0)) * 0.25, 1e-3)
+        pa = self._world_to_pixel(start)
+        pb = self._world_to_pixel(start + lock_dir.normalized() * step)
+        if pa is not None and pb is not None:
+            dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+            dd = dx * dx + dy * dy
+            if dd > 1.0:
+                s = ((pixel_x - pa[0]) * dx + (pixel_y - pa[1]) * dy) / dd
+                pixel_x, pixel_y = pa[0] + dx * s, pa[1] + dy * s
         ray_origin, ray_dir = self._pixel_to_ray(pixel_x, pixel_y)
         if ray_origin is None or ray_dir is None:
             return start
@@ -8765,6 +9041,17 @@ class Viewport(QOpenGLWidget):
     #: Eye depth (m) a segment is cut at when it runs behind the camera.
     _CLIP_W = 1e-3
 
+    def _clip_w(self) -> float:
+        """Where a segment is cut in front of the eye: 1 mm, or the near
+        plane when the camera has come closer than that would allow — at a
+        few millimetres from a small part, 1 mm cut away the very line
+        being drawn (#653, #692)."""
+        cam = self.camera
+        if not getattr(cam, "perspective", True):
+            return self._CLIP_W
+        near = getattr(cam, "near_plane", None)
+        return min(self._CLIP_W, near()) if callable(near) else self._CLIP_W
+
     def _segment_to_pixels(self, p0: QVector3D, p1: QVector3D):
         """A world segment → its two screen pixels, cut where it passes
         behind the eye instead of dropped whole. A guide is kilometres
@@ -8773,7 +9060,7 @@ class Viewport(QOpenGLWidget):
         mvp = self.camera.projection_matrix() * self.camera.view_matrix()
         c0 = mvp.map(QVector4D(p0.x(), p0.y(), p0.z(), 1.0))
         c1 = mvp.map(QVector4D(p1.x(), p1.y(), p1.z(), 1.0))
-        w0, w1, eps = c0.w(), c1.w(), self._CLIP_W
+        w0, w1, eps = c0.w(), c1.w(), self._clip_w()
         if w0 < eps and w1 < eps:
             return None
         if w0 < eps:
@@ -9141,6 +9428,63 @@ class Viewport(QOpenGLWidget):
             ln = np.linalg.norm(out, axis=1, keepdims=True)
             return out / np.where(ln > 1e-12, ln, 1.0)
 
+        # The prototype's tones were baked from ITS normals against the fixed
+        # world light: a rotated copy re-shades them for the faces as placed
+        # (#482), with the bake's own law (``_shade_factor``) per triangle.
+        light = np.array([self._LIGHT.x(), self._LIGHT.y(), self._LIGHT.z()])
+
+        # Only a turn (or a mirror, or an uneven scale) changes the light; a
+        # copy that is just moved or evenly scaled keeps the bake as it is.
+        diag = np.diag(L)
+        turned = not (np.allclose(L, np.diag(diag), atol=1e-9)
+                      and diag[0] > 0.0 and np.allclose(diag, diag[0]))
+
+        def matte(tri, quantise=False):  # (n, 3, 3) corners → shade (n,)
+            n = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+            ln = np.linalg.norm(n, axis=1)
+            d = np.abs(n @ light) / np.where(ln > 1e-9, ln, 1.0)
+            f = 0.62 + 0.38 * d
+            if quantise:                 # a texture run's key, as baked
+                f = np.round(f * 32.0) / 32.0
+            return np.where(ln > 1e-9, f, 0.84375)
+
+        def tri_pos(raw, stride):
+            a = np.frombuffer(raw, np.float32).reshape(-1, 3, stride)
+            return a[:, :, :3].astype(np.float64)
+
+        def reshade6(raw, placed):      # pos(3)+rgb(3), local → placed
+            if (not turned or not raw or len(raw) % 72
+                    or len(placed) != len(raw)):
+                return placed
+            k = (matte(tri_pos(placed, 6), quantise=True)
+                 / matte(tri_pos(raw, 6), quantise=True))
+            a = np.frombuffer(placed, np.float32).reshape(-1, 3, 6).copy()
+            rgb = a[:, :, 3:6].astype(np.float64) * k[:, None, None]
+            a[:, :, 3:6] = np.round(np.minimum(rgb, 1.0) * 64.0) / 64.0
+            return a.tobytes()
+
+        def with_shade(key, s):
+            # The shade sits in the (path, shade) pair, at the front of
+            # the key or as its first element.
+            if isinstance(key[0], str):
+                return (key[0], s) + tuple(key[2:])
+            return ((key[0][0], s),) + tuple(key[1:])
+
+        def rekey5(placed):             # {key: pos(3)+uv(2)} by new shade
+            if not turned:
+                return placed
+            out: dict = {}
+            for key, raw in placed.items():
+                if not raw or len(raw) % 60:
+                    out[key] = out.get(key, b"") + raw
+                    continue
+                f = matte(tri_pos(raw, 5), quantise=True)
+                a = np.frombuffer(raw, np.float32).reshape(-1, 15)
+                for s in np.unique(f):
+                    nk = with_shade(key, float(s))
+                    out[nk] = out.get(nk, b"") + a[f == s].tobytes()
+            return out
+
         sp = base["soft_pts"]
         if sp is not None:
             s6 = sp.reshape(-1, 6).astype(np.float64)
@@ -9154,21 +9498,23 @@ class Viewport(QOpenGLWidget):
             "nv": base["nv"], "ne": base["ne"], "nf": base["nf"],
             "edges": tp32(base["edges"], 3, tris=False),
             "dback": tp32(base.get("dback", b""), 3),
-            "vcol": tp32(base["vcol"], 6),
-            "by_texture": {p: tp32(raw, 5)
-                           for p, raw in base["by_texture"].items()},
-            "tcol": {a: tp32(raw, 6)
+            "vcol": reshade6(base["vcol"], tp32(base["vcol"], 6)),
+            "by_texture": rekey5({p: tp32(raw, 5)
+                                  for p, raw in base["by_texture"].items()}),
+            "tcol": {a: reshade6(raw, tp32(raw, 6))
                      for a, raw in base.get("tcol", {}).items()},
-            "ttex": {k: tp32(raw, 5)
-                     for k, raw in base.get("ttex", {}).items()},
-            "back_vcol": tp32(base.get("back_vcol", b""), 6),
-            "back_tex": {k: tp32(raw, 5)
-                         for k, raw in base.get("back_tex", {}).items()},
-            "back_tcol": {k: tp32(raw, 6)
+            "ttex": rekey5({k: tp32(raw, 5)
+                            for k, raw in base.get("ttex", {}).items()}),
+            "back_vcol": reshade6(base.get("back_vcol", b""),
+                                  tp32(base.get("back_vcol", b""), 6)),
+            "back_tex": rekey5({k: tp32(raw, 5) for k, raw
+                                in base.get("back_tex", {}).items()}),
+            "back_tcol": {k: reshade6(raw, tp32(raw, 6))
                           for k, raw in base.get("back_tcol", {}).items()},
-            "back_ttex": {k: tp32(raw, 5)
-                          for k, raw in base.get("back_ttex", {}).items()},
-            "fvcol": tp32(base.get("fvcol", b""), 6),
+            "back_ttex": rekey5({k: tp32(raw, 5) for k, raw
+                                 in base.get("back_ttex", {}).items()}),
+            "fvcol": reshade6(base.get("fvcol", b""),
+                              tp32(base.get("fvcol", b""), 6)),
             "faces": base["faces"],
             "areas": base["areas"] * (abs(det) ** (2.0 / 3.0)),
             "v0": tp(base["v0"]) if base["v0"] is not None else None,
@@ -11419,7 +11765,13 @@ class Viewport(QOpenGLWidget):
         # used to kill on-line snapping in ordinary 3D views); guide POINTS
         # snap as degenerate pseudo-edges, exactly like survey points.
         lines = []
+        # Guides that Move is dragging pass through the cursor: left out,
+        # or the cursor locks onto its own guide (#627).
+        moving = getattr(self.active_tool, "moving_guide_ids", None)
+        moving = moving() if callable(moving) else ()
         for g in getattr(self.scene, "guides", None) or []:
+            if id(g) in moving:
+                continue
             if g.is_line:
                 seg = self._guide_snap_segment(g)
                 if seg is not None:
@@ -13125,20 +13477,32 @@ class Viewport(QOpenGLWidget):
 
         «Under the cursor» is what the cursor SHOWS: a group behind a
         selected loose face used to take the right-click and drop the
-        selection, and «Make Group» with it (#378)."""
+        selection, and «Make Group» with it (#378).
+
+        Something already selected under the cursor wins outright: loose
+        geometry flush on a group (a block standing on it, a face drawn on
+        its surface) is coplanar with the group there, and the group took
+        the click (#744)."""
+        mine = self.pick_edge(x, y) or self.pick_face(x, y)
+        if mine is not None and mine in self.scene.selection:
+            return mine
         picked = (self.pick_text_label(x, y, rect_only=True)
                   or self.pick_group(x, y) or self.pick_edge(x, y)
                   or self.pick_geopath(x, y) or self.pick_dimension(x, y)
                   or self.pick_text_label(x, y)
                   or self.pick_section_plane(x, y)
                   or self.pick_guide(x, y)
-                  or self.pick_face(x, y)
+                  or self._face_or_image_in_front(x, y)
                   or self.pick_image_plane(x, y)
                   or self.pick_locked_image_plane(x, y))
         if picked is not None and picked not in self.scene.selection:
             self.scene.select([picked])
             self.update()
         return picked
+
+    def _face_or_image_in_front(self, x: float, y: float):
+        face = self.pick_face(x, y)
+        return self.image_in_front_of(face, x, y) or face
 
     # ---- A side-tray tab dropped here: the window moves it to that side ----
     def _dock_drag(self, ev) -> bool:
@@ -13922,12 +14286,11 @@ class Viewport(QOpenGLWidget):
             if focus is None:
                 focus = self._world_under_cursor(pos.x(), pos.y())
         if focus is not None:
-            # A perceptible retreat even from a 2 cm close-up: ~1 % of the
+            # A perceptible retreat even from a close-up: ~1 % of the
             # model's size per notch when the frame scaling alone would move
             # the eye less than that (the "zoom is stuck" report).
-            diag = self._model_diag()
             self.camera.zoom_to(steps, focus,
-                                min_step=max(0.05, 0.01 * diag))
+                                min_step=self._zoom_out_step())
         else:
             self.camera.zoom(steps)
         self._zoom_focus = (pose(), pos.x(), pos.y(),
@@ -13936,6 +14299,23 @@ class Viewport(QOpenGLWidget):
             _plog("wheel", (_time_mod.monotonic() - now) * 1000.0,
                   extra=f"reused={'proj' if reproj else reused}", floor=10.0)
         self.update()
+
+    #: The least a notch of the wheel backs out, from a close-up, once the
+    #: camera stands 2 cm or more from what it looks at — and always in an
+    #: empty scene, which has no size to go by.
+    _ZOOM_OUT_STEP = 0.05
+
+    def _zoom_out_step(self) -> float:
+        """Zoom-out floor per notch: 1 % of the model, never less than 5 cm
+        — as it always was — except closer than 2 cm to a small part, where
+        5 cm would throw it out of sight in one notch: there the 5 cm
+        shrinks with the distance (1.25 cm at the 5 mm close-up)."""
+        diag = self._model_diag()
+        if diag <= 0.0:
+            return self._ZOOM_OUT_STEP
+        from core.camera import MIN_DISTANCE_FAR
+        near = min(1.0, float(self.camera.distance) / MIN_DISTANCE_FAR)
+        return max(self._ZOOM_OUT_STEP * near, 0.01 * diag)
 
     def _model_diag(self) -> float:
         """The model's size, for the zoom step. On a huge model it comes
@@ -14431,6 +14811,9 @@ class Viewport(QOpenGLWidget):
         self._mark_plane_for_shift()
         snap = self.last_snap
         tool = self.active_tool
+        owns = getattr(tool, "owns_shift_lock", None)
+        if owns is not None and owns():
+            return  # the tool reads the cursor's motion itself
         start = getattr(tool, "start_point", None) if tool is not None else None
         if snap is None or start is None or snap.kind not in self._SHIFT_LOCKABLE:
             return
@@ -14578,16 +14961,25 @@ class Viewport(QOpenGLWidget):
             # typed length must drop the lock exactly like the second click.
             history = getattr(self, "history", None)
             _before = len(history.undo_stack) if history is not None else 0
+            _top = history.undo_stack[-1] if _before else None
             typed = self._value_buffer
             self.active_tool.on_value(self, value)
             _drew = history is not None and len(history.undo_stack) > _before
+            # A hot retype (Push/Pull, Move, Rotate… typed right after a
+            # commit) undoes the last command and commits it again: the
+            # stack keeps its length but its top is a new command. That
+            # also changed the model, and the box went on showing the
+            # value from before the retype (tutorial video, #859).
+            _redrew = (not _drew and _before > 0
+                       and len(history.undo_stack) == _before
+                       and history.undo_stack[-1] is not _top)
             self._set_value_buffer("")
             # The box falls back to the live reading, which only refreshes on
             # a mouse move: it went on showing the preview from BEFORE the
             # Enter, as if the typed size had been ignored (#607). What was
             # drawn is what was typed, read as the canvas showed it. Nothing
             # drawn: the preview the box shows is still the live one.
-            if _drew:
+            if _drew or _redrew:
                 unitless = getattr(self.active_tool, "value_is_unitless", None)
                 self.measurementChanged.emit(
                     typed if callable(unitless) and unitless()
@@ -14832,8 +15224,17 @@ class Viewport(QOpenGLWidget):
         place. Returns ``None`` when the pixel casts no world point (the ray
         misses the plane / the point is behind the camera). A tool that does
         not snap (Select, Push/Pull) gets a ``"none"`` result instead - no
-        snap engine, no occlusion raycasts, no marker."""
-        return self.inference.snap(px_x, px_y, modifiers)
+        snap engine, no occlusion raycasts, no marker.
+
+        A point that is not finite counts as no point: a NaN that reached a
+        tool showed «nan m» in the length box and failed the Line's commit
+        with «AddEdgeCommand: cannot convert float NaN to integer» (#466,
+        #754). Whatever inference produced it, the cursor just gives
+        nothing for that pixel."""
+        snap = self.inference.snap(px_x, px_y, modifiers)
+        if snap is not None and not _finite_point(snap.point):
+            return None
+        return snap
 
     def _build_ctx(self, ev) -> Optional[ToolContext]:
         self._sync_axes()

@@ -10322,7 +10322,8 @@ class Viewport(QOpenGLWidget):
     _PICK_LAZY_MIN_FACES = 1_000_000
     #: How many faces of lazy placements the index keeps baked at once.
     _PICK_LIVE_MAX_FACES = 600_000
-    #: Lazy placements baked by one query at most (the nearest first).
+    #: Lazy placements baked by one query at most (the nearest first) —
+    #: by all the footprint queries of one input event together.
     _PICK_NEW_PER_QUERY = 300
     #: Screen margin, in pixels, around the cursor for «near the cursor».
     _PICK_NEAR_PX = 32.0
@@ -10444,6 +10445,7 @@ class Viewport(QOpenGLWidget):
             near = ("ray", o, d)
         elif isinstance(near, tuple) and near[0] == "snap":
             near = (None, near[1], near[2])
+        footprint = False
         if near == "all":
             need = np.arange(len(groups))
         elif isinstance(near, tuple) and near[0] == "ray":
@@ -10489,6 +10491,7 @@ class Viewport(QOpenGLWidget):
                 x, y = float(pos.x()), float(pos.y())
             else:
                 x, y = float(near[1]), float(near[2])
+            footprint = True
             ckey = (self._placements_epoch(), round(x), round(y),
                     tuple(self._np_mvp().ravel()))
             cmemo = getattr(self, "_pick_near_memo", None)
@@ -10521,17 +10524,30 @@ class Viewport(QOpenGLWidget):
                         self._PICK_NEAR_PX + 2.0), dtype=np.int64)
                 self._pick_near_memo = (ckey, need)
         new = [int(i) for i in need if id(groups[int(i)]) not in live]
-        if len(new) > self._PICK_NEW_PER_QUERY and near != "all":
+        # The footprint queries of one input event (the snap, the cursor's
+        # own) share the cap: each brought in its own 300 over the same
+        # spot, and each change rebuilt the lazy part of the index — five
+        # rebuilds a pointer move over the plant of #158.
+        serial = getattr(self, "_input_serial", None)
+        cap = self._PICK_NEW_PER_QUERY
+        budget = None
+        if footprint and serial is not None:
+            budget = getattr(self, "_pick_budget", None)
+            if budget is None or budget[0] != serial:
+                budget = self._pick_budget = [serial, cap]
+            cap = budget[1]
+        if len(new) > cap and near != "all":
             # A first snap over a dense spot met thousands at once (2.3 s):
             # the nearest to the eye come in now, the rest on the next moves.
             e = self.camera.eye()
             e = np.array([e.x(), e.y(), e.z()])
             nn = np.array(new)
             dist = np.linalg.norm(np.clip(e, lo[nn], hi[nn]) - e, axis=1)
-            keep_new = set(nn[np.argsort(dist)[:self._PICK_NEW_PER_QUERY]]
-                           .tolist())
+            keep_new = set(nn[np.argsort(dist)[:cap]].tolist())
             need = [int(i) for i in need
                     if id(groups[int(i)]) in live or int(i) in keep_new]
+        if budget is not None:
+            budget[1] = max(0, cap - min(len(new), cap))
         changed = False
         for i in need:
             g = groups[int(i)]
@@ -10542,7 +10558,16 @@ class Viewport(QOpenGLWidget):
                 live[k] = (g, int(nf[int(i)]))
                 changed = True
         faces = sum(v[1] for v in live.values())
-        if faces > self._PICK_LIVE_MAX_FACES and near != "all":
+        # Making room once per input event: the ray picks that follow the
+        # snap over the same spot let go of what it had just brought in,
+        # and every such change rebuilt the index (up to twice the cap).
+        evict = faces > self._PICK_LIVE_MAX_FACES and near != "all"
+        if (evict and serial is not None
+                and getattr(self, "_pick_evicted_at", None) == serial
+                and faces <= 2 * self._PICK_LIVE_MAX_FACES):
+            evict = False
+        if evict:
+            self._pick_evicted_at = serial
             keep = {id(groups[int(i)]) for i in need}
             inst = getattr(self, "_inst_chunks", None)
             for k in list(live):
@@ -13648,6 +13673,7 @@ class Viewport(QOpenGLWidget):
         # second click of a line) the tool is still busy and nothing moves.
         self._release_linear_mode()
         self._input_t = _time_mod.monotonic()   # P0: input→paint latency
+        self._input_serial = getattr(self, "_input_serial", 0) + 1
         if (ev.button() in (Qt.LeftButton, Qt.RightButton)
                 and self.nav_mode is None and self._look_drag is None
                 and callable(getattr(self.active_tool, "on_look", None))):
@@ -13860,6 +13886,7 @@ class Viewport(QOpenGLWidget):
 
     def mouseMoveEvent(self, ev) -> None:
         self._input_t = _time_mod.monotonic()   # P0: input→paint latency
+        self._input_serial = getattr(self, "_input_serial", 0) + 1
         # An Alt released while another window had the keyboard never
         # reaches any filter here; the pointer re-reads it on the move.
         alt = bool(ev.modifiers() & Qt.AltModifier)
@@ -14327,6 +14354,7 @@ class Viewport(QOpenGLWidget):
             ev.accept()
             return
         self._input_t = _time_mod.monotonic()   # P0: input→paint latency
+        self._input_serial = getattr(self, "_input_serial", 0) + 1
         # Zoom toward the cursor: keep the point under the
         # pointer fixed on screen, not the origin. During a wheel burst the
         # focus is CACHED: zoom_to pins that world point, so re-picking every

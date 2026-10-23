@@ -260,3 +260,80 @@ def test_the_hovered_group_edge_comes_from_the_index_it_was_measured_on(vp):
         if e is not None and getattr(e, "group", None) is not None:
             assert _owner_holds(e)
         vp.pick_group(x, y)                             # must not raise
+
+
+
+def _live(v):
+    return set(getattr(v, "_pick_live", None) or ())
+
+
+def _far(v):
+    """Zoomed out: the cursor's footprint takes in several cubes."""
+    v.camera.fit_to(V(-60, -60, 0), V(80, 70, 1))
+    return v._world_to_pixel(V(7.5, 4.5, 1.0))
+
+
+def test_the_footprint_queries_of_one_event_share_the_cap(vp):
+    # The snap and the cursor's own query of one pointer move each brought
+    # in their own lot over the same spot (#158): now the lot is the
+    # event's, and the next event brings the next one.
+    _lazy(vp, True)
+    x, y = _far(vp)
+    vp._input_serial = None
+    vp._pick_materialize(("snap", x, y))
+    assert len(_live(vp)) >= 4               # what the spot takes in
+    _lazy(vp, True)
+    vp._PICK_NEW_PER_QUERY = 2
+    vp._input_serial = 1
+    vp._pick_materialize(("snap", x, y))
+    first = _live(vp)
+    assert len(first) == 2
+    vp._pick_materialize(("snap", x, y))
+    assert _live(vp) == first
+    vp._input_serial = 2
+    vp._pick_materialize(("snap", x, y))
+    assert len(_live(vp)) == 4 and first <= _live(vp)
+
+
+def test_without_an_input_event_each_query_has_its_own_cap(vp):
+    _lazy(vp, True)
+    vp._PICK_NEW_PER_QUERY = 2
+    vp._input_serial = None
+    x, y = _far(vp)
+    vp._pick_materialize(("snap", x, y))
+    vp._pick_materialize(("snap", x, y))
+    assert len(_live(vp)) == 4
+
+
+def test_a_ray_pick_is_not_held_back_by_the_footprint_lot(vp):
+    _lazy(vp, True)
+    vp._PICK_NEW_PER_QUERY = 1
+    vp._input_serial = 7
+    x, y = _far(vp)
+    vp._pick_materialize(("snap", x, y))           # the lot is spent
+    before = _live(vp)
+    assert len(before) == 1
+    g = next(g for g in vp.scene.groups if g.name == "C52")
+    cx, cy = vp._world_to_pixel(_centre(vp, "C52"))
+    vp._pick_materialize(("px", cx, cy))
+    assert id(g) in _live(vp) and len(_live(vp)) == 2
+
+
+def test_room_is_made_once_per_event(vp):
+    # The ray picks after the snap let go of what it had just brought in,
+    # and each change rebuilt the index: one clean-up per event (up to
+    # twice the cap meanwhile).
+    _lazy(vp, True, cap=12)                              # two cubes
+    vp._input_serial = 1
+    pts = [vp._world_to_pixel(_centre(vp, n)) for n in ("C00", "C11", "C22",
+                                                         "C33", "C52")]
+    for x, y in pts[:3]:
+        vp._pick_materialize(("px", x, y))
+    assert len(_live(vp)) == 2           # the first over the cap made room
+    vp._pick_materialize(("px", *pts[3]))
+    assert len(_live(vp)) == 3           # not again in the same event
+    vp._pick_materialize(("px", *pts[4]))
+    assert len(_live(vp)) == 4           # nor while within twice the cap
+    vp._input_serial = 2
+    vp._pick_materialize(("px", *pts[4]))
+    assert len(_live(vp)) == 2           # the next event makes room

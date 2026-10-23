@@ -4903,6 +4903,7 @@ class ChangeAxesCommand(Command):
         self._d = None
         self._instances: list = []
         self._inst_axes: list = []
+        self._inst_xforms: list = []
 
     def _siblings(self, scene) -> list:
         from core.group import iter_placements
@@ -4950,6 +4951,7 @@ class ChangeAxesCommand(Command):
         # classic-group days would turn the new frame again (#484), so the
         # re-expressed definition's own axes are the instances' now.
         self._inst_axes = [inst.axes for inst in self._instances]
+        self._inst_xforms = [self._copy(inst.xform) for inst in self._instances]
         for inst in self._instances:
             inst.xform = inst.xform * d_inv
             inst.axes = None
@@ -4965,8 +4967,11 @@ class ChangeAxesCommand(Command):
             return
         d_inv, _ok = self._d.inverted()
         self._reexpress(g, d_inv)
-        for inst, axes in zip(self._instances, self._inst_axes):
-            inst.xform = inst.xform * self._d
+        # The placements as they were, not ``xform · d`` again: that product
+        # came back 6e-8 off, and undo should leave exactly what was there.
+        for inst, axes, xform in zip(self._instances, self._inst_axes,
+                                     self._inst_xforms):
+            inst.xform = self._copy(xform)
             inst.axes = axes
         scene.version += 1
 

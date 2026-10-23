@@ -4572,6 +4572,65 @@ def _point_in_tri(p: QVector3D, t0: QVector3D, t1: QVector3D,
     return True
 
 
+def _segment_grid(segments):
+    """A lookup ``near(p)`` giving, in ascending order, the indices of the
+    ``segments`` (``(QVector3D, QVector3D)`` pairs) that ``p`` can lie on
+    under ``_point_on_seg_incl``.
+
+    The rebuild re-stamped curve flags by testing every new edge against
+    every flagged one: 167 M tests, 218 s, on an exploded DWG plan (#491).
+    Each segment goes in the cells of its box padded past the test's reach
+    (its ``t`` slack scales with length); the cell size grows until the boxes
+    cover at most a few cells each, so a long wall cannot flood the grid."""
+    import math
+    if not segments:
+        return lambda p: ()
+    boxes = []
+    for a, b in segments:
+        pad = 4e-4 * (1.0 + (b - a).length()) + 4e-4
+        boxes.append((min(a.x(), b.x()) - pad, min(a.y(), b.y()) - pad,
+                      min(a.z(), b.z()) - pad, max(a.x(), b.x()) + pad,
+                      max(a.y(), b.y()) + pad, max(a.z(), b.z()) + pad))
+    ext = sorted(max(bx[3] - bx[0], bx[4] - bx[1], bx[5] - bx[2])
+                 for bx in boxes)
+    size = ext[len(ext) // 2]
+
+    def span(lo, hi):
+        return math.floor(hi / size) - math.floor(lo / size) + 1
+
+    while sum(span(bx[0], bx[3]) * span(bx[1], bx[4]) * span(bx[2], bx[5])
+              for bx in boxes) > 8 * len(boxes):
+        size *= 2.0
+    cells: dict = {}
+    for i, (x0, y0, z0, x1, y1, z1) in enumerate(boxes):
+        for cx in range(math.floor(x0 / size), math.floor(x1 / size) + 1):
+            for cy in range(math.floor(y0 / size), math.floor(y1 / size) + 1):
+                for cz in range(math.floor(z0 / size),
+                                math.floor(z1 / size) + 1):
+                    cells.setdefault((cx, cy, cz), []).append(i)
+
+    def near(p):
+        return cells.get((math.floor(p.x() / size), math.floor(p.y() / size),
+                          math.floor(p.z() / size)), ())
+    return near
+
+
+def _welded_loop(mesh, loop):
+    """``loop`` with the corners the mesh welds into one merged, or ``None``
+    if fewer than three are left -- see the weld note in
+    :meth:`RebuildPlanarFacesCommand.do`."""
+    out = []
+    for p in loop:
+        v = mesh.vertex(p)
+        if not out or v is not out[-1]:
+            out.append(v)
+    if len(out) > 1 and out[0] is out[-1]:
+        out.pop()
+    if len(out) < 3:
+        return None
+    return [v.position for v in out]
+
+
 class RebuildPlanarFacesCommand(Command):
     """Rebuild the minimal faces of a flat drawing from its edge graph (a planar
     arrangement) — the deterministic, from-scratch replacement for the heuristic
@@ -4614,15 +4673,28 @@ class RebuildPlanarFacesCommand(Command):
                      for f in mesh.faces if f.attrs]
         edges, faces = planar_rebuild(segments, origin, normal)
 
+        near_flagged = _segment_grid([(fa, fb) for fa, fb, _ in flagged])
+
         scene.selection.clear()
         mesh.clear()
         for a, b in edges:
+            if mesh.vertex(a) is mesh.vertex(b):
+                # Shorter than the weld: the arrangement keys points on a
+                # 0.1 mm grid, so two ends a hair apart across a cell line
+                # stay two -- the mesh welds them into one. Raising here
+                # rolled the whole draw back on an exploded DWG plan (#491).
+                continue
             e = mesh.add_edge(a, b)
-            for (fa, fb, flags) in flagged:
+            for i in near_flagged(e.a):
+                fa, fb, flags = flagged[i]
                 if _point_on_seg_incl(e.a, fa, fb) and _point_on_seg_incl(e.b, fa, fb):
                     stamp_edge_flags(e, flags)
                     break
         for outer, holes in faces:
+            outer = _welded_loop(mesh, outer)
+            if outer is None:
+                continue
+            holes = [h for h in (_welded_loop(mesh, h) for h in holes) if h]
             f = mesh.add_face(outer, holes or None)
             if f is None or not old_attrs:
                 continue

@@ -9184,6 +9184,28 @@ class Viewport(QOpenGLWidget):
         import numpy as np
         return self._project_px(np.asarray(pts, dtype=float).reshape(-1, 3))
 
+    def _pixel_projector(self):
+        """:meth:`_world_to_pixel` with the camera as it is NOW: the matrix
+        is made once and the same Qt arithmetic maps every point, so a
+        snap search asking for thousands of points per pointer move (20 000
+        on the plant of #158) gets the very pixels it got before without
+        rebuilding the view and projection for each one. Only for work the
+        camera cannot move under (one snap search)."""
+        if "_world_to_pixel" in vars(self):
+            return self._world_to_pixel     # a test's stand-in wins
+        mvp = self.camera.projection_matrix() * self.camera.view_matrix()
+        w, h = self.width(), self.height()
+        vec4 = QVector4D
+
+        def world_to_pixel(world):
+            clip = mvp.map(vec4(world.x(), world.y(), world.z(), 1.0))
+            if clip.w() <= 0:
+                return None
+            ndc_x = clip.x() / clip.w()
+            ndc_y = clip.y() / clip.w()
+            return ((ndc_x * 0.5 + 0.5) * w, (1.0 - (ndc_y * 0.5 + 0.5)) * h)
+        return world_to_pixel
+
     def _world_to_pixel(self, world: QVector3D) -> Optional[tuple[float, float]]:
         """World point → screen pixel (or None if behind the camera)."""
         mvp = self.camera.projection_matrix() * self.camera.view_matrix()

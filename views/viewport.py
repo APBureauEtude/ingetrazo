@@ -4638,7 +4638,7 @@ class Viewport(QOpenGLWidget):
     _DOCUMENT_CACHES = ("_group_chunks", "_inst_chunks", "_fp_memo",
                         "_proto_wrappers", "_proto_draw", "_faceme_cache",
                         "_proto_pts_store", "_container_obb", "_placement_frames",
-                        "_pick_live",
+                        "_pick_live", "_pick_foot_keep",
                         # Also keyed by id(): a face-me's placed sprite, the
                         # nested-placement proxies and the arc midpoints per
                         # mesh. A group of the next document born at a dead
@@ -6164,8 +6164,7 @@ class Viewport(QOpenGLWidget):
         if gcache is None or gcache[0] != gkey:
             head_parts, head_spans, head_n = (
                 _collect_slots(slots) if slots is not None else _collect(
-                    self._static_draw_groups(head) if not editing else head,
-                    0))
+                    self._static_draw_groups(head), 0))
             gcache = self._edge_groups_cache = (gkey, head_parts, head_spans,
                                                 head_n)
         _gk, head_parts, head_spans, head_n = gcache
@@ -6334,8 +6333,14 @@ class Viewport(QOpenGLWidget):
         # pass leaves to it (in the same order: nothing it skips adds a
         # face), not every placement — 1 900 of 21 406 on the plant of
         # #158, whose full walk was ~0.3 s of every edit there.
+        # Inside a group, the same for the surroundings: the subject (last,
+        # walked whole) is where the fade split is recorded, and what the
+        # static filter leaves out of the surroundings adds no face. The
+        # walk over every placement was ~0.8 s of each edit inside a group
+        # on that plant.
         walk = (self._static_draw_groups(draw_groups)
-                if self.scene.edit_group is None else draw_groups)
+                if self.scene.edit_group is None
+                else self._static_draw_groups(head) + subject)
         if slots is None:
             slots = [(_Slot(g), False) for g in walk]
         for sl, gone in slots:        # context first, edited group last
@@ -9681,6 +9686,8 @@ class Viewport(QOpenGLWidget):
         from core.snap import face_plane_world
         p_f, n_f = face_plane_world(f_face, getattr(f_place, "xform", None))
         pidx = getattr(idx, "ent_place_idx", None)
+        f = (f_face, f_place, p_f, n_f)
+        pairs = []
         for i in cand:
             i = int(i)
             g_face, g_owner = idx.entities[i]
@@ -9693,19 +9700,31 @@ class Viewport(QOpenGLWidget):
             u = QVector3D.crossProduct(n_f, n_g)
             if u.length() < 0.02:               # (near) coplanar: no crossing
                 continue
-            found = self._crossing_on_screen(
-                px, py, o, d, (f_face, f_place, p_f, n_f),
-                (g_face, g_place, p_g, n_g, u))
+            g = (g_face, g_place, p_g, n_g, u)
+            sides = self._crossing_sides(px, py, o, d, f, g)
+            if sides is not None:
+                pairs.append((g, sides))
+        # The probes either side of every crossing bake what they cross
+        # first, together: one at a time, each that met a new lazy
+        # placement rebuilt the index for the next (up to five rebuilds a
+        # pointer move with Rectangle over the plant of #158).
+        mat = getattr(self, "_pick_materialize", None)
+        if mat is not None and hasattr(self, "_pick_lazy_table"):
+            for _g, (_x, probes) in pairs:
+                for q in probes:
+                    mat(("px", q[0], q[1]))
+        for g, sides in pairs:
+            found = self._crossing_on_screen(f, g, sides)
             if found is not None:
                 return found
         return None
 
-    def _crossing_on_screen(self, px, py, o, d, f, g):
+    def _crossing_sides(self, px, py, o, d, f, g):
         """The crossing of plane ``f`` with plane ``g`` nearest the cursor
-        ray, if it is within reach on screen and shows face ``f`` on one
-        side and face ``g`` on the other (see :meth:`_face_crossing_point`)."""
-        f_face, f_place, p_f, n_f = f
-        g_face, g_place, p_g, n_g, u = g
+        ray, if it is within reach on screen: ``(world point, (pixel one
+        side, pixel the other side))``, or ``None``."""
+        _f_face, _f_place, p_f, n_f = f
+        _g_face, _g_place, p_g, n_g, u = g
         r = self._CROSSING_RING_PX
         # The crossing line: the point of both planes nearest the origin…
         d_f = QVector3D.dotProduct(n_f, p_f)
@@ -9735,8 +9754,17 @@ class Viewport(QOpenGLWidget):
         if ln < 1e-9:
             return None
         nx, ny = -sy / ln * self._CROSSING_SIDE_PX, sx / ln * self._CROSSING_SIDE_PX
-        sides = [self._front_face_at(pix[0] + nx, pix[1] + ny),
-                 self._front_face_at(pix[0] - nx, pix[1] - ny)]
+        return x, ((pix[0] + nx, pix[1] + ny), (pix[0] - nx, pix[1] - ny))
+
+    def _crossing_on_screen(self, f, g, found):
+        """The crossing ``found`` by :meth:`_crossing_sides` if it shows
+        face ``f`` on one side and face ``g`` on the other (see
+        :meth:`_face_crossing_point`): ``(world point, context)`` or
+        ``None``."""
+        f_face, f_place = f[0], f[1]
+        g_face, g_place = g[0], g[1]
+        x, probes = found
+        sides = [self._front_face_at(*q) for q in probes]
         ids = {(id(h[0]), id(h[1])) for h in sides if h is not None}
         if ids != {(id(f_face), id(f_place)), (id(g_face), id(g_place))}:
             return None
@@ -11383,6 +11411,25 @@ class Viewport(QOpenGLWidget):
                         Viewport.GEDGE_REACH_PX + 2.0,
                         self._PICK_NEAR_PX + 2.0), dtype=np.int64)
                 self._pick_near_memo = (ckey, need)
+        if footprint and len(need):
+            # A footprint takes in the placements nearest the eye that fit
+            # in most of the cap, and those stay (see the eviction below):
+            # zoomed out over the plant of #158 it met ~3 400 placements,
+            # far more than fit, and each pointer move the first ray let go
+            # of 300 the footprint then brought in again — two rebuilds of
+            # the lazy part a move, for the same set.
+            room = self._PICK_LIVE_MAX_FACES * 0.8
+            need = np.asarray(need, dtype=np.int64)
+            if float(nf[need].sum()) > room:
+                e = self.camera.eye()
+                e = np.array([e.x(), e.y(), e.z()])
+                dist = np.linalg.norm(np.clip(e, lo[need], hi[need]) - e,
+                                      axis=1)
+                srt = need[np.argsort(dist, kind="stable")]
+                fit = np.cumsum(nf[srt]) <= room
+                fit[0] = True
+                need = srt[fit]
+            self._pick_foot_keep = {id(groups[int(i)]) for i in need}
         new = [int(i) for i in need if id(groups[int(i)]) not in live]
         # The footprint queries of one input event (the snap, the cursor's
         # own) share the cap: each brought in its own 300 over the same
@@ -11429,6 +11476,7 @@ class Viewport(QOpenGLWidget):
         if evict:
             self._pick_evicted_at = serial
             keep = {id(groups[int(i)]) for i in need}
+            keep |= getattr(self, "_pick_foot_keep", None) or set()
             inst = getattr(self, "_inst_chunks", None)
             for k in list(live):
                 if faces <= self._PICK_LIVE_MAX_FACES:
@@ -13332,9 +13380,28 @@ class Viewport(QOpenGLWidget):
         # snap engine reads its candidates. One ray per candidate, in turn,
         # took minutes a pointer move over a dense mesh whose hundreds of
         # nearby corners were nearly all hidden (a 128 788-face STL in #158).
+        # A corner shared by several edges comes once per end: asked once
+        # (the same point, the same answer), in batches of at most 1 024 —
+        # zoomed out over the plant of #158 some 65 000 hidden corners lay
+        # under the cursor, and a batch of 32 768 rays built ~1.4 GB of box
+        # tests and took 7 s.
         first = vertex_of(order[0])
         if not self._is_occluded(first):
             return first
+        if len(order) > 1:
+            # Each point once, where it first comes (the nearest of its
+            # copies on screen): the same answer as asking every copy.
+            xyz = np.empty((len(order), 3))
+            for lo_i, hi_i, arr, base in (
+                    (0, n, idx.edge_a, 0), (n, 2 * n, idx.edge_b, n),
+                    (2 * n, 2 * n + m, idx.gedge_a, 2 * n),
+                    (2 * n + m, 2 * n + 2 * m, idx.gedge_b, 2 * n + m)):
+                w = np.flatnonzero((order >= lo_i) & (order < hi_i))
+                if len(w):
+                    xyz[w] = arr[order[w] - base]
+            _u, at = np.unique(xyz, axis=0, return_index=True)
+            at.sort()
+            order = order[at]
         many = getattr(self, "_occluded_many", None)
         k, size = 1, 8
         while k < len(order):
@@ -13345,7 +13412,7 @@ class Viewport(QOpenGLWidget):
                 if not h:
                     return v
             k += size
-            size *= 2
+            size = min(size * 2, 1024)
         return None
 
     def hlr_geometry(self):
@@ -13651,12 +13718,40 @@ class Viewport(QOpenGLWidget):
                             for sp in spans], dtype=np.float64).reshape(-1, 3)
             boxes = idx._span_boxes = (len(spans), blo, bhi)
         _n, blo, bhi = boxes
+        # The rays leave one eye inside a cone; a span whose bounding
+        # sphere lies outside it meets none of them, and is left out of the
+        # box test below (rays x spans x 3: zoomed out over the plant of
+        # #158, hundreds of rays against 1 700 spans, most of them far off
+        # to the side). Conservative, so the answer is the same; the
+        # regime below is still chosen by the whole count.
+        sel = np.arange(len(spans))
+        if len(rows) > 1 and len(spans) > 64:
+            axis = D.sum(axis=0)
+            na = float(np.linalg.norm(axis))
+            cos_min = float((D @ axis).min()) / na if na > 0 else -1.0
+            fin = np.isfinite(blo).all(axis=1) & np.isfinite(bhi).all(axis=1)
+            if cos_min > 0.5 and fin.any():
+                a = axis / na
+                theta = float(np.arccos(min(cos_min, 1.0)))
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    c = (blo + bhi) * 0.5 - o           # unboxed: kept anyway
+                    rad = (np.linalg.norm(bhi - blo, axis=1) * 0.5
+                           * (1 + 1e-6) + 1e-6)
+                    L = np.linalg.norm(c, axis=1)
+                    ang = np.arccos(np.clip((c @ a) / L, -1.0, 1.0))
+                    widen = np.arcsin(np.clip(rad / L, 0.0, 1.0))
+                keep = (~fin | (L <= rad)
+                        | (ang - widen <= theta + 1e-6))
+                if not keep.all():
+                    sel = np.flatnonzero(keep)
+        many_spans = len(spans) > 64
+        blo, bhi = blo[sel], bhi[sel]
         # The box prefilter _ray_hits applies, in both its regimes: the
         # vectorised slab past 64 spans, ``_ray_aabb`` (with its tolerance
         # for a ray parallel to an axis) below — they differ on exactly
         # those rays, the standard views'.
         with np.errstate(divide="ignore", invalid="ignore"):
-            if len(spans) > 64:
+            if many_spans:
                 inv_d = 1.0 / np.where(np.abs(D) > 1e-12, D, 1e-12)  # (R, 3)
                 t1 = (blo[None, :, :] - o) * inv_d[:, None, :]        # (R, S, 3)
                 t2 = (bhi[None, :, :] - o) * inv_d[:, None, :]
@@ -13675,7 +13770,8 @@ class Viewport(QOpenGLWidget):
                 inside = (o >= blo - 1e-9) & (o <= bhi + 1e-9)        # (S, 3)
                 meet = ((~par[:, None, :] | inside[None, :, :]).all(axis=2)
                         & (tmin <= tmax))
-                unboxed = np.array([sp[0] is None for sp in spans], dtype=bool)
+                unboxed = np.array([spans[j][0] is None for j in sel],
+                                   dtype=bool)
                 meet |= unboxed[None, :]
                 tmin = np.where(unboxed[None, :], -inf, tmin)
         limit = np.array(dists) - 1e-3                                # (R,)
@@ -13691,7 +13787,7 @@ class Viewport(QOpenGLWidget):
         order = np.argsort(np.where(meet[:, live_spans],
                                     tmin[:, live_spans], np.inf).min(axis=0))
         for si in live_spans[order]:
-            span = spans[si]
+            span = spans[sel[si]]
             if len(span) == 3:
                 _bb, s0, n = span
                 if not n:

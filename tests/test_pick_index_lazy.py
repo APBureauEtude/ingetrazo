@@ -66,6 +66,7 @@ def _lazy(v, on, cap=None):
     v._pick_lazy_memo = None
     v._pick_near_memo = None
     v._pick_live = None
+    v._pick_foot_keep = None
     getattr(v, "_inst_chunks", {}).clear()
     v._hover_hits_cache = None
 
@@ -354,3 +355,39 @@ def test_the_kept_edge_projection_is_the_full_one(vp):
         bx, by, okb = vp._project_px(idx.gedge_b)
         for g, w in zip(got, (ax, ay, bx, by, oka & okb)):
             assert np.array_equal(g, w)
+
+
+def test_a_footprint_that_cannot_all_fit_keeps_its_nearest_and_stops_changing(vp):
+    # Zoomed out over the plant of #158 the footprint met far more than the
+    # cap holds: each pointer move the first ray let go of what the last
+    # footprint brought in, and the footprint brought it in again — two
+    # rebuilds a move for the same set. Now it takes the nearest that fit
+    # in most of the cap, and those stay.
+    _lazy(vp, True, cap=18)                  # three cubes; the spot meets more
+    x, y = _far(vp)
+    vp._input_serial = 1
+    vp._pick_materialize(("snap", x, y))
+    foot = _live(vp)
+    assert 0 < len(foot) <= 2                # 0.8 of the cap: two cubes
+    import numpy as np
+    groups, lo, hi = vp._pick_lazy_table()[:3]
+    e = vp.camera.eye()
+    e = np.array([e.x(), e.y(), e.z()])
+    dist = {id(groups[int(i)]): float(np.linalg.norm(
+        np.clip(e, lo[int(i)], hi[int(i)]) - e))
+        for i in vp._pick_near_memo[1]}
+    assert len(dist) > len(foot)              # more than fit...
+    assert max(dist[k] for k in foot) <= min(
+        d for k, d in dist.items() if k not in foot)   # ...the nearest kept
+    others = [g for g in vp.scene.groups if id(g) not in foot]
+    for serial in range(2, 8):
+        vp._input_serial = serial
+        before = _live(vp)
+        vp._pick_materialize(("snap", x, y))
+        assert _live(vp) <= before, serial        # nothing brought in again
+        assert foot <= _live(vp)
+        for g in others[2 * serial:2 * serial + 2]:      # rays elsewhere
+            cx, cy = vp._world_to_pixel(_centre(vp, g.name))
+            vp._pick_materialize(("px", cx, cy))
+            assert id(g) in _live(vp)
+        assert foot <= _live(vp)

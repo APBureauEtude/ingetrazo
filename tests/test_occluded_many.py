@@ -334,3 +334,65 @@ def test_the_native_rays_hide_exactly_what_numpy_hides(viewport, view,
               for h in vp._occluded_many(pts[k:k + 40])]
     assert native == numpy_
     assert calls                              # the kernel did answer
+
+
+@pytest.mark.parametrize("view", ["iso", "front", "back", "left"])
+def test_a_narrow_cone_of_rays_hides_what_the_rays_hide(viewport, view,
+                                                        monkeypatch):
+    """Rays crowded onto a few blocks seen from afar (zoomed out over the
+    plant of #158, ~65 000 corners under the cursor): the spans outside
+    their cone are left out of the box test — the answer stays the rays'
+    one by one, and some spans were left out."""
+    import numpy as np
+    vp = viewport
+    vp.camera.set_view(view)
+    vp.camera.fit_to(V(-60, -40, -20), V(60, 40, 40))
+    _app.processEvents()
+    rng = random.Random(view)
+    sc = vp.scene
+    near = [g for g in sc.groups if g.name in ("block 0", "block 4",
+                                               "block 8", "post")]
+    pts = []
+    for g in near:
+        for f in g.mesh.faces:
+            for p in [f.centroid()] + [v.position for v in f.loop]:
+                pts.append(g.xform.map(p) if g.xform is not None else p)
+    pts += [V(rng.uniform(-3.5, -1.5), rng.uniform(0.5, 3), rng.uniform(0, 3))
+            for _ in range(200)]
+    one = [vp._is_occluded(p) for p in pts]
+    assert any(one) and not all(one)
+    widths = []
+    real = np.flatnonzero
+
+    def spy(a):
+        r = real(a)
+        if a.dtype == bool and a.ndim == 1 and len(a) > 64:
+            widths.append((len(r), len(a)))
+        return r
+    monkeypatch.setattr(np, "flatnonzero", spy)
+    got = vp._occluded_many(pts)
+    monkeypatch.setattr(np, "flatnonzero", real)
+    assert got == one
+    assert any(k < n for k, n in widths), widths     # the cone left some out
+
+
+def test_pick_vertex_asks_a_shared_corner_once(viewport, monkeypatch):
+    """A corner shared by several edges is one point: asked once."""
+    vp = viewport
+    vp.camera.set_view("iso")
+    vp.camera.fit_to(V(-60, -40, -20), V(60, 40, 40))
+    _app.processEvents()
+    asked = []
+    real_many, real_one = vp._occluded_many, vp._is_occluded
+    monkeypatch.setattr(vp, "_is_occluded",
+                        lambda w: asked.append(w) or True)
+    monkeypatch.setattr(vp, "_occluded_many",
+                        lambda ws: asked.extend(ws) or [True] * len(ws))
+    cx, cy = vp._world_to_pixel(V(-2.5, 1.5, 1.0))
+    vp.pick_threshold_px = 40
+    assert vp.pick_vertex(cx, cy) is None             # all hidden
+    keys = [(p.x(), p.y(), p.z()) for p in asked]
+    assert len(keys) > 8
+    assert len(keys) == len(set(keys))
+    monkeypatch.setattr(vp, "_is_occluded", real_one)
+    monkeypatch.setattr(vp, "_occluded_many", real_many)

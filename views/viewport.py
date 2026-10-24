@@ -383,6 +383,33 @@ def _pv_hole(raw):
     return bytes(len(raw))
 
 
+_ZEROS: dict = {}
+
+
+def _zeros(n: int) -> bytes:
+    """``n`` zero bytes, the same object for the same size: a gone
+    object's place (``_static_slots``) is passed over by identity on the
+    next upload, not compared byte by byte."""
+    z = _ZEROS.get(n)
+    if z is None:
+        if len(_ZEROS) > 256:
+            _ZEROS.clear()
+        z = _ZEROS[n] = bytes(n)
+    return z
+
+
+class _Slot:
+    """One object's place in the static buffers (``_static_slots``): the
+    object, and the byte sizes it took the last time it was laid out, per
+    buffer — what its zeros take once it is gone."""
+
+    __slots__ = ("g", "sizes")
+
+    def __init__(self, g) -> None:
+        self.g = g
+        self.sizes: dict = {}
+
+
 class _LazyChunk(dict):
     """A chunk whose draw-only fields are computed on first use: a component
     placement baked for the pick index (#158's lazy placements, hundreds per
@@ -2841,7 +2868,7 @@ class Viewport(QOpenGLWidget):
             for i, g in base[3]:
                 whole[i] = part(g)
             epoch = hash(tuple(whole))
-            self._epoch_remember(epoch, len(base[1]), list(whole))
+            self._epoch_remember(epoch, len(base[1]), list(whole), base[4])
             self._epoch_memo = ((tick, _cache_ver(self)), epoch)
             self._epoch_same = None
             return epoch
@@ -2854,13 +2881,19 @@ class Viewport(QOpenGLWidget):
             parts.append(part(g))
             for c in (g.children or ()):
                 walk(c)
+        # Where each top-level object's subtree sits in ``parts``: what
+        # ``_epoch_kept_tops`` compares, object by object.
+        tops: list = []
         for g in sc.groups:
+            start = len(parts)
             walk(g)
+            tops.append((id(g), start, len(parts)))
         epoch = hash(tuple(parts))
-        self._epoch_remember(epoch, head, parts)
+        self._epoch_remember(epoch, head, parts, tops)
         # (cheap key, the parts before the walk, every part, the movers'
-        # slots) — what the next frozen frame starts from.
-        self._epoch_frozen_base = ((cheap, parts[:head], list(parts), movers)
+        # slots, the subtrees) — what the next frozen frame starts from.
+        self._epoch_frozen_base = ((cheap, parts[:head], list(parts), movers,
+                                    tops)
                                    if not live and pv else None)
         self._epoch_memo = ((tick, _cache_ver(self)), epoch)
         self._epoch_same = (cheap, epoch) if live else None
@@ -2869,13 +2902,13 @@ class Viewport(QOpenGLWidget):
     #: How many past epochs keep their parts for ``_epoch_only_matrices``.
     _EPOCH_HISTORY = 4
 
-    def _epoch_remember(self, epoch, head, parts) -> None:
+    def _epoch_remember(self, epoch, head, parts, tops=()) -> None:
         """Keep the parts an epoch was made of, for the few last ones."""
         hist = getattr(self, "_epoch_hist", None)
         if hist is None:
             from collections import OrderedDict
             hist = self._epoch_hist = OrderedDict()
-        hist[epoch] = (head, parts)
+        hist[epoch] = (head, parts, tops)
         hist.move_to_end(epoch)
         while len(hist) > self._EPOCH_HISTORY:
             hist.popitem(last=False)
@@ -2919,6 +2952,75 @@ class Viewport(QOpenGLWidget):
             return False
         return True
 
+    def _epoch_kept_tops(self, old, new=None):
+        """The ids of the top-level objects whose whole subtree — every
+        placement in it, with its mesh, matrix, layer, flags and paint —
+        reads the same in placements epoch ``old`` as in ``new`` (the
+        current one by default), the rest of the scene (context, loose
+        mesh, view switches, layers) being the same too; the preview's two
+        slots are the caller's to handle, as in ``_epoch_only_matrices``.
+        ``None`` when that cannot be told.
+
+        Deleting, pasting or undoing either adds or takes away an object
+        or two: the per-placement passes can keep the rows of every other
+        object instead of making all 21 406 again (~2 s each way on the
+        plant of #158)."""
+        if new is None:
+            new = self._placements_epoch()
+        memo = getattr(self, "_kept_tops_memo", None)
+        if memo is not None and memo[0] == (old, new):
+            return memo[1]
+        hist = getattr(self, "_epoch_hist", None) or {}
+        a, b = hist.get(old), hist.get(new)
+        out = None
+        if (a is not None and b is not None and len(a) > 2 and len(b) > 2
+                and a[0] == b[0]
+                and all(i in (2, 3) or a[1][i] == b[1][i]
+                        for i in range(a[0]))):
+            pa, pb = a[1], b[1]
+            was = {t: (s, e) for t, s, e in a[2]}
+            kept = set()
+            for t, s, e in b[2]:
+                ab = was.get(t)
+                if ab is None or ab[1] - ab[0] != e - s:
+                    continue
+                o = ab[0]
+                for k in range(s, e):
+                    x, y = pa[o + k - s], pb[k]
+                    if x is not y and x != y:
+                        break
+                else:
+                    kept.add(t)
+            out = frozenset(kept)
+        self._kept_tops_memo = ((old, new), out)
+        return out
+
+    def _refilter(self, old_epoch, old_out, source, test, old_source=None):
+        """``[g for g in source if test(g)]`` worked out only for the
+        placements of objects that changed since placements epoch
+        ``old_epoch``, whose answer was ``old_out``: an unchanged object's
+        placements are in it exactly when they were. ``old_source``: the
+        ids the old answer was taken from, when not every placement.
+        ``None`` when ``_epoch_kept_tops`` cannot tell."""
+        kept = self._epoch_kept_tops(old_epoch)
+        if kept is None:
+            return None
+        was = {id(g) for g in old_out}
+        top_of = self._placement_top
+        if old_source is not None:
+            src = set(old_source)
+            return [g for g in source
+                    if (id(g) in was if top_of(g) in kept and id(g) in src
+                        else test(g))]
+        return [g for g in source
+                if (id(g) in was if top_of(g) in kept else test(g))]
+
+    def _placement_top(self, g):
+        """The id of the top-level object placement ``g`` belongs to (the
+        one ``_placements`` expanded it from)."""
+        tops = getattr(self, "_placement_tops", None)
+        return tops.get(id(g), id(g)) if tops else id(g)
+
     def _placements(self):
         """``scene.groups`` with every nested placement expanded into a proxy
         group carrying its composed world matrix.
@@ -2960,8 +3062,11 @@ class Viewport(QOpenGLWidget):
         # a fresh object (chunk cache miss) that the preview no longer knows.
         if len(cache) > len(seen) and not getattr(self, "_preview_groups",
                                                   None):
+            tops = getattr(self, "_placement_tops", None) or {}
             for k in [k for k in cache if k not in seen]:
-                cache.pop(k, None)
+                gone = cache.pop(k, None)
+                if gone is not None:
+                    tops.pop(id(gone), None)
         self._placements_memo = (key, out)
         return out
 
@@ -2981,6 +3086,9 @@ class Viewport(QOpenGLWidget):
         kids = getattr(group, "children", None)
         if not kids:
             return out
+        tops = getattr(self, "_placement_tops", None)
+        if tops is None:
+            tops = self._placement_tops = {}
         vis, locked = self.scene._layer_state(group)
         forced = group.layer if (not vis or locked) else None
 
@@ -3008,6 +3116,7 @@ class Viewport(QOpenGLWidget):
                                                      name=child.name)
                 if seen is not None:
                     seen.add(id(child))
+                tops[id(proxy)] = id(group)
                 proxy.mesh = child.mesh
                 # A nested entity with no tag of its own inherits the
                 # parent's (the .skp convention); and when the parent's tag is hidden or
@@ -3147,44 +3256,11 @@ class Viewport(QOpenGLWidget):
         key = (self._placements_epoch(), id(self.scene.mesh))
         pool = getattr(self, "_inst_pool", None)
         if pool is not None and pool[0] != key:
-            pool = self._inst_pool = self._inst_pool_moved(pool, key)
+            moved = self._inst_pool_moved(pool, key)
+            pool = self._inst_pool = (moved if moved is not None
+                                      else self._inst_pool_build(key, pool))
         if pool is None or pool[0] != key:
-            from core.group import effective_material
-            groups: list = []
-            boxes: list = []
-            codes: list = []
-            protos: list = []             # code → (mesh, paint, mirrored)
-            code_of: dict = {}
-            for g in self._placements():
-                if not self.scene.entity_visible(g):
-                    continue
-                if not self._instanced_eligible(g):
-                    continue
-                groups.append(g)
-                boxes.append(self._placement_bbox(g))
-                # Which pool (prototype, container paint, mirror) it draws
-                # in, and its matrix: fixed while the placements are, so
-                # not worked out again per frame (#158: 21 406 placements).
-                paint = effective_material(g)
-                mirrored = g.xform.determinant() < 0.0
-                pk = (id(g.mesh), _material_sig(paint), mirrored)
-                c = code_of.get(pk)
-                if c is None:
-                    c = code_of[pk] = len(protos)
-                    protos.append((g.mesh, paint, mirrored))
-                codes.append(c)
-            # Boxless chunks (unknown extents) always draw: give them an
-            # infinite box so the vectorised test keeps them.
-            lo = np.array([b[0] if b else (-np.inf,) * 3 for b in boxes],
-                          dtype=np.float64).reshape(-1, 3)
-            hi = np.array([b[1] if b else (np.inf,) * 3 for b in boxes],
-                          dtype=np.float64).reshape(-1, 3)
-            codes_a = np.asarray(codes, dtype=np.int64)
-            mats = np.array([g.xform.data() for g in groups],
-                            dtype=np.float32).reshape(-1, 16)
-            by_code = np.argsort(codes_a, kind="stable")
-            pool = self._inst_pool = (key, groups, lo, hi, codes_a, protos,
-                                      mats, by_code)
+            pool = self._inst_pool = self._inst_pool_build(key)
         _k, groups, lo, hi, codes_a, protos, mats, by_code = pool
         out: dict = {}
         if not groups:
@@ -3261,6 +3337,87 @@ class Viewport(QOpenGLWidget):
         memos[planes is None] = (pool, keep, out, pvkey)
         self._frame_instanced = out
         return out
+
+    def _inst_pool_build(self, key, old=None):
+        """The instanced pool for ``key``: every visible, eligible
+        placement with its box, its batch (prototype, container paint,
+        mirror) and its matrix. With the ``old`` pool, the rows of the
+        objects ``_epoch_kept_tops`` finds unchanged are taken from it, not
+        worked out again — the same pool, row for row, as one made afresh
+        (a Delete or a Paste beside 21 406 placements, #158)."""
+        import numpy as np
+        from core.group import effective_material
+        kept = (self._epoch_kept_tops(old[0][0], key[0])
+                if old is not None and old[0][1:] == key[1:] else None)
+        row = {}
+        if kept:
+            _k, o_groups, o_lo, o_hi, o_codes, o_protos, o_mats, _b = old
+            row = {id(g): i for i, g in enumerate(o_groups)}
+            o_pk = [(id(m), _material_sig(p), mir) for m, p, mir in o_protos]
+        placements = self._placements()
+        top_of = self._placement_top
+        groups: list = []
+        boxes: list = []                  # a box, or the old row's index
+        codes: list = []
+        protos: list = []                 # code → (mesh, paint, mirrored)
+        code_of: dict = {}
+        for g in placements:
+            if kept and top_of(g) in kept:
+                # Unchanged: in the old pool exactly when it is in this one.
+                i = row.get(id(g))
+                if i is None:
+                    continue
+                pk = o_pk[int(o_codes[i])]
+                c = code_of.get(pk)
+                if c is None:
+                    c = code_of[pk] = len(protos)
+                    protos.append(o_protos[int(o_codes[i])])
+                groups.append(g)
+                boxes.append(i)
+                codes.append(c)
+                continue
+            if not self.scene.entity_visible(g):
+                continue
+            if not self._instanced_eligible(g):
+                continue
+            groups.append(g)
+            boxes.append(self._placement_bbox(g))
+            # Which pool (prototype, container paint, mirror) it draws
+            # in, and its matrix: fixed while the placements are, so
+            # not worked out again per frame (#158: 21 406 placements).
+            paint = effective_material(g)
+            mirrored = g.xform.determinant() < 0.0
+            pk = (id(g.mesh), _material_sig(paint), mirrored)
+            c = code_of.get(pk)
+            if c is None:
+                c = code_of[pk] = len(protos)
+                protos.append((g.mesh, paint, mirrored))
+            codes.append(c)
+        n = len(groups)
+        lo = np.empty((n, 3), dtype=np.float64)
+        hi = np.empty((n, 3), dtype=np.float64)
+        mats = np.empty((n, 16), dtype=np.float32)
+        new_rows = []
+        if row:
+            src = np.fromiter((b if type(b) is int else -1 for b in boxes),
+                              np.int64, count=n)
+            old_at = np.flatnonzero(src >= 0)
+            lo[old_at] = o_lo[src[old_at]]
+            hi[old_at] = o_hi[src[old_at]]
+            mats[old_at] = o_mats[src[old_at]]
+            new_rows = np.flatnonzero(src < 0).tolist()
+        else:
+            new_rows = range(n)
+        for j in new_rows:
+            # Boxless chunks (unknown extents) always draw: give them an
+            # infinite box so the vectorised test keeps them.
+            b = boxes[j]
+            lo[j] = b[0] if b else (-np.inf,) * 3
+            hi[j] = b[1] if b else (np.inf,) * 3
+            mats[j] = groups[j].xform.data()
+        codes_a = np.asarray(codes, dtype=np.int64)
+        by_code = np.argsort(codes_a, kind="stable")
+        return (key, groups, lo, hi, codes_a, protos, mats, by_code)
 
     def _inst_pool_previewed(self, pool, pv):
         """Mask of the pool's placements a preview draws instead."""
@@ -4488,7 +4645,7 @@ class Viewport(QOpenGLWidget):
                         # one's address met its entry — the scale figure
                         # «transported» into an opened file (issue #75).
                         "_billboard_world", "_placement_proxies",
-                        "_arc_mid_by_mesh")
+                        "_placement_tops", "_arc_mid_by_mesh")
 
     def reset_document_caches(self) -> None:
         """Forget the previous document's chunks at the document boundary.
@@ -4524,8 +4681,10 @@ class Viewport(QOpenGLWidget):
         self._pick_lazy_memo = None
         self._pick_near_memo = None
         self._proto_draw_fast = None
-        self._run_joins = None            # joined from the old chunks
         self._arc_mid_cache = None
+        self._epoch_hist = None           # ids of the old document's objects
+        self._kept_tops_memo = None
+        self._slot_layout = None          # holds its gone objects
 
     def reset_texture_cache(self) -> None:
         """Return the document's cached GL textures to the driver.
@@ -5723,16 +5882,61 @@ class Viewport(QOpenGLWidget):
             if memo[0] != epoch:
                 self._static_groups_memo = (epoch,) + memo[1:]
             return memo[3]
-        out = [g for g in groups
-               if self.scene.entity_visible(g)
-               and not getattr(g, "billboard", False)
-               and not self._instanced_eligible(g)]
+        def static(g):
+            return (self.scene.entity_visible(g)
+                    and not getattr(g, "billboard", False)
+                    and not self._instanced_eligible(g))
+        out = None
+        if memo is not None and memo[2] is self.scene.mesh:
+            out = self._refilter(memo[0], memo[3], groups, static, memo[1])
+        if out is None:
+            out = [g for g in groups if static(g)]
         self._static_groups_memo = (epoch, ids, self.scene.mesh, out)
         return out
 
+    #: Past this many objects gone, or this many bytes of their zeros in
+    #: the faces buffer, the static buffers are laid out afresh.
+    _SLOTS_MAX_GONE = 64
+    _SLOTS_MAX_BYTES = 64 << 20
+
+    def _static_slots(self, walk):
+        """``walk`` (the placements the static buffers draw, in order) as
+        slots ``(slot, gone)``, keeping the places of objects taken away
+        since the last layout: a Delete leaves zeros of the deleted object's
+        size where it was, its undo fills them back, a Paste comes at the
+        end. Everything else keeps its offset, so the upload re-sends what
+        changed and not the whole tail after it — up to 0.4 GB of faces on
+        the plant of #158, ~0.4 s each way. The order of what is drawn is
+        the walk's, as laid out afresh. A walk that changed otherwise (an
+        object come in between, an order changed), or too many objects
+        gone, is laid out afresh."""
+        prev = getattr(self, "_slot_layout", None)
+        ids = {id(g): g for g in walk}
+        out = None
+        if prev:
+            known = {id(sl.g) for sl in prev}
+            kept = [id(sl.g) for sl in prev if id(sl.g) in ids]
+            order = [id(g) for g in walk if id(g) in known]
+            if kept == order:
+                n_old = len(order)
+                tail = [g for g in walk if id(g) not in known]
+                if (all(id(g) not in known for g in walk[n_old:])
+                        and len(tail) == len(walk) - n_old):
+                    gone = [sl for sl in prev if id(sl.g) not in ids]
+                    if (len(gone) <= self._SLOTS_MAX_GONE
+                            and sum(sl.sizes.get("f", 0) for sl in gone)
+                            <= self._SLOTS_MAX_BYTES):
+                        out = ([(sl, id(sl.g) not in ids) for sl in prev]
+                               + [(_Slot(g), False) for g in tail])
+        if out is None:
+            old = {id(sl.g): sl for sl in prev or ()}
+            out = [(old.get(id(g)) or _Slot(g), False) for g in walk]
+        self._slot_layout = [sl for sl, _gone in out]
+        return out
+
     def _upload_vbo(self, vbo, slot: str, parts, empty: int = 24) -> int:
-        """Put ``b"".join(parts)`` in ``vbo``, re-sending only the tail that
-        actually changed. Returns the total byte length.
+        """Put ``b"".join(parts)`` in ``vbo``, re-sending only the parts
+        that actually changed. Returns the total byte length.
 
         Every scene-version bump re-uploaded each buffer whole, so an edit
         inside one group re-sent the entire model each drag frame — on
@@ -5740,47 +5944,44 @@ class Viewport(QOpenGLWidget):
         telemetry read ``sync=197ms`` against ``faces=11ms edges=7ms``: the
         frame was the upload, not the drawing.
 
-        Parts that compare equal form a prefix the GPU already holds. Chunk
-        buffers are cached objects, so that comparison is an identity hit for
-        every group that did not change; the freshly built loose block falls
-        back to a bytes compare, which is memcmp and still an order of
-        magnitude under the transfer it saves. The buffer is over-allocated so
-        a growing tail usually fits without a reallocation (which would
-        discard the prefix along with everything else)."""
+        A part equal to the one the GPU holds at the same offset is not
+        sent. Chunk buffers are cached objects, so that comparison is an
+        identity hit for every group that did not change; the freshly built
+        loose block falls back to a bytes compare, which is memcmp and still
+        an order of magnitude under the transfer it saves. The buffer is
+        over-allocated so a growing tail usually fits without a reallocation
+        (which would discard everything the GPU held)."""
         sizes = [len(p) for p in parts]
         total = sum(sizes)
         prev = self._vbo_parts.get(slot)
         cap = prev[1] if prev is not None else 0
         vbo.bind()
-        if prev is not None and total <= cap and len(prev) > 2 \
-                and prev[2] == sizes:
-            # The same parts, of the same sizes (an object moved, the rest
-            # as it was): only the parts that changed are sent, each in
-            # place. Joining the whole buffer to send its tail was most of
-            # putting an object down on the plant of #158 (~0.6 s).
+        if prev is not None and total <= cap and len(prev) > 2:
+            # Each part is sent unless the GPU holds it already, at the very
+            # same offset: an object moved, deleted (its zeros) or pasted
+            # into the room left for it sends its own part, not the tail
+            # after it. Joining the whole buffer to send its tail was most
+            # of putting an object down on the plant of #158 (~0.6 s).
+            held = {}
             off = 0
-            for a, b, n in zip(parts, prev[0], sizes):
-                if not (a is b or a == b):
-                    vbo.write(off, a, n)
+            for b, n in zip(prev[0], prev[2]):
+                if n:
+                    held[off] = b
+                off += n
+            off = 0
+            for a, n in zip(parts, sizes):
+                if n:
+                    b = held.get(off)
+                    if not (b is not None and (a is b or (len(b) == n
+                                                          and a == b))):
+                        vbo.write(off, a, n)
                 off += n
         else:
-            keep = 0
-            first = 0
-            if prev is not None and total <= cap:
-                for a, b in zip(parts, prev[0]):
-                    if a is b or a == b:
-                        keep += len(a)
-                        first += 1
-                    else:
-                        break
             if total > cap:
                 cap = max(int(total * 1.25) + 4096, empty)
                 vbo.allocate(cap)      # reserve; a realloc keeps no contents
-                keep = first = 0
-            if total > keep:
-                # Only the tail is joined: the head is on the GPU already.
-                tail = b"".join(parts[first:])
-                vbo.write(keep, tail, total - keep)
+            if total:
+                vbo.write(0, b"".join(parts), total)
         vbo.release()
         self._vbo_parts[slot] = (list(parts), cap, sizes)
         return total
@@ -5908,6 +6109,15 @@ class Viewport(QOpenGLWidget):
         # is re-read each sync instead — its chunk is cached per group and
         # revalidated by the mesh serial, so that is a lookup, not a build.
         editing = self.scene.edit_group is not None
+        # Outside a group, the static half is laid out in slots that keep
+        # the places of objects taken away (``_static_slots``).
+        slots = None
+        if not editing and not hide_rest and epoch_of is not None:
+            slots = self._static_slots(self._static_draw_groups(draw_groups))
+            gkey += (tuple(i for i, (_sl, gone) in enumerate(slots)
+                           if gone),)
+        else:
+            self._slot_layout = None
         head = ([g for g in draw_groups if self._draws_in_edit_context(g)]
                 if editing else draw_groups)
         subject = ([g for g in draw_groups
@@ -5932,10 +6142,30 @@ class Viewport(QOpenGLWidget):
                     rel += n
             return parts, spans, rel
 
+        def _collect_slots(slots):
+            parts: list = []
+            spans: list = []
+            rel = 0
+            for sl, gone in slots:
+                if gone:
+                    n = sl.sizes.get("e", 0)
+                    if n:
+                        parts.append(_zeros(n))
+                        rel += n // 12
+                    continue
+                got, sp, rel2 = _collect((sl.g,), rel)
+                sl.sizes["e"] = sum(len(p) for p in got)
+                parts += got
+                spans += sp
+                rel = rel2
+            return parts, spans, rel
+
         gcache = getattr(self, "_edge_groups_cache", None)
         if gcache is None or gcache[0] != gkey:
-            head_parts, head_spans, head_n = _collect(
-                self._static_draw_groups(head) if not editing else head, 0)
+            head_parts, head_spans, head_n = (
+                _collect_slots(slots) if slots is not None else _collect(
+                    self._static_draw_groups(head) if not editing else head,
+                    0))
             gcache = self._edge_groups_cache = (gkey, head_parts, head_spans,
                                                 head_n)
         _gk, head_parts, head_spans, head_n = gcache
@@ -5963,22 +6193,26 @@ class Viewport(QOpenGLWidget):
         # with its own uniform. Loose faces rebuild fresh; untouched groups
         # contribute their cached chunk buffers (a 17k-face reference model
         # made every stroke pay a ~1 s re-triangulation otherwise).
-        # The translucent and back-side runs are joined from chunk parts
-        # that a Move leaves as they were: the same parts give back the same
-        # bytes object (which the upload then passes over by identity) —
-        # re-joining them was ~0.1 s of picking up and of putting down.
-        join_old = getattr(self, "_run_joins", None) or {}
-        join_new: dict = {}
-
-        def joined(key, parts):
-            hit = join_old.get(key)
-            if (hit is not None and len(hit[0]) == len(parts)
-                    and all(a is b for a, b in zip(hit[0], parts))):
-                join_new[key] = hit
-                return hit[1]
-            raw = b"".join(parts)
-            join_new[key] = (list(parts), raw)
-            return raw
+        # The translucent and back-side runs go to the upload as their
+        # chunk parts, not joined: a Move, a Delete or a Paste leaves most
+        # of them as they were, and the upload passes those over by
+        # identity — joining a run of glass again was ~0.1 s of each, on
+        # the plant of #158. Small parts (a loose face each) are joined in
+        # batches, or the upload would send them one by one.
+        def pieces(parts):
+            out: list = []
+            small: list = []
+            for p in parts:
+                if len(p) >= 1 << 16:
+                    if small:
+                        out.append(b"".join(small))
+                        small = []
+                    out.append(p)
+                else:
+                    small.append(p)
+            if small:
+                out.append(b"".join(small))
+            return out
 
         suppressed_faces = self._suppressed_faces
         vcol = array("f")            # loose faces, interleaved pos(3)+rgb(3)
@@ -6102,7 +6336,38 @@ class Viewport(QOpenGLWidget):
         # #158, whose full walk was ~0.3 s of every edit there.
         walk = (self._static_draw_groups(draw_groups)
                 if self.scene.edit_group is None else draw_groups)
-        for g in walk:                # context first, edited group last
+        if slots is None:
+            slots = [(_Slot(g), False) for g in walk]
+        for sl, gone in slots:        # context first, edited group last
+            if gone:
+                # A gone object's place: zeros of what it took (see
+                # ``_static_slots``), so what follows keeps its offset.
+                sz = sl.sizes
+                if sz.get("d"):
+                    dback_parts.append(_zeros(sz["d"]))
+                    dback_start += sz["d"] // 12
+                # (one part per object, empty or not: as many as before)
+                face_parts.append(_zeros(sz.get("f", 0)))
+                gface_start += sz.get("f", 0) // 24
+                for path, n in (sz.get("t") or {}).items():
+                    group_texture.setdefault(path, []).append(
+                        (_zeros(n), None, False))
+                # Its share of the translucent and back-side runs too: the
+                # runs keep their sizes, and their joins their parts.
+                runs = sz.get("runs") or {}
+                for name, dest in (("tcol", tcol_runs), ("ttex", ttex_runs),
+                                   ("back_tex", back_tex_runs),
+                                   ("back_tcol", back_tcol_runs),
+                                   ("back_ttex", back_ttex_runs)):
+                    for key, n in (runs.get(name) or {}).items():
+                        dest.setdefault(key, []).append(_zeros(n))
+                if runs.get("back_vcol"):
+                    back_vcol_parts.append(_zeros(runs["back_vcol"]))
+                if runs.get("fvcol"):
+                    fcull_vcol_parts.append(_zeros(runs["fvcol"]))
+                continue
+            g = sl.g
+            sl.sizes.update(f=0, d=0, t={}, runs={})
             if (self._edit_split_f is None
                     and self.scene.edit_group is not None
                     and not self._draws_in_edit_context(g)):
@@ -6132,6 +6397,9 @@ class Viewport(QOpenGLWidget):
                 for path, raw in chunk["by_texture"].items():
                     group_texture.setdefault(path, []).append(
                         (_pv_hole(raw), None, False))
+                sl.sizes.update(
+                    f=len(chunk["vcol"]), d=len(chunk.get("dback") or b""),
+                    t={p: len(r) for p, r in chunk["by_texture"].items()})
                 continue
             if suppressed_faces and any(f in suppressed_faces
                                         for f in g.mesh.faces):
@@ -6147,6 +6415,15 @@ class Viewport(QOpenGLWidget):
                 subject_bucketed = True
                 continue
             chunk = self._group_chunk(g)
+            sl.sizes.update(
+                f=len(chunk["vcol"]), d=len(chunk.get("dback") or b""),
+                t={p: len(r) for p, r in chunk["by_texture"].items()},
+                runs={**{name: {k: len(r) for k, r in
+                                (chunk.get(name) or {}).items()}
+                         for name in ("tcol", "ttex", "back_tex",
+                                      "back_tcol", "back_ttex")},
+                      "back_vcol": len(chunk.get("back_vcol") or b""),
+                      "fvcol": len(chunk.get("fvcol") or b"")})
             if chunk.get("dback"):
                 dback_parts.append(chunk["dback"])
                 dback_spans.append((chunk.get("bbox"), dback_start,
@@ -6202,30 +6479,45 @@ class Viewport(QOpenGLWidget):
                 # The bucketed block IS the subject, and it is last: the fade
                 # split moves to its start so the context still fades.
                 self._edit_split_f = subj_start
+        # Room after the opaque batch, outside a group: what a Paste adds
+        # lands in it, and the runs below keep their offsets — moved, they
+        # were the whole tail of the buffer sent again (~0.2 s on the plant
+        # of #158). Zeros, never drawn: the opaque pass stops before them.
+        if slots is not None and getattr(self, "_slot_layout", None):
+            main = self._faces_count * 24
+            room = max(24 << 15, min(24 << 19, main // 64 // 24 * 24))
+            at = getattr(self, "_face_room_at", None)
+            if at is None or at < main or at - main > 2 * room:
+                at = main + room
+            self._face_room_at = at
+            if at > main:
+                all_face_parts.append(_zeros(at - main))
+        else:
+            self._face_room_at = None
         # Translucent colour runs live in the SAME VBO, after the opaque
         # batch; drawn in their own blended pass (depth-write off).
         self._tcol_runs = []
-        start = self._faces_count
+        start = sum(len(p) for p in all_face_parts) // 24
         for key in sorted(tcol_runs):
             a, fc = key
-            raw = joined(("tcol", key), tcol_runs[key])
-            all_face_parts.append(raw)
-            count = len(raw) // 24
+            run = pieces(tcol_runs[key])
+            all_face_parts += run
+            count = sum(map(len, run)) // 24
             self._tcol_runs.append((a, fc, start, count))
             start += count
-        back_vcol_raw = joined("back_vcol", back_vcol_parts)
-        self._back_vcol_run = (start, len(back_vcol_raw) // 24)
-        all_face_parts.append(back_vcol_raw)
+        run = pieces(back_vcol_parts)
+        self._back_vcol_run = (start, sum(map(len, run)) // 24)
+        all_face_parts += run
         start += self._back_vcol_run[1]
-        fvcol_raw = joined("fvcol", fcull_vcol_parts)
-        self._fvcol_run = (start, len(fvcol_raw) // 24)
-        all_face_parts.append(fvcol_raw)
+        run = pieces(fcull_vcol_parts)
+        self._fvcol_run = (start, sum(map(len, run)) // 24)
+        all_face_parts += run
         start += self._fvcol_run[1]
         self._back_tcol_runs = []
         for a in sorted(back_tcol_runs):
-            raw = joined(("back_tcol", a), back_tcol_runs[a])
-            all_face_parts.append(raw)
-            count = len(raw) // 24
+            run = pieces(back_tcol_runs[a])
+            all_face_parts += run
+            count = sum(map(len, run)) // 24
             self._back_tcol_runs.append((a, start, count))
             start += count
         self._upload_vbo(self._faces_vbo, "faces", all_face_parts, empty=48)
@@ -6284,29 +6576,28 @@ class Viewport(QOpenGLWidget):
         self._ttex_runs = []
         for full in sorted(ttex_runs):
             key, a, fc = full
-            raw = joined(("ttex", full), ttex_runs[full])
-            tex_parts.append(raw)
-            count = len(raw) // 20
+            run = pieces(ttex_runs[full])
+            tex_parts += run
+            count = sum(map(len, run)) // 20
             self._ttex_runs.append((key, a, fc, start, count))
             start += count
         self._back_tex_runs = []
         for key in sorted(back_tex_runs):
-            raw = joined(("back_tex", key), back_tex_runs[key])
-            tex_parts.append(raw)
-            count = len(raw) // 20
+            run = pieces(back_tex_runs[key])
+            tex_parts += run
+            count = sum(map(len, run)) // 20
             self._back_tex_runs.append((key, start, count))
             start += count
         self._back_ttex_runs = []
         for full in sorted(back_ttex_runs):
             key, a = full
-            raw = joined(("back_ttex", full), back_ttex_runs[full])
-            tex_parts.append(raw)
-            count = len(raw) // 20
+            run = pieces(back_ttex_runs[full])
+            tex_parts += run
+            count = sum(map(len, run)) // 20
             self._back_ttex_runs.append((key, a, start, count))
             start += count
         self._tex_faces_count = self._upload_vbo(
             self._tex_faces_vbo, "tex", tex_parts, empty=40) // 20
-        self._run_joins = join_new
 
         if _PERF:
             _plog("sync_edges", (_time_mod.perf_counter() - _st0) * 1000.0)
@@ -6932,10 +7223,18 @@ class Viewport(QOpenGLWidget):
         if gmemo is not None and gmemo[0] == gkey:
             groups = gmemo[1]
         else:
-            groups = [g for g in self._placements()
-                      if self.scene.entity_visible(g)
-                      and not getattr(g, "billboard", False)
-                      and not (skip_context and self._draws_in_edit_context(g))]
+            def outlined(g):
+                return (self.scene.entity_visible(g)
+                        and not getattr(g, "billboard", False)
+                        and not (skip_context
+                                 and self._draws_in_edit_context(g)))
+            groups = None
+            if (gmemo is not None and gmemo[0][1] == skip_context
+                    and gmemo[2] is self.scene.mesh):
+                groups = self._refilter(gmemo[0][0], gmemo[1],
+                                        self._placements(), outlined)
+            if groups is None:
+                groups = [g for g in self._placements() if outlined(g)]
             self._sil_groups = (gkey, groups, self.scene.mesh)
         if groups:
             import numpy as np
@@ -6999,9 +7298,38 @@ class Viewport(QOpenGLWidget):
             # the placements that moved, not the whole table (~1 s).
             self._sil_table = (key, memo[1], memo[2])
             return memo[1], memo[2]
-        by_proto: dict = {}
+        # An object or two added or taken away (a Delete, a Paste, their
+        # undo): the rows of every unchanged object come from the old
+        # table, and a prototype none of whose rows changed keeps its
+        # entry — and with it the outline last worked out for this view.
+        kept = (self._epoch_kept_tops(memo[0][0], key[0])
+                if memo is not None else None)
+        old_rows: dict = {}
+        old_rest: set = set()
+        if kept:
+            for t in memo[1]:
+                for j, g in enumerate(t["groups"]):
+                    old_rows[id(g)] = (t, j)
+            old_rest = {id(g) for g in memo[2]}
+        top_of = self._placement_top
+        inf = float("inf")
+        by_proto: dict = {}          # uid → [old entry, base, rows]
         rest: list = []
         for g in groups:
+            if kept and top_of(g) in kept:
+                hit = old_rows.get(id(g))
+                if hit is None:
+                    if id(g) in old_rest:
+                        rest.append(g)
+                    continue
+                t, j = hit
+                ent = by_proto.get(t["uid"])
+                if ent is None:
+                    ent = by_proto[t["uid"]] = [t, None, []]
+                elif ent[0] is None:
+                    ent[0] = t
+                ent[2].append((g, t, j))
+                continue
             if getattr(g, "xform", None) is None \
                     or getattr(g, "billboard", False):
                 rest.append(g)
@@ -7015,30 +7343,52 @@ class Viewport(QOpenGLWidget):
                 continue
             ent = by_proto.get(base["uid"])
             if ent is None:
-                ent = by_proto[base["uid"]] = (base, [], [], [], [], [])
-            _b, fwds, invs, los, his, gl = ent
-            gl.append(g)
-            fwds.append(np.array(g.xform.data(), np.float64)
-                        .reshape(4, 4, order="F")[:3])
-            invs.append(np.array(inv.data(), np.float64)
-                        .reshape(4, 4, order="F")[:3])
-            inf = float("inf")
-            los.append(box[0] if box else (-inf, -inf, -inf))
-            his.append(box[1] if box else (inf, inf, inf))
+                ent = by_proto[base["uid"]] = [None, base, []]
+            elif ent[1] is None:
+                ent[1] = base
+            ent[2].append((g, None, (
+                np.array(g.xform.data(), np.float64)
+                .reshape(4, 4, order="F")[:3],
+                np.array(inv.data(), np.float64).reshape(4, 4, order="F")[:3],
+                box[0] if box else (-inf, -inf, -inf),
+                box[1] if box else (inf, inf, inf))))
         table = []
-        for base, fwds, invs, los, his, gl in by_proto.values():
-            n0 = np.asarray(base["soft_n0"], np.float64)
-            n1 = np.asarray(base["soft_n1"], np.float64)
+        for uid, (t, base, rows) in by_proto.items():
+            if (t is not None and len(rows) == len(t["groups"])
+                    and all(src is t and j == k
+                            for k, (_g, src, j) in enumerate(rows))):
+                table.append(t)               # as it was, outline and all
+                continue
+            gl = [r[0] for r in rows]
+            fwds, invs, los, his = [], [], [], []
+            for g, src, j in rows:
+                if src is None:
+                    fwd, inv, lo, hi = j
+                else:
+                    fwd, inv = src["fwd"][j], src["inv"][j]
+                    lo, hi = src["lo"][j], src["hi"][j]
+                fwds.append(fwd)
+                invs.append(inv)
+                los.append(lo)
+                his.append(hi)
+            if base is not None:
+                n0 = np.asarray(base["soft_n0"], np.float64)
+                n1 = np.asarray(base["soft_n1"], np.float64)
+                arrays = {
+                    "seg": np.asarray(base["soft_pts"], np.float64).reshape(-1, 2, 3),
+                    "n0": n0, "n1": n1,
+                    "d0": np.einsum("ij,ij->i", n0, np.asarray(base["soft_c0"], np.float64)),
+                    "d1": np.einsum("ij,ij->i", n1, np.asarray(base["soft_c1"], np.float64)),
+                    "single": np.asarray(base["soft_single"], bool)}
+            else:
+                arrays = {k: t[k] for k in ("seg", "n0", "n1", "d0", "d1",
+                                            "single")}
             table.append({
-                "seg": np.asarray(base["soft_pts"], np.float64).reshape(-1, 2, 3),
-                "n0": n0, "n1": n1,
-                "d0": np.einsum("ij,ij->i", n0, np.asarray(base["soft_c0"], np.float64)),
-                "d1": np.einsum("ij,ij->i", n1, np.asarray(base["soft_c1"], np.float64)),
-                "single": np.asarray(base["soft_single"], bool),
+                **arrays,
                 "fwd": np.stack(fwds), "inv": np.stack(invs),
                 "lo": np.asarray(los, np.float64), "hi": np.asarray(his, np.float64),
                 "groups": gl, "xf": [tuple(g.xform.data()) for g in gl],
-                "ids": frozenset(map(id, gl)), "rev": 0,
+                "ids": frozenset(map(id, gl)), "rev": 0, "uid": uid,
             })
         self._sil_table = (key, table, rest)
         return table, rest
@@ -10814,20 +11164,50 @@ class Viewport(QOpenGLWidget):
         groups = [g for g in self._placements()
                   if getattr(g, "xform", None) is not None
                   and not getattr(g, "billboard", False)]
+        # An object or two added or taken away (a Delete, a Paste): the
+        # rows of the others are the old table's.
+        kept = (self._epoch_kept_tops(memo[0], key)
+                if memo is not None and memo[1] is not None else None)
+        src = None
+        if kept:
+            o_groups, o_lo, o_hi, o_nf = memo[1][:4]
+            row = {id(g): i for i, g in enumerate(o_groups)}
+            top_of = self._placement_top
+            src = np.fromiter(
+                (row.get(id(g), -1) if top_of(g) in kept else -1
+                 for g in groups), np.int64, count=len(groups))
         from core.mesh import face_count
-        nf = np.fromiter((face_count(g.mesh) for g in groups), np.int64,
-                         count=len(groups))
+        if src is None:
+            nf = np.fromiter((face_count(g.mesh) for g in groups), np.int64,
+                             count=len(groups))
+        else:
+            nf = np.fromiter((face_count(g.mesh) if k < 0 else 0
+                              for g, k in zip(groups, src.tolist())),
+                             np.int64, count=len(groups))
+            at = np.flatnonzero(src >= 0)
+            nf[at] = o_nf[src[at]]
         table = None
         if int(nf.sum()) >= self._PICK_LAZY_MIN_FACES:
             inf = float("inf")
             lo = np.empty((len(groups), 3))
             hi = np.empty((len(groups), 3))
-            for i, g in enumerate(groups):
-                box = self._placement_frame(g)[0]
+            if src is None:
+                todo = range(len(groups))
+            else:
+                lo[at], hi[at] = o_lo[src[at]], o_hi[src[at]]
+                todo = np.flatnonzero(src < 0).tolist()
+            for i in todo:
+                box = self._placement_frame(groups[i])[0]
                 lo[i], hi[i] = box if box else ((-inf,) * 3, (inf,) * 3)
             table = (groups, lo, hi, nf, {id(g) for g in groups})
-        xfs = ([tuple(g.xform.data()) for g in groups]
-               if table is not None else None)
+        if table is None:
+            xfs = None
+        elif src is None:
+            xfs = [tuple(g.xform.data()) for g in groups]
+        else:
+            o_xfs = memo[2]
+            xfs = [tuple(g.xform.data()) if k < 0 else o_xfs[k]
+                   for g, k in zip(groups, src.tolist())]
         self._pick_lazy_memo = (key, table, xfs)
         return table
 

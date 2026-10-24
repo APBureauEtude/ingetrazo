@@ -99,6 +99,10 @@ class Command(ABC):
     #: Whether doing or undoing it leaves every material where it was —
     #: which ones the model wears (see ``History.paint_cv``).
     keeps_paint = False
+    #: Whether doing or undoing it only puts groups in the model or takes
+    #: them out, whole, and leaves every group that stays as it was — its
+    #: Browser row, the paint of its faces (see ``History.groups_cv``).
+    keeps_groups = False
 
     @abstractmethod
     def do(self, scene) -> None:
@@ -184,14 +188,29 @@ class History:
         #: The same, for the Browser's rows (views/outliner.py): a command
         #: that keeps paint moves things, and no row shows where a thing is.
         self.rows_cv = None
+        #: Per reader («paint» the materials panel, «rows» the Browser), the
+        #: content version up to which nothing but commands that keep paint
+        #: or keep groups changed the model since that reader last went
+        #: through it all: a Delete or a Paste only adds or takes away an
+        #: object or two, and the reader need not go through the 21 406
+        #: others again (#158). The reader sets its own entry.
+        self.groups_cv: dict = {}
 
     def _keep_paint_cv(self, cmd, before) -> None:
-        if getattr(cmd, "keeps_paint", False) and before is not None:
-            cv = getattr(self.scene, "content_version", None)
+        if before is None:
+            return
+        keeps = getattr(cmd, "keeps_paint", False)
+        if not (keeps or getattr(cmd, "keeps_groups", False)):
+            return
+        cv = getattr(self.scene, "content_version", None)
+        if keeps:
             if self.paint_cv == before:
                 self.paint_cv = cv
             if self.rows_cv == before:
                 self.rows_cv = cv
+        for k, v in self.groups_cv.items():
+            if v == before:
+                self.groups_cv[k] = cv
 
     def execute(self, cmd: Command) -> None:
         _t0 = _time_mod.perf_counter() if _PERF else 0.0
@@ -3782,6 +3801,8 @@ class InsertGroupCommand(Command):
     is expressed in the container's own space when that one carries a
     matrix (entering usually pushes it down into the children already)."""
 
+    keeps_groups = True
+
     def __init__(self, group) -> None:
         self.group = group
         self._owner: Optional[list] = None
@@ -4584,6 +4605,8 @@ class DeleteGroupCommand(Command):
     rolled back, nothing on screen, «quiero eliminar, tampoco puedo»
     (Marco, 2026-09-11, a fountain inside an imported component)."""
 
+    keeps_groups = True
+
     def __init__(self, group: Group) -> None:
         self.group = group
         self.index: Optional[int] = None
@@ -4974,6 +4997,12 @@ class CompoundCommand(Command):
     @property
     def keeps_paint(self) -> bool:
         return all(getattr(c, "keeps_paint", False) for c in self.commands)
+
+    @property
+    def keeps_groups(self) -> bool:
+        return all(getattr(c, "keeps_paint", False)
+                   or getattr(c, "keeps_groups", False)
+                   for c in self.commands)
 
     def do(self, scene) -> None:
         done = []

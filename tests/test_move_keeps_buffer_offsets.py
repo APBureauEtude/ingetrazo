@@ -38,6 +38,20 @@ def _square(x0, y0, s=1.0, color=None):
     return m
 
 
+def _opaque_holes(vp):
+    """The all-zero parts of the faces buffer's opaque block (the room
+    left after it for what a Paste adds is zeros too, and not drawn)."""
+    out, off = [], 0
+    end = vp._faces_count * 24
+    for p in vp._vbo_parts["faces"][0]:
+        if off >= end:
+            break
+        if p and not any(p):
+            out.append(p)
+        off += len(p)
+    return out
+
+
 def _close(win):
     win._saved_version = win.viewport.scene.version
     win.close()
@@ -98,9 +112,7 @@ def test_a_picked_up_group_leaves_zeros_in_its_place_and_draws_nothing_there():
         assert colour(img, -5.5, 0.5) != sky and colour(img, 5.5, -2.5) != sky
         for k in ("faces", "edges"):
             assert vp._vbo_parts[k][2] == sizes[k], k
-        holes = [p for p in vp._vbo_parts["faces"][0]
-                 if p and not any(p)]
-        assert holes, "the mover's place holds zeros"
+        assert _opaque_holes(vp), "the mover's place holds zeros"
         vp.end_groups_preview()
         vp.history.execute(MoveGroupCommand(mover, V(0.0, -5.0, 0.0)))
         _pump()
@@ -110,7 +122,7 @@ def test_a_picked_up_group_leaves_zeros_in_its_place_and_draws_nothing_there():
         assert np.allclose(colour(img, 2.5, 2.5), sky, atol=0.02)
         r, g, b = colour(img, 2.5, -2.5)
         assert r > 0.6 and g > 0.5 and b < 0.35
-        assert not any(p and not any(p) for p in vp._vbo_parts["faces"][0])
+        assert not _opaque_holes(vp)
     finally:
         _close(win)
 

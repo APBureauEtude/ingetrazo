@@ -747,6 +747,26 @@ def _slab_near(t):
     return np.fmin(np.fmin(t[..., 0], t[..., 1]), t[..., 2])
 
 
+def _moller_trumbore(o, d, v0, e1, e2):
+    """Möller–Trumbore of the ray ``o`` + t·``d`` against triangles (v0, e1,
+    e2) (N, 3): ``(t, hit)``, with the thresholds of :func:`_ray_triangle`.
+    The pick index's pass and the lazy placements' (#158) run this one, so
+    the same triangle gives the same t whichever holds it."""
+    import numpy as np
+    p = np.cross(d, e2)
+    det = np.einsum("ij,ij->i", e1, p)
+    ok = np.abs(det) > 1e-6
+    inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+    s = o - v0
+    u = np.einsum("ij,ij->i", s, p) * inv
+    q = np.cross(s, e1)
+    v = (q @ d) * inv
+    t = np.einsum("ij,ij->i", e2, q) * inv
+    hit = (ok & (u >= 0.0) & (u <= 1.0) & (v >= 0.0) & (u + v <= 1.0)
+           & (t > 1e-6))
+    return t, hit
+
+
 #: How the rest of the model reads while a group is open for editing.
 #: ``normal`` draws it as always, ``fade`` washes it out behind the group
 #: being edited (the default), ``hide`` leaves it out of the frame.
@@ -9744,20 +9764,12 @@ class Viewport(QOpenGLWidget):
         if o is None or d is None:
             return None
         import numpy as np
-        idx = self._pick_index(near=("px", x, y))
-        if not idx.entities:
+        idx = self._pick_index(near=Viewport._ray_near(self, x, y))
+        hits = Viewport._face_hits(self, idx, o, d, "sel")
+        if hits is None or len(hits.t) == 0:
             return None
-        t = self._ray_hits(idx, o, d, idx.ent_sel)
-        if t is None or len(t) == 0:
-            return None
-        i = int(np.argmin(t))
-        if not np.isfinite(t[i]):
-            return None
-        face, owner = idx.entities[i]
-        pidx = getattr(idx, "ent_place_idx", None)
-        if pidx is not None and i < len(pidx) and pidx[i] >= 0:
-            return face, idx.ent_placements[int(pidx[i])]
-        return face, owner
+        i = int(np.argmin(hits.t))
+        return hits.ent(i)[0], hits.place(i)
 
     #: How far from the cursor (px) a face crossing snaps, and how far
     #: either side of the crossing the search checks that each face shows.
@@ -9785,10 +9797,11 @@ class Viewport(QOpenGLWidget):
         if o is None or d is None:
             return None
         import numpy as np
-        idx = self._pick_index(near=("px", px, py))
-        face_t = self._hover_face_t(idx, o, d)                # memoised
-        if face_t is None or not np.isfinite(face_t).any():
+        idx = self._pick_index(near=Viewport._ray_near(self, px, py))
+        hits = self._hover_hits(idx, o, d)                    # memoised
+        if hits is None or not np.isfinite(hits.t).any():
             return None
+        face_t = hits.t
         t_f = float(face_t.min())
         r = self._CROSSING_RING_PX
         o2, d2 = self._pixel_to_ray(px + r, py)
@@ -9803,15 +9816,12 @@ class Viewport(QOpenGLWidget):
         cand = cand[np.argsort(face_t[cand], kind="stable")][:7]
         from core.snap import face_plane_world
         p_f, n_f = face_plane_world(f_face, getattr(f_place, "xform", None))
-        pidx = getattr(idx, "ent_place_idx", None)
         f = (f_face, f_place, p_f, n_f)
         pairs = []
         for i in cand:
             i = int(i)
-            g_face, g_owner = idx.entities[i]
-            g_place = g_owner
-            if pidx is not None and i < len(pidx) and pidx[i] >= 0:
-                g_place = idx.ent_placements[int(pidx[i])]
+            g_face = hits.ent(i)[0]
+            g_place = hits.place(i)
             if g_face is f_face and g_place is f_place:
                 continue
             p_g, n_g = face_plane_world(g_face, getattr(g_place, "xform", None))
@@ -9827,7 +9837,8 @@ class Viewport(QOpenGLWidget):
         # placement rebuilt the index for the next (up to five rebuilds a
         # pointer move with Rectangle over the plant of #158).
         mat = getattr(self, "_pick_materialize", None)
-        if mat is not None and hasattr(self, "_pick_lazy_table"):
+        if (mat is not None and hasattr(self, "_pick_lazy_table")
+                and Viewport._ray_near(self, px, py) != "skip"):
             for _g, (_x, probes) in pairs:
                 for q in probes:
                     mat(("px", q[0], q[1]))
@@ -12372,21 +12383,34 @@ class Viewport(QOpenGLWidget):
         layers are not there to bump into). With ``reach``, only faces
         within that distance count: the query bakes and tests only what
         lies within it."""
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
         near = (("ray", origin, direction) if reach is None
                 else ("ray", origin, direction, float(reach)))
-        idx = self._pick_index(near=near)
-        if idx is None or (getattr(idx, "tri_v0", None) is None
-                           and not getattr(idx, "own_spans", None)):
+        idx = self._pick_index(near="skip" if nat is not None else near)
+        if nat is not None:
+            # The lazy placements from the engine, none baked (#158).
+            t = self._ray_hits(idx, origin, direction, idx.ent_vis,
+                               reduce_global=True, reach=reach, own=False)
+            lz = Viewport._lazy_face_hits(self, nat, origin, direction,
+                                          "vis", reach)
+            if lz is not None:
+                tl = float(lz[0].min())
+                t = tl if t is None else min(t, tl)
+        elif idx is None or (getattr(idx, "tri_v0", None) is None
+                             and not getattr(idx, "own_spans", None)):
             return None
-        t = self._ray_hits(idx, origin, direction, idx.ent_vis,
-                           reduce_global=True, reach=reach)
+        else:
+            t = self._ray_hits(idx, origin, direction, idx.ent_vis,
+                               reduce_global=True, reach=reach)
         if t is None or t == float("inf") or (reach is not None
                                                and t > reach):
             return None
         return float(t)
 
     def _ray_hits(self, idx, origin, direction, ent_mask,
-                  reduce_global: bool = False, reach: float | None = None):
+                  reduce_global: bool = False, reach: float | None = None,
+                  own: bool = True):
         """Per-entity nearest ray parameter over the index triangles whose
         entity passes ``ent_mask``. Returns an (E,) array of t (``inf`` = no
         hit), the single nearest t as a float when ``reduce_global``, or
@@ -12396,9 +12420,11 @@ class Viewport(QOpenGLWidget):
         P3: the Möller–Trumbore pass runs per chunk SPAN on array views,
         after a ray-vs-AABB prefilter — a hover/zoom ray only pays for the
         chunks it actually crosses (the full 700k-row pass cost 25–45 ms
-        per pick against the piscina scene)."""
+        per pick against the piscina scene). ``own`` False leaves out the
+        lazy placements' own spans (the engine answers for them, see
+        _face_hits)."""
         import numpy as np
-        own = getattr(idx, "own_spans", None) or ()
+        own = (getattr(idx, "own_spans", None) or ()) if own else ()
         if idx.tri_v0 is None and not own:
             return None
         o = np.array([origin.x(), origin.y(), origin.z()])
@@ -12482,17 +12508,8 @@ class Viewport(QOpenGLWidget):
                                                     lim):
                     continue
                 te = te_local + eoff
-            p = np.cross(d, e2)
-            det = np.einsum("ij,ij->i", e1, p)
-            ok = np.abs(det) > 1e-6
-            inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
-            s = o - v0
-            u = np.einsum("ij,ij->i", s, p) * inv
-            q = np.cross(s, e1)
-            v = (q @ d) * inv
-            t = np.einsum("ij,ij->i", e2, q) * inv
-            hit = (ok & (u >= 0.0) & (u <= 1.0) & (v >= 0.0) & (u + v <= 1.0)
-                   & (t > 1e-6) & ent_mask[te])
+            t, hit = _moller_trumbore(o, d, v0, e1, e2)
+            hit &= ent_mask[te]
             if reduce_global:
                 # Zoom focus wants ONE nearest t, not per-entity buckets.
                 th = t[hit]
@@ -12509,40 +12526,169 @@ class Viewport(QOpenGLWidget):
                     np.minimum.at(face_t, te[hit_rows], t[hit_rows])
         return best if reduce_global else face_t
 
-    def _hover_face_t(self, idx, origin, direction):
-        """Per-entity nearest-hit ``t`` against every *selectable* entity,
-        memoised for the current cursor ray. One SelectTool hover fires
-        pick_group + pick_face on the same mouse move, and each used to re-run
-        the full Möller–Trumbore pass (~20 ms over a 260k-triangle import);
-        they now share one pass and post-mask by loose/group."""
+    def _ray_near(self, x: float, y: float):
+        """What a ray pick at widget pixel ``(x, y)`` asks the pick index
+        to bake: nothing with the engine, which answers for the lazy
+        placements itself (see _face_hits), the placements the ray meets
+        otherwise."""
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        return "skip" if nat is not None else ("px", x, y)
+
+    def _face_hits(self, idx, origin, direction, which: str = "sel"):
+        """The faces the ray from ``origin`` along ``direction`` meets, each
+        at its nearest t, of the index entities that pass ``which``
+        ("sel": selectable, "vis": visible) — in the index's order, which
+        the ties of every pick go by: ``SimpleNamespace(t, area, loose,
+        ent(k) → (face, owner), place(k) → placement)``, or None when the
+        index has no triangles. With the experimental engine the lazy
+        placements' faces come from it, none of them baked (#158), after
+        the index's own, in the order their bakes would follow them."""
+        import numpy as np
+        from types import SimpleNamespace
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        mask = idx.ent_sel if which == "sel" else idx.ent_vis
+        face_t = (self._ray_hits(idx, origin, direction, mask,
+                                 own=nat is None)
+                  if len(idx.entities) else None)
+        lazy = (Viewport._lazy_face_hits(self, nat, origin, direction, which)
+                if nat is not None else None)
+        if face_t is None and lazy is None:
+            return None
+        rows = (np.flatnonzero(np.isfinite(face_t)) if face_t is not None
+                else np.empty(0, np.int64))
+        pidx = getattr(idx, "ent_place_idx", None)
+        n = len(rows)
+
+        def ent(k):
+            if k < n:
+                return idx.entities[int(rows[k])]
+            return lazy[3](k - n)
+
+        def place(k):
+            if k < n:
+                i = int(rows[k])
+                if pidx is not None and i < len(pidx) and pidx[i] >= 0:
+                    return idx.ent_placements[int(pidx[i])]
+                return idx.entities[i][1]
+            return lazy[4](k - n)
+        t = face_t[rows] if n else np.empty(0)
+        area = idx.ent_area[rows] if n else np.empty(0)
+        loose = idx.ent_loose[rows] if n else np.empty(0, bool)
+        if lazy is not None:
+            t = np.concatenate([t, lazy[0]])
+            area = np.concatenate([area, lazy[1]])
+            loose = np.concatenate([loose, np.zeros(len(lazy[0]), bool)])
+        return SimpleNamespace(t=t, area=area, loose=loose, ent=ent,
+                               place=place)
+
+    def _lazy_sel_rows(self, nat):
+        """The rows of the lazy table whose faces a pick may land on (see
+        _lazy_native's ``snap``, less what the open context keeps from
+        being touched), in the index's order."""
+        import numpy as np
+        memo = getattr(self, "_lazy_sel_memo", None)
+        if memo is not None and memo[0] is nat:
+            return memo[1]
+        toc = self._pick_cands_memo[1]
+        groups = self._pick_lazy_table()[0]
+        snap = nat[1]
+        sel = np.fromiter((i for i in snap.tolist() if id(groups[i]) in toc),
+                          np.int64)
+        self._lazy_sel_memo = (nat, sel)
+        return sel
+
+    def _lazy_face_hits(self, nat, origin, direction, which,
+                        reach: float | None = None):
+        """The lazy placements' faces the ray meets, from the engine (see
+        _face_hits): ``(t, area, order, ent(k), place(k))`` as their bakes
+        would give them, or None. The engine hands the triangles the ray
+        may meet; which it meets, and where, is decided here by the pick
+        index's own test."""
+        import numpy as np
+        from core.group import effective_material
+        iset, _snap, vis = nat
+        rows = Viewport._lazy_sel_rows(self, nat) if which == "sel" else vis
+        if not len(rows):
+            return None
+        o = np.array([origin.x(), origin.y(), origin.z()])
+        d = np.array([direction.x(), direction.y(), direction.z()])
+        pl, tr, v0, e1, e2 = iset.ray_cands(
+            np.ascontiguousarray(rows, np.int64), tuple(o.tolist()),
+            tuple(d.tolist()), float("inf") if reach is None else float(reach))
+        if not len(pl):
+            return None
+        t, hit = _moller_trumbore(o, d, v0, e1, e2)
+        k = np.flatnonzero(hit)
+        if not len(k):
+            return None
+        groups = self._pick_lazy_table()[0]
+        lazy_pos = self._pick_cands_memo[3]
+        bases: dict = {}
+        best: dict = {}                     # (row, entity) → nearest t
+        for i, r, tt in zip(pl[k].tolist(), tr[k].tolist(), t[k].tolist()):
+            base = bases.get(i)
+            if base is None:
+                g = groups[i]
+                base = bases[i] = self._proto_base_chunk(
+                    g.mesh, effective_material(g))
+            key = (i, int(base["tri_ent"][r]))
+            if tt < best.get(key, float("inf")):
+                best[key] = tt
+        keys = sorted(best, key=lambda ij: (lazy_pos[id(groups[ij[0]])][0],
+                                            ij[1]))
+        scale: dict = {}
+        for i in bases:
+            # The placed areas as _instance_chunk makes them.
+            L = _placed_maps(groups[i].xform)[0]
+            scale[i] = abs(float(np.linalg.det(L))) ** (2.0 / 3.0)
+        tt = np.array([best[ij] for ij in keys], dtype=np.float64)
+        area = np.array([bases[i]["areas"][j] * scale[i] for i, j in keys],
+                        dtype=np.float64)
+
+        def ent(m):
+            i, j = keys[m]
+            return bases[i]["faces"][j], self._owner_of(groups[i])
+
+        def place(m):
+            return groups[keys[m][0]]
+        return tt, area, keys, ent, place
+
+    def _hover_hits(self, idx, origin, direction):
+        """:meth:`_face_hits` of the selectable faces, memoised for the
+        current cursor ray, without what lies past the active cut. One
+        SelectTool hover fires pick_group + pick_face on the same mouse
+        move, and each used to re-run the full Möller–Trumbore pass (~20 ms
+        over a 260k-triangle import); they now share one pass and post-mask
+        by loose/group."""
         key = (self.scene.version, id(self.scene.mesh),
                origin.x(), origin.y(), origin.z(),
                direction.x(), direction.y(), direction.z())
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
         cached = getattr(self, "_hover_hits_cache", None)
         # The answer is per entity OF THIS INDEX: a lazy index (#158) is
         # rebuilt between two asks of one hover when a query brings new
         # placements in, and the old index's per-entity times read against
         # the new one picked the wrong face, or ran past its end.
-        if cached is not None and cached[0] == key and cached[2] is idx:
+        if (cached is not None and cached[0] == key and cached[2] is idx
+                and cached[3] is nat):
             return cached[1]
-        face_t = self._ray_hits(idx, origin, direction, idx.ent_sel)
+        hits = Viewport._face_hits(self, idx, origin, direction, "sel")
         sp = _active_cut(self.scene)
-        if sp is not None and face_t is not None:
+        if sp is not None and hits is not None and len(hits.t):
             # Hits beyond the active cut are on clipped-away geometry.
             import numpy as np
-            finite = np.isfinite(face_t)
-            if finite.any():
-                o = np.array([origin.x(), origin.y(), origin.z()])
-                d = np.array([direction.x(), direction.y(), direction.z()])
-                n = np.array([sp.normal.x(), sp.normal.y(), sp.normal.z()])
-                c = float(n @ [sp.point.x(), sp.point.y(), sp.point.z()])
-                pts = o + d * face_t[finite, None]
-                hidden = (pts @ n - c) > 1e-6
-                vals = face_t[finite]
-                vals[hidden] = np.inf
-                face_t[finite] = vals
-        self._hover_hits_cache = (key, face_t, idx)
-        return face_t
+            o = np.array([origin.x(), origin.y(), origin.z()])
+            d = np.array([direction.x(), direction.y(), direction.z()])
+            n = np.array([sp.normal.x(), sp.normal.y(), sp.normal.z()])
+            c = float(n @ [sp.point.x(), sp.point.y(), sp.point.z()])
+            pts = o + d * hits.t[:, None]
+            hidden = (pts @ n - c) > 1e-6
+            hits.t = np.where(hidden, np.inf, hits.t)
+        self._hover_hits_cache = (key, hits, idx, nat)
+        return hits
 
     def edge_point_under_cursor(self, edge, screen_x: float, screen_y: float):
         """The world point of ``edge`` nearest the cursor (closest point of
@@ -13022,6 +13168,69 @@ class Viewport(QOpenGLWidget):
                              else "group"), group=owner)))
         out.sort(key=lambda de: de[0])        # stable: the fixed ones first
         return out[:cap] if with_d else [e for _d, e in out[:cap]]
+
+    def _pick_group_edge_unbaked(self, px, py, nat):
+        """pick_group's edge fallback with the lazy placements' edges from
+        the engine, none baked (#158): ``(d, owner)`` of the nearest group
+        edge within the pick threshold that a pick may land on and the
+        user can see, or ``(threshold, None)``."""
+        import numpy as np
+        best = self.pick_threshold_px
+        idx = self._pick_index(near="skip")
+        cands = []                         # (d, a, b, t, owner)
+        fx = getattr(idx, "gedge_fixed", None)
+        m = fx[1] if fx is not None else 0
+        proj = self._gedge_screen() if m else None
+        if proj is not None:
+            ax, ay, bx, by, ok = (v[:m] for v in proj)
+            dx, dy = bx - ax, by - ay
+            l2 = dx * dx + dy * dy
+            safe = np.where(l2 > 1e-12, l2, 1.0)
+            t = np.clip(((px - ax) * dx + (py - ay) * dy) / safe, 0.0, 1.0)
+            d = np.hypot(ax + t * dx - px, ay + t * dy - py)
+            sel = getattr(idx, "gedge_sel", None)
+            if sel is not None:
+                ok = ok & sel[:m]
+            d = np.where(ok, d, np.inf)
+            near = np.where(d < best)[0]
+            for i in near[np.argsort(d[near], kind="stable")]:
+                cands.append((float(d[i]), QVector3D(*idx.gedge_a[i]),
+                              QVector3D(*idx.gedge_b[i]), float(t[i]),
+                              idx.gedge_groups[int(idx.gedge_gi[i])]))
+        table = self._pick_lazy_table()
+        rows = self._footprint_need(table, float(px), float(py), best)
+        if len(rows):
+            rows = rows[np.isin(rows, Viewport._lazy_sel_rows(self, nat))]
+        if len(rows):
+            M = self._np_mvp()
+            pl, _e, a, b, d = nat[0].edges_near(
+                np.ascontiguousarray(rows, np.int64),
+                np.ascontiguousarray(M.T).ravel().tolist(),
+                float(self.width()), float(self.height()), float(px),
+                float(py), float(best), int(Viewport.GEDGE_ENOUGH))
+            if len(pl):
+                # Where along each the cursor is, as the index's
+                # projection of it reads it.
+                ex, ey, _ok = self._project_px(
+                    np.concatenate([np.asarray(a, np.float64),
+                                    np.asarray(b, np.float64)]))
+                n = len(pl)
+                ax, ay, bx, by = ex[:n], ey[:n], ex[n:], ey[n:]
+                dx, dy = bx - ax, by - ay
+                l2 = dx * dx + dy * dy
+                safe = np.where(l2 > 1e-12, l2, 1.0)
+                t = np.clip(((px - ax) * dx + (py - ay) * dy) / safe,
+                            0.0, 1.0)
+                groups = table[0]
+                for k, i in enumerate(pl.tolist()):
+                    cands.append((float(d[k]), QVector3D(*a[k]),
+                                  QVector3D(*b[k]), float(t[k]),
+                                  self._owner_of(groups[i])))
+        cands.sort(key=lambda c: c[0])         # stable: the fixed ones first
+        for dd, a, b, t, owner in cands:
+            if not self._is_occluded(a + (b - a) * t):
+                return dd, owner
+        return best, None
 
     def pick_edge_any(self, screen_x: float, screen_y: float):
         """The edge under the cursor, loose OR a group's (as a world
@@ -14388,21 +14597,19 @@ class Viewport(QOpenGLWidget):
         if origin is None or direction is None:
             return None
         import numpy as np
-        idx = self._pick_index(near=("px", screen_x, screen_y))
-        if not idx.entities:
+        idx = self._pick_index(near=Viewport._ray_near(self, screen_x, screen_y))
+        hits = self._hover_hits(idx, origin, direction)
+        if hits is None or not len(hits.t):
             return None
-        face_t = self._hover_face_t(idx, origin, direction)
-        if face_t is None:
-            return None
-        face_t = np.where(idx.ent_loose, face_t, np.inf)
+        face_t = np.where(hits.loose, hits.t, np.inf)
         best_t = face_t.min()
         if not np.isfinite(best_t):
             return None
         eps = self._coplanar_eps(origin, direction, float(best_t))
         cand = np.where(face_t <= best_t + eps)[0]
         if len(cand) == 1:
-            return idx.entities[int(cand[0])][0]
-        return idx.entities[int(cand[np.argmin(idx.ent_area[cand])])][0]
+            return hits.ent(int(cand[0]))[0]
+        return hits.ent(int(cand[np.argmin(hits.area[cand])]))[0]
 
     def pick_face_any(self, screen_x: float, screen_y: float):
         """Front-most face under the cursor across the loose mesh **and** every
@@ -14416,7 +14623,9 @@ class Viewport(QOpenGLWidget):
 
         Memoised per cursor position and view: a hover asks up to three
         times (work plane, acquisition, on-face flag) for the same answer."""
-        idx = self._pick_index(near=("px", screen_x, screen_y))
+        idx = self._pick_index(near=Viewport._ray_near(self, screen_x, screen_y))
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
         try:
             cam = self.camera
             key = (round(screen_x, 2), round(screen_y, 2), id(idx),
@@ -14429,14 +14638,18 @@ class Viewport(QOpenGLWidget):
         # Keyed by the index itself, not its id(): a rebuilt index can be
         # given the address of the one it replaced.
         if (key is not None and cached is not None and cached[0] == key
-                and len(cached) > 2 and cached[2] is idx):
+                and len(cached) > 3 and cached[2] is idx
+                and cached[3] is nat):
+            self._face_any_place = cached[4]
             return cached[1]
         result = (None, None)
+        self._face_any_place = None
         origin, direction = self._pixel_to_ray(screen_x, screen_y)
-        if origin is not None and direction is not None and idx.entities:
+        if origin is not None and direction is not None:
             import numpy as np
-            face_t = self._hover_face_t(idx, origin, direction)
-            if face_t is not None:
+            hits = self._hover_hits(idx, origin, direction)
+            if hits is not None and len(hits.t):
+                face_t = hits.t
                 best_t = face_t.min()
                 if np.isfinite(best_t):
                     eps = self._coplanar_eps(origin, direction, float(best_t))
@@ -14444,11 +14657,14 @@ class Viewport(QOpenGLWidget):
                     if len(cand) == 1:
                         chosen = int(cand[0])
                     else:
-                        chosen = int(cand[np.argmin(idx.ent_area[cand])])
-                    result = idx.entities[chosen]
-                    self._face_any_index = chosen
+                        chosen = int(cand[np.argmin(hits.area[cand])])
+                    result = hits.ent(chosen)
+                    # The placement it was hit through, for
+                    # pick_face_placement.
+                    self._face_any_place = (result[0], hits.place(chosen))
         if key is not None:
-            self._face_any_memo = (key, result, idx)
+            self._face_any_memo = (key, result, idx, nat,
+                                   self._face_any_place)
         return result
 
     def pick_face_placement(self, screen_x: float, screen_y: float):
@@ -14461,12 +14677,9 @@ class Viewport(QOpenGLWidget):
         face, owner = self.pick_face_any(screen_x, screen_y)
         if face is None:
             return None, None
-        idx = self._pick_index(near=("px", screen_x, screen_y))
-        i = getattr(self, "_face_any_index", None)
-        pidx = getattr(idx, "ent_place_idx", None)
-        if (pidx is not None and i is not None and i < len(pidx)
-                and idx.entities[i][0] is face and pidx[i] >= 0):
-            return face, idx.ent_placements[int(pidx[i])]
+        fp = getattr(self, "_face_any_place", None)
+        if fp is not None and fp[0] is face:
+            return face, fp[1]
         return face, owner
 
     def pick_group(self, screen_x: float, screen_y: float):
@@ -14479,17 +14692,16 @@ class Viewport(QOpenGLWidget):
         if origin is not None and direction is not None:
             import numpy as np
             best = None  # (t, group)
-            idx = self._pick_index(near=("px", screen_x, screen_y))
+            idx = self._pick_index(near=Viewport._ray_near(self, screen_x, screen_y))
             loose_t = np.inf
-            if idx.entities:
-                face_t = self._hover_face_t(idx, origin, direction)
-                if face_t is not None:
-                    loose_t = float(np.where(idx.ent_loose, face_t,
-                                             np.inf).min())
-                    face_t = np.where(idx.ent_loose, np.inf, face_t)
-                    i = int(np.argmin(face_t))
-                    if np.isfinite(face_t[i]):
-                        best = (float(face_t[i]), idx.entities[i][1])
+            hits = self._hover_hits(idx, origin, direction)
+            if hits is not None and len(hits.t):
+                face_t = hits.t
+                loose_t = float(np.where(hits.loose, face_t, np.inf).min())
+                face_t = np.where(hits.loose, np.inf, face_t)
+                i = int(np.argmin(face_t))
+                if np.isfinite(face_t[i]):
+                    best = (float(face_t[i]), hits.ent(i)[1])
             for g in self._context_placements():
                 # The figure test first: it is an attribute, the layer test
                 # walks tags — asked of every placement on every hover it
@@ -14523,10 +14735,17 @@ class Viewport(QOpenGLWidget):
         import numpy as np
         best_d = self.pick_threshold_px
         best_g = None
-        # The index first, then its projection (see _nearby_group_edges).
-        idx = self._pick_index(near=("px", screen_x, screen_y))
-        proj = self._gedge_screen()
-        if proj is not None:
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        if nat is not None:
+            best_d, best_g = self._pick_group_edge_unbaked(
+                screen_x, screen_y, nat)
+        else:
+            # The index first, then its projection (see
+            # _nearby_group_edges).
+            idx = self._pick_index(near=("px", screen_x, screen_y))
+            proj = self._gedge_screen()
+        if nat is None and proj is not None:
             ax, ay, bx, by, ok = proj
             if ok.any():
                 dx, dy = bx - ax, by - ay
@@ -15113,14 +15332,13 @@ class Viewport(QOpenGLWidget):
             return seen[1]
         if origin is not None and direction is not None and seen is None:
             try:
-                idx = self._pick_index(near=("px", x, y))
-                if idx.entities:
-                    import numpy as np
-                    face_t = self._hover_face_t(idx, origin, direction)
-                    if face_t is not None and len(face_t):
-                        t = float(np.min(face_t))
-                        if math.isfinite(t) and t > 0.0:
-                            return origin + direction * t
+                idx = self._pick_index(near=Viewport._ray_near(self, x, y))
+                import numpy as np
+                hits = self._hover_hits(idx, origin, direction)
+                if hits is not None and len(hits.t):
+                    t = float(np.min(hits.t))
+                    if math.isfinite(t) and t > 0.0:
+                        return origin + direction * t
             except Exception:                  # noqa: BLE001 - fall back
                 pass
         lo, hi = self.scene.bounds()

@@ -103,7 +103,16 @@ def test_lazy_answers_equal_the_full_index(vp):
     assert lazy == full
 
 
-def test_only_the_placements_near_the_cursor_are_baked(vp):
+def _baking(monkeypatch):
+    # What the index bakes for a ray: with the experimental engine a ray
+    # bakes nothing (it answers for the lazy placements itself), so these
+    # watch the path that runs without it.
+    import views.viewport as vpm
+    monkeypatch.setattr(vpm, "_LAZY_NATIVE", False)
+
+
+def test_only_the_placements_near_the_cursor_are_baked(vp, monkeypatch):
+    _baking(monkeypatch)
     _lazy(vp, True)
     x, y = vp._world_to_pixel(_centre(vp, "C10"))
     vp.pick_face_any(x, y)
@@ -134,7 +143,8 @@ def test_a_ray_bakes_what_it_crosses(vp):
     assert d == pytest.approx(9.0, abs=1e-5)                 # top of C21
 
 
-def test_a_bounded_ray_bakes_only_what_it_can_reach(vp):
+def test_a_bounded_ray_bakes_only_what_it_can_reach(vp, monkeypatch):
+    _baking(monkeypatch)
     # Along the row j = 0 at mid-height: C00 (mirrored, x in [-1, 0]) is
     # 2 m from the origin, C10 6 m, … C50 18 m. The walkthrough's wall
     # feelers ask half a metre ahead; an unbounded ray baked every one of

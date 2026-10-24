@@ -790,6 +790,66 @@ impl InstanceSet {
         };
         Ok((arr(a)?, arr(b)?, arr(e)?))
     }
+
+    /// ``ray_tris`` with whose each triangle is: ``(place, tri, v0, e1,
+    /// e2)`` for the placements ``cand`` the ray walks the placements' BVH
+    /// to, ordered by placement then prototype triangle — a superset of
+    /// what the exact test accepts, for the caller to decide on.
+    #[allow(clippy::type_complexity)]
+    fn ray_cands<'py>(&self, py: Python<'py>, cand: PyReadonlyArray1<'py, i64>,
+                      origin: (f64, f64, f64), d: (f64, f64, f64), limit: f64)
+        -> PyResult<(Bound<'py, PyArray1<i64>>, Bound<'py, PyArray1<i64>>,
+                     Bound<'py, PyArray2<f64>>, Bound<'py, PyArray2<f64>>,
+                     Bound<'py, PyArray2<f64>>)> {
+        let c = cand.as_array().to_vec();
+        self.check(&c)?;
+        let (o, d) = ([origin.0, origin.1, origin.2], [d.0, d.1, d.2]);
+        let mut mask = vec![false; self.places.len()];
+        for &i in &c {
+            mask[i as usize] = true;
+        }
+        let mut met: Vec<usize> = Vec::new();
+        self.bvh.on_ray(o, d, limit, |i| {
+            if mask[i] && self.places[i].ray_meets_box(o, d, limit) {
+                met.push(i);
+            }
+            true
+        });
+        met.sort_unstable();
+        met.dedup();
+        let (mut pl, mut tr) = (Vec::new(), Vec::new());
+        let (mut a, mut b, mut e) = (Vec::new(), Vec::new(), Vec::new());
+        for i in met {
+            let p = &self.places[i];
+            let pr = &self.protos[p.proto];
+            let mut rows: Vec<usize> = Vec::new();
+            match p.local_ray(o, d) {
+                Some((lo, ld)) => pr.for_tris_on_ray(lo, ld, limit, |r| {
+                    rows.push(r);
+                    true
+                }),
+                None => rows.extend(0..pr.n_tris()),
+            }
+            rows.sort_unstable();
+            rows.dedup();
+            for r in rows {
+                let (x, y, z) = pr.world_tri(&p.m, r);
+                pl.push(i as i64);
+                tr.push(r as i64);
+                a.push(x.to_vec());
+                b.push(y.to_vec());
+                e.push(z.to_vec());
+            }
+        }
+        let arr = |v: Vec<Vec<f64>>| -> PyResult<Bound<'py, PyArray2<f64>>> {
+            if v.is_empty() {
+                Ok(PyArray2::zeros(py, [0, 3], false))
+            } else {
+                PyArray2::from_vec2(py, &v).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+            }
+        };
+        Ok((PyArray1::from_vec(py, pl), PyArray1::from_vec(py, tr), arr(a)?, arr(b)?, arr(e)?))
+    }
 }
 
 impl InstanceSet {

@@ -191,3 +191,92 @@ def test_the_edges_near_the_cursor_are_the_baked_ones(pair):
                 seen += len(want) + (g2 is not None)
     assert not getattr(va, "_pick_live", None)
     assert seen > 200
+
+
+def _face_key(face, place):
+    if face is None:
+        return None
+    c = face.centroid()
+    if place is not None and getattr(place, "xform", None) is not None:
+        c = place.xform.map(c)
+    return (c.x(), c.y(), c.z(), getattr(place, "name", None))
+
+
+def test_the_faces_under_the_cursor_are_the_baked_ones(pair):
+    """What a ray through a pixel finds — the face and the placement it
+    was hit through, the group a click takes, the face of each probe, the
+    crossing of two faces, the distance to what is seen — comes from the
+    engine for the lazy copies, none baked, and is the pick index's."""
+    va, vb = pair
+    seen = crossed = edged = 0
+    for view in VIEWS:
+        _set_view(va, view)
+        _set_view(vb, view)
+        for x in np.arange(8.3, 900, 21.0):
+            for y in np.arange(5.9, 640, 23.0):
+                x, y = float(x), float(y)
+                va._input_serial = vb._input_serial = (x, y)
+                fa = va.pick_face_placement(x, y)
+                fb = vb.pick_face_placement(x, y)
+                assert _face_key(*fa) == _face_key(*fb), (view, x, y)
+                ga, gb = va.pick_group(x, y), vb.pick_group(x, y)
+                assert (getattr(ga, "name", None)
+                        == getattr(gb, "name", None)), (view, x, y)
+                ha, hb = va._front_face_at(x, y), vb._front_face_at(x, y)
+                assert ((ha is None) == (hb is None)
+                        and (ha is None or _face_key(*ha) == _face_key(*hb))
+                        ), (view, x, y)
+                ca = va._face_crossing_point(x, y)
+                cb = vb._face_crossing_point(x, y)
+                assert ((ca is None) == (cb is None)
+                        and (ca is None or (_key(ca[0]), ca[1])
+                             == (_key(cb[0]), cb[1]))), (view, x, y)
+                o, d = va._pixel_to_ray(x, y)
+                assert (va.ray_distance(o, d) == vb.ray_distance(o, d)), \
+                    (view, x, y)
+                assert (va.ray_distance(o, d, 9.0)
+                        == vb.ray_distance(o, d, 9.0)), (view, x, y)
+                seen += fb[0] is not None
+                crossed += cb is not None
+                edged += fb[0] is None and gb is not None
+    assert not getattr(va, "_pick_live", None)
+    assert seen > 200 and crossed >= 3 and edged > 3, (seen, crossed, edged)
+
+
+def test_of_two_coplanar_faces_the_smaller_copy_is_picked():
+    """Two copies of one cube whose tops are one plane — a 4×4 slab, then
+    a small block standing in it: the ray meets both tops at the same
+    depth and the smaller face wins, by its area as placed."""
+    from core.group import Group
+    from views.main_window import MainWindow
+    out = []
+    for lazy in (True, False):
+        win = MainWindow()
+        vp = win.viewport
+        vp.resize(600, 400)
+        vp.scene.guides.clear()
+        proto = _cube()
+        for name, (sx, sy, tx, ty) in (("big", (4.0, 4.0, 0.0, 0.0)),
+                                      ("small", (1.0, 1.0, 1.5, 1.5))):
+            g = Group(proto, name=name)
+            m = QMatrix4x4()
+            m.translate(tx, ty, 0.0)
+            m.scale(sx, sy, 1.0)
+            g.xform = m
+            vp.scene.groups.append(g)
+        vp.scene.version += 1
+        vp._PICK_LAZY_MIN_FACES = 1 if lazy else 10 ** 9
+        cam = vp.camera
+        cam.perspective = False
+        cam.fit_to(V(-1, -1, 0), V(5, 5, 1))
+        cam.yaw, cam.pitch = math.radians(0.0), math.radians(89.0)
+        x, y = vp._world_to_pixel(V(2.0, 2.0, 1.0))
+        vp._input_serial = (x, y)
+        if lazy:
+            assert vp._lazy_native() is not None
+        face, place = vp.pick_face_placement(x, y)
+        out.append((_key(face.centroid()), place.name))
+        assert not lazy or not getattr(vp, "_pick_live", None)
+        win._saved_version = vp.scene.version
+        win.close()
+    assert out[0] == out[1] and out[0][1] == "small"

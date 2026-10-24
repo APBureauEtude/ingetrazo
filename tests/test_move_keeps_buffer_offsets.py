@@ -193,7 +193,11 @@ def test_the_lazy_pick_table_is_kept_on_pick_up_and_its_rows_follow_a_drop(place
     assert table[1] is not kept[1]                 # and the old one is intact
 
 
-def test_an_eviction_keeps_the_bakes_the_static_buffers_draw(placed):
+def test_an_eviction_keeps_the_bakes_the_static_buffers_draw(placed,
+                                                            monkeypatch):
+    # The baking path: with the experimental engine a pick bakes nothing.
+    import views.viewport as vpm
+    monkeypatch.setattr(vpm, "_LAZY_NATIVE", False)
     vp = placed
     vp._PICK_LIVE_MAX_FACES = 12                   # two cubes
     by = {g.name: g for g in vp.scene.groups}

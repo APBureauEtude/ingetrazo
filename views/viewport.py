@@ -3101,13 +3101,8 @@ class Viewport(QOpenGLWidget):
             # a plane at a time on the box columns (the (planes, boxes, 3)
             # array it used to build was most of a frame's gather, #158);
             # the same products and sums, in the same order.
-            keep = np.ones(len(groups), dtype=bool)
-            for pl in planes:
-                nx, ny, nz, d = (float(c) for c in pl)
-                px = hi[:, 0] if nx >= 0.0 else lo[:, 0]
-                py = hi[:, 1] if ny >= 0.0 else lo[:, 1]
-                pz = hi[:, 2] if nz >= 0.0 else lo[:, 2]
-                keep &= ((px * nx + py * ny) + pz * nz) + d >= 0.0
+            keep = self._instances_in_frustum(lo, hi, planes)
+            keep &= ~self._instances_below_a_pixel(pool)
         # One pool per (prototype, container paint): a painted instance
         # (issue #47) draws its own bake of the prototype, not the plain
         # one its siblings share — pooled by mesh alone it kept showing
@@ -3123,6 +3118,23 @@ class Viewport(QOpenGLWidget):
                 and np.array_equal(last[1], keep)):
             self._frame_instanced = last[2]
             return last[2]
+        if planes is not None and len(planes) == 6:
+            # An orbit brings a few placements in or out of view on almost
+            # every frame, and each change re-recorded the whole instanced
+            # pass in Python: ~70 ms a frame close to the plant of #158,
+            # 3 800 prototypes. So the batches drawn are a SUPERSET of what
+            # is in view — the frustum widened, the pixel floor halved —
+            # kept while what is in view stays inside them and they hold
+            # no more than _INST_SUPERSET_MAX times as many placements. What is drawn beyond
+            # the view is clipped; nothing on screen changes.
+            if (last is not None and last[0] is pool
+                    and not (keep & ~last[1]).any()
+                    and int(last[1].sum()) <= self._INST_SUPERSET_MAX * int(keep.sum()) + 64):
+                self._frame_instanced = last[2]
+                return last[2]
+            keep = self._instances_in_frustum(
+                lo, hi, self._widened_planes(planes, self._INST_VIEW_MARGIN))
+            keep &= ~self._instances_below_a_pixel(pool, 0.5)
         # The kept placements of each pool, in placement order, the pools
         # in the order their first kept placement comes (the face-by-face
         # dict this replaces filled them so).
@@ -3146,6 +3158,96 @@ class Viewport(QOpenGLWidget):
         memos[planes is None] = (pool, keep, out)
         self._frame_instanced = out
         return out
+
+    #: How far past the view the instanced batches reach, as a fraction of
+    #: its width and height, so an orbit keeps drawing the same ones
+    #: (_gather_instanced).
+    _INST_VIEW_MARGIN = 0.25
+    #: ... and while they hold at most this many times what is in view.
+    _INST_SUPERSET_MAX = 4
+
+    @staticmethod
+    def _widened_planes(planes, frac):
+        """The six planes of ``_frustum_planes`` with the four sides moved
+        out by ``frac`` of the view on each side — the clip test |x|, |y|
+        ≤ w becomes ≤ (1 + 2·frac)·w — and no near plane (what is behind
+        the eye is clipped anyway)."""
+        # Each side is r3 ± row: half the sum of a pair is r3 itself.
+        r3 = [(a + b) * 0.5 for a, b in zip(planes[0], planes[1])]
+        k = 2.0 * frac
+        out = [tuple(c + k * r for c, r in zip(pl, r3)) for pl in planes[:4]]
+        out.append(planes[5])                                       # far
+        return out
+
+    @staticmethod
+    def _instances_in_frustum(lo, hi, planes, margin=0.0):
+        """Mask of the boxes ``lo``/``hi`` not wholly outside one of the
+        frustum ``planes`` — moved ``margin`` world units outward."""
+        import numpy as np
+        # Same p-vertex test as ``_aabb_visible``, all boxes at once — a
+        # plane at a time on the box columns (the (planes, boxes, 3) array
+        # it used to build was most of a frame's gather, #158); the same
+        # products and sums, in the same order.
+        keep = np.ones(len(lo), dtype=bool)
+        for pl in planes:
+            nx, ny, nz, d = (float(c) for c in pl)
+            if margin:
+                d += margin * (nx * nx + ny * ny + nz * nz) ** 0.5
+            px = hi[:, 0] if nx >= 0.0 else lo[:, 0]
+            py = hi[:, 1] if ny >= 0.0 else lo[:, 1]
+            pz = hi[:, 2] if nz >= 0.0 else lo[:, 2]
+            keep &= ((px * nx + py * ny) + pz * nz) + d >= 0.0
+        return keep
+
+    #: An instance whose bounding sphere spans less than this many
+    #: framebuffer pixels is not drawn (the camera's frame only).
+    _INST_MIN_PX = 1.0
+
+    def _instances_below_a_pixel(self, pool, scale=1.0):
+        """Mask of the pool's placements whose bounding sphere comes out
+        under ``_INST_MIN_PX`` (× ``scale``) framebuffer pixels across on
+        this frame.
+
+        From the whole plant of #158, 70 % of the instanced faces belonged
+        to placements under a pixel — bolts and fittings a hundred metres
+        off — and the GPU spent two thirds of every orbit frame on them.
+        The sphere is the box's (its half diagonal), so the test only ever
+        errs toward drawing; a box that reaches the eye plane always draws."""
+        import numpy as np
+        memo = getattr(self, "_inst_sphere_memo", None)
+        if memo is None or memo[0] is not pool:
+            memo = self._inst_sphere_memo = (
+                pool, *self._bounding_spheres(pool[2], pool[3]))
+        return self._spheres_below_a_pixel(memo[1], memo[2],
+                                           self._INST_MIN_PX * scale)
+
+    @staticmethod
+    def _bounding_spheres(lo, hi):
+        """Centres and radii of boxes ``lo``/``hi``; a box with an unknown
+        (infinite) extent gets an infinite radius: it is never «small»."""
+        import numpy as np
+        with np.errstate(invalid="ignore"):
+            ctr = (lo + hi) * 0.5
+            rad = np.linalg.norm(hi - lo, axis=1) * 0.5
+        known = np.isfinite(ctr).all(axis=1) & np.isfinite(rad)
+        return np.where(known[:, None], ctr, 0.0), np.where(known, rad, np.inf)
+
+    def _spheres_below_a_pixel(self, ctr, rad, floor=None):
+        """Mask of the spheres that span under ``floor`` (by default
+        ``_INST_MIN_PX``) framebuffer pixels across on this frame."""
+        import numpy as np
+        h = (self._export_size or self._fb_size())[1]
+        m = self._np_mvp()
+        # pixels per world unit at w = 1: the projection's own y scale
+        sy = abs(self.camera.projection_matrix().data()[5]) * h * 0.5
+        w = ctr @ m[3, :3] + m[3, 3]
+        if self.camera.perspective:
+            w = w - rad                         # the sphere's nearest point
+        with np.errstate(invalid="ignore", divide="ignore"):
+            px = 2.0 * rad * sy / np.where(w > 1e-9, w, np.nan)
+        if floor is None:
+            floor = self._INST_MIN_PX
+        return np.isfinite(px) & (px < floor)
 
     def _ensure_proto_draw(self, mesh, paint=None):
         """Static draw entry of one prototype: vcol/edges/texture VBOs from
@@ -10277,14 +10379,18 @@ class Viewport(QOpenGLWidget):
                 if bbox is not None:
                     has[i] = True
                     lo[i], hi[i] = bbox[0], bbox[1]
-            hit = memo[id(spans)] = (spans, has, lo, hi, start, count)
-        _s, has, lo, hi, start, count = hit
+            hit = memo[id(spans)] = (spans, has, lo, hi, start, count,
+                                     *self._bounding_spheres(lo, hi))
+        _s, has, lo, hi, start, count, ctr, rad = hit
         vis = np.ones(len(start), dtype=bool)
         for nx, ny, nz, d in planes:
             px = hi[:, 0] if nx >= 0.0 else lo[:, 0]
             py = hi[:, 1] if ny >= 0.0 else lo[:, 1]
             pz = hi[:, 2] if nz >= 0.0 else lo[:, 2]
             vis &= ~(((nx * px + ny * py) + nz * pz) + d < 0.0)
+        # What comes out under a pixel is not drawn either, as with the
+        # instances (see _instances_below_a_pixel).
+        vis &= ~(has & self._spheres_below_a_pixel(ctr, rad))
         live = count > 0
         drawn = live & (vis | ~has)
         culled = int(count[live & ~drawn].sum())

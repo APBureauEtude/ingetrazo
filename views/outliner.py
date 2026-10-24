@@ -1306,6 +1306,20 @@ class OutlinerPanel(QWidget):
                        and hist is not None
                        and getattr(hist, "groups_cv", {}).get("rows")
                        == rows_key[0])
+        # Only a group opened or closed since (History.context_changed):
+        # what a row shows changes for the groups on the open path, old and
+        # new, and for the copies of a component whose count moved (its
+        # instance edits a world copy) — the other 21 406 rows of the plant
+        # of #158 read as they did (~0.15 s each way).
+        ctx_only = (rows_if_changed and old_key is not None
+                    and rows_key[0] is not None
+                    and not self._kind_providers
+                    and shape == self._shape
+                    and old_key[1:3] == rows_key[1:3]
+                    and old_key[4:] == rows_key[4:]
+                    and hist is not None
+                    and getattr(hist, "groups_cv", {}).get("rows")
+                    == rows_key[0])
         patched = False
         if shape != self._shape:
             patched = groups_only and self._patch_rows(scene, shape)
@@ -1319,7 +1333,10 @@ class OutlinerPanel(QWidget):
                       and getattr(hist, "rows_cv", None) == rows_key[0])
         if (not rows_if_changed or rows_key[0] is None
                 or (rows_key != old_key and not moved_only)):
-            if not patched:
+            if ctx_only:
+                self._update_some_rows(scene, set(old_key[3])
+                                       | set(rows_key[3]))
+            elif not patched:
                 self._update_rows(scene)
             if hist is not None:
                 hist.rows_cv = rows_key[0]
@@ -1635,6 +1652,35 @@ class OutlinerPanel(QWidget):
             state_of = self._state
             around = inherited_states(scene.groups)
             for key, g in self._groups.items():
+                state = self._row_state(g, counts, opened,
+                                        around.get(key, (None, None)))
+                old = state_of[key]
+                if state != old:
+                    self._paint(self._items[key], old, state)
+                    state_of[key] = state
+        finally:
+            self._updating = False
+
+    def _update_some_rows(self, scene, keys) -> None:
+        """``_update_rows`` for the rows of ``keys`` and of every copy of
+        a component whose count changed."""
+        counts = outliner.instance_counts(scene.groups)
+        old_counts = getattr(self, "_counts", None) or {}
+        moved = {m for m in set(counts) | set(old_counts)
+                 if counts.get(m) != old_counts.get(m)}
+        self._counts = counts
+        if moved:
+            keys = set(keys) | {k for k, g in self._groups.items()
+                                if id(g.mesh) in moved}
+        opened = {id(g) for g in outliner.open_path(scene)}
+        self._updating = True
+        try:
+            state_of = self._state
+            around = inherited_states(scene.groups)
+            for key in keys:
+                g = self._groups.get(key)
+                if g is None:
+                    continue
                 state = self._row_state(g, counts, opened,
                                         around.get(key, (None, None)))
                 old = state_of[key]

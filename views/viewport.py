@@ -641,6 +641,14 @@ def _content_ver(vp):
     return getattr(sc, "content_version", sc.version)
 
 
+def _ctx_changed(vp, before):
+    """``History.context_changed`` (stub viewports in tests have no
+    history, or one without it)."""
+    cc = getattr(getattr(vp, "history", None), "context_changed", None)
+    if cc is not None:
+        cc(before)
+
+
 def _cat_kept(vp, slot, parts):
     """``np.concatenate(parts)``, the same array again while the parts are
     the same objects: the pick index is rebuilt on each change of its lazy
@@ -2991,7 +2999,7 @@ class Viewport(QOpenGLWidget):
             return False
         return True
 
-    def _epoch_kept_tops(self, old, new=None):
+    def _epoch_kept_tops(self, old, new=None, ctx=False):
         """The ids of the top-level objects whose whole subtree — every
         placement in it, with its mesh, matrix, layer, flags and paint —
         reads the same in placements epoch ``old`` as in ``new`` (the
@@ -3003,20 +3011,34 @@ class Viewport(QOpenGLWidget):
         Deleting, pasting or undoing either adds or takes away an object
         or two: the per-placement passes can keep the rows of every other
         object instead of making all 21 406 again (~2 s each way on the
-        plant of #158)."""
+        plant of #158).
+
+        ``ctx``: for passes that read only what a placement IS (its mesh,
+        matrix, box), not what the open context makes of it — a group
+        opened or closed changes the context and the loose mesh, and they
+        made all 21 406 rows again (~0.9 s each way). The objects with a
+        placement of the loose mesh, old or new (the one being edited,
+        every copy of a component being edited), are not kept; nor
+        anything under Hide Similar Components, which hides by context."""
         if new is None:
             new = self._placements_epoch()
         memo = getattr(self, "_kept_tops_memo", None)
-        if memo is not None and memo[0] == (old, new):
+        if memo is not None and memo[0] == (old, new, ctx):
             return memo[1]
         hist = getattr(self, "_epoch_hist", None) or {}
         a, b = hist.get(old), hist.get(new)
         out = None
+        free = (0, 1, 2, 3) if ctx else (2, 3)
         if (a is not None and b is not None and len(a) > 2 and len(b) > 2
                 and a[0] == b[0]
-                and all(i in (2, 3) or a[1][i] == b[1][i]
+                and all(i in free or a[1][i] == b[1][i]
                         for i in range(a[0]))):
             pa, pb = a[1], b[1]
+            moved = a[0] > 1 and (pa[0] != pb[0] or pa[1] != pb[1])
+            if moved and (a[0] <= 7 or pa[7] or pb[7]):
+                self._kept_tops_memo = ((old, new, ctx), None)
+                return None
+            loose = {pa[1], pb[1]} if moved else ()
             was = {t: (s, e) for t, s, e in a[2]}
             kept = set()
             for t, s, e in b[2]:
@@ -3028,20 +3050,24 @@ class Viewport(QOpenGLWidget):
                     x, y = pa[o + k - s], pb[k]
                     if x is not y and x != y:
                         break
+                    if loose and y[1] in loose:
+                        break
                 else:
                     kept.add(t)
             out = frozenset(kept)
-        self._kept_tops_memo = ((old, new), out)
+        self._kept_tops_memo = ((old, new, ctx), out)
         return out
 
-    def _refilter(self, old_epoch, old_out, source, test, old_source=None):
+    def _refilter(self, old_epoch, old_out, source, test, old_source=None,
+                  ctx=False):
         """``[g for g in source if test(g)]`` worked out only for the
         placements of objects that changed since placements epoch
         ``old_epoch``, whose answer was ``old_out``: an unchanged object's
         placements are in it exactly when they were. ``old_source``: the
         ids the old answer was taken from, when not every placement.
-        ``None`` when ``_epoch_kept_tops`` cannot tell."""
-        kept = self._epoch_kept_tops(old_epoch)
+        ``None`` when ``_epoch_kept_tops`` cannot tell; ``ctx`` as there,
+        for a ``test`` that reads what a placement is, not the context."""
+        kept = self._epoch_kept_tops(old_epoch, ctx=ctx)
         if kept is None:
             return None
         was = {id(g) for g in old_out}
@@ -3386,8 +3412,8 @@ class Viewport(QOpenGLWidget):
         (a Delete or a Paste beside 21 406 placements, #158)."""
         import numpy as np
         from core.group import effective_material
-        kept = (self._epoch_kept_tops(old[0][0], key[0])
-                if old is not None and old[0][1:] == key[1:] else None)
+        kept = (self._epoch_kept_tops(old[0][0], key[0], ctx=True)
+                if old is not None else None)
         row = {}
         if kept:
             _k, o_groups, o_lo, o_hi, o_codes, o_protos, o_mats, _b = old
@@ -5929,8 +5955,12 @@ class Viewport(QOpenGLWidget):
                     and not getattr(g, "billboard", False)
                     and not self._instanced_eligible(g))
         out = None
-        if memo is not None and memo[2] is self.scene.mesh:
-            out = self._refilter(memo[0], memo[3], groups, static, memo[1])
+        if memo is not None:
+            # Visible, face-me, instanced: what a placement is, not what
+            # the open context makes of it — kept across a group opened or
+            # closed too (~0.12 s each way on the plant of #158).
+            out = self._refilter(memo[0], memo[3], groups, static, memo[1],
+                                 ctx=memo[2] is not self.scene.mesh)
         if out is None:
             out = [g for g in groups if static(g)]
         self._static_groups_memo = (epoch, ids, self.scene.mesh, out)
@@ -7349,7 +7379,7 @@ class Viewport(QOpenGLWidget):
         # undo): the rows of every unchanged object come from the old
         # table, and a prototype none of whose rows changed keeps its
         # entry — and with it the outline last worked out for this view.
-        kept = (self._epoch_kept_tops(memo[0][0], key[0])
+        kept = (self._epoch_kept_tops(memo[0][0], key[0], ctx=True)
                 if memo is not None else None)
         old_rows: dict = {}
         old_rest: set = set()
@@ -11236,7 +11266,7 @@ class Viewport(QOpenGLWidget):
                   and not getattr(g, "billboard", False)]
         # An object or two added or taken away (a Delete, a Paste): the
         # rows of the others are the old table's.
-        kept = (self._epoch_kept_tops(memo[0], key)
+        kept = (self._epoch_kept_tops(memo[0], key, ctx=True)
                 if memo is not None and memo[1] is not None else None)
         src = None
         if kept:
@@ -14370,7 +14400,9 @@ class Viewport(QOpenGLWidget):
             self.history.execute(MakeUniqueCommand(group))
         was_instance = (getattr(group, "xform", None) is not None
                         and not getattr(group, "children", None))
+        before = getattr(self.scene, "content_version", None)
         self.scene.begin_group_edit(group)
+        _ctx_changed(self, before)
         self._edit_undo_mark = len(self.history.undo_stack)
         self._hover_entity = None
         self._edges_version = -1     # the rest may fade out or leave the VBOs
@@ -14461,10 +14493,12 @@ class Viewport(QOpenGLWidget):
         if self.scene.edit_group is None:
             return
         share = self.scene.take_edit_share()
+        before = getattr(self.scene, "content_version", None)
         if todos:
             self.scene.end_group_edit()
         else:
             self.scene.end_one_group_edit()
+        _ctx_changed(self, before)
         self._hover_entity = None
         self._edges_version = -1     # the rest comes back
         if share is not None:

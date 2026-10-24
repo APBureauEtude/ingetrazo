@@ -212,6 +212,23 @@ class History:
             if v == before:
                 self.groups_cv[k] = cv
 
+    def context_changed(self, before) -> None:
+        """A group opened or closed (content version ``before`` → now):
+        what the model wears is the same — the meshes that changed (an
+        instance's world copy, a container's matrix pushed down, a copy
+        shared back) are read again by their serial — so the Materials
+        panel keeps its scan: on the plant of #158 it read 2 722 meshes
+        again, ~0.35 s each way."""
+        cv = getattr(self.scene, "content_version", None)
+        if before is None:
+            return
+        # The Browser's rows too: only the open path's and the copies of a
+        # component whose count moved read differently (see
+        # OutlinerPanel.refresh).
+        for k in ("paint", "rows"):
+            if self.groups_cv.get(k) == before:
+                self.groups_cv[k] = cv
+
     def execute(self, cmd: Command) -> None:
         _t0 = _time_mod.perf_counter() if _PERF else 0.0
         snapshot = self.scene.mesh.capture_state()

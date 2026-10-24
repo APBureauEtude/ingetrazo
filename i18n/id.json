@@ -1533,6 +1533,8 @@
  "− Row": "− Baris",
  "⚠ {name} (load error)": "⚠ {name} (kesalahan pemuatan)",
  "IngeTrazo is drawing with the software renderer ({renderer}): the viewport will be slow. Update the graphics driver, or assign IngeTrazo to the high-performance GPU in Windows graphics settings.": "IngeTrazo menggambar dengan perender perangkat lunak ({renderer}): viewport akan lambat. Perbarui driver grafis, atau tetapkan IngeTrazo ke GPU berkinerja tinggi di pengaturan grafis Windows.",
+ "OpenGL 3.3 not available": "OpenGL 3.3 tidak tersedia",
+ "IngeTrazo needs OpenGL 3.3, but this computer only offers OpenGL {version} ({renderer}). The viewport stays empty.\n\nUpdate the graphics driver from the NVIDIA, AMD or Intel website. On a laptop with two graphics chips, assign IngeTrazo to the high-performance GPU (Windows: Settings ▸ System ▸ Display ▸ Graphics) and start it again.": "IngeTrazo memerlukan OpenGL 3.3, tetapi komputer ini hanya menyediakan OpenGL {version} ({renderer}). Viewport tetap kosong.\n\nPerbarui driver grafis dari situs web NVIDIA, AMD, atau Intel. Pada laptop dengan dua chip grafis, tetapkan IngeTrazo ke GPU berkinerja tinggi (Windows: Pengaturan ▸ Sistem ▸ Layar ▸ Grafis), lalu jalankan kembali.",
  "IngeTrazo asked Windows for the high-performance GPU; it applies the next time you open the program.": "IngeTrazo meminta GPU berkinerja tinggi dari Windows; berlaku saat program dibuka berikutnya.",
  "The AI bridge is listening on 127.0.0.1:{port}. Connect a Claude client:": "Jembatan AI mendengarkan di 127.0.0.1:{port}. Hubungkan klien Claude:",
  "Claude Code (in a terminal):": "Claude Code (di terminal):",

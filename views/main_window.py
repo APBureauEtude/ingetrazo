@@ -2855,6 +2855,11 @@ class MainWindow(QMainWindow):
     def _on_gl_ready(self, info: dict) -> None:
         """A viewport drawn on the CPU is the usual reason a Windows machine
         reports IngeTrazo as unusably slow; say so where the user looks."""
+        if not info.get("supported", True):
+            # Queued: initializeGL is still on the stack, and a modal loop
+            # would run with that context current.
+            QTimer.singleShot(0, self, lambda: self._warn_gl_unsupported(info))
+            return
         if info.get("software"):
             self.statusBar().showMessage(tr(
                 "IngeTrazo is drawing with the software renderer ({renderer}): "
@@ -2867,6 +2872,22 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(tr(
                 "IngeTrazo asked Windows for the high-performance GPU; it "
                 "applies the next time you open the program."), 20000)
+
+    def _warn_gl_unsupported(self, info: dict) -> None:
+        """The context is below OpenGL 3.3, so the viewport draws nothing
+        (issue #751): name what Qt got and what fixes it. Once: a
+        viewport moved into MultiView gets a new context and asks again."""
+        if getattr(self, "_gl_unsupported_shown", False):
+            return
+        self._gl_unsupported_shown = True
+        QMessageBox.critical(self, tr("OpenGL 3.3 not available"), tr(
+            "IngeTrazo needs OpenGL 3.3, but this computer only offers "
+            "OpenGL {version} ({renderer}). The viewport stays empty.\n\n"
+            "Update the graphics driver from the NVIDIA, AMD or Intel "
+            "website. On a laptop with two graphics chips, assign IngeTrazo "
+            "to the high-performance GPU (Windows: Settings ▸ System ▸ "
+            "Display ▸ Graphics) and start it again.",
+            version=info.get("version", ""), renderer=info.get("renderer", "")))
 
     def _on_command_search(self) -> None:
         from views.command_search import open_search

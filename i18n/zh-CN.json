@@ -1553,6 +1553,8 @@
  "− Row": "− 行",
  "⚠ {name} (load error)": "⚠ {name} (加载错误)",
  "IngeTrazo is drawing with the software renderer ({renderer}): the viewport will be slow. Update the graphics driver, or assign IngeTrazo to the high-performance GPU in Windows graphics settings.": "IngeTrazo 使用软件渲染器 ({renderer}) 进行绘图：视口将运行缓慢。请更新图形驱动程序，或在 Windows 图形设置中将 IngeTrazo 分配给高性能 GPU。",
+ "OpenGL 3.3 not available": "OpenGL 3.3 不可用",
+ "IngeTrazo needs OpenGL 3.3, but this computer only offers OpenGL {version} ({renderer}). The viewport stays empty.\n\nUpdate the graphics driver from the NVIDIA, AMD or Intel website. On a laptop with two graphics chips, assign IngeTrazo to the high-performance GPU (Windows: Settings ▸ System ▸ Display ▸ Graphics) and start it again.": "IngeTrazo 需要 OpenGL 3.3，但此计算机仅提供 OpenGL {version} ({renderer})。视口将保持空白。\n\n请从 NVIDIA、AMD 或 Intel 官网更新图形驱动程序。在配有两个图形芯片的笔记本电脑上，请将 IngeTrazo 分配给高性能 GPU（Windows：设置 ▸ 系统 ▸ 屏幕 ▸ 显示卡），然后重新启动它。",
  "IngeTrazo asked Windows for the high-performance GPU; it applies the next time you open the program.": "IngeTrazo 已向 Windows 请求高性能 GPU；它将在您下次打开程序时生效。",
  "The AI bridge is listening on 127.0.0.1:{port}. Connect a Claude client:": "AI 网桥正在 127.0.0.1:{port} 监听。连接一个 Claude 客户端：",
  "Claude Code (in a terminal):": "Claude Code (在终端中):",

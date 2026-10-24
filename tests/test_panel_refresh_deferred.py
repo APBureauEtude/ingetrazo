@@ -44,7 +44,8 @@ def test_a_hidden_components_list_waits_until_it_is_shown(win, monkeypatch):
     panel.hide()
     calls = _count_calls(monkeypatch, panel, "refresh_in_model")
     for _ in range(3):
-        panel.on_scene_changed()                 # three edits, panel hidden
+        win.viewport.scene.version += 1          # three edits, panel hidden
+        panel.on_scene_changed()
     assert calls == []
     panel.show()
     _app.processEvents()
@@ -59,12 +60,47 @@ def test_a_burst_of_edits_refreshes_the_visible_panels_once(win, monkeypatch):
     comp_calls = _count_calls(monkeypatch, panel, "refresh_in_model")
     tree_calls = _count_calls(monkeypatch, outliner, "refresh")
     for _ in range(5):
+        win.viewport.scene.version += 1
         panel.on_scene_changed()
         outliner.on_scene_changed()
     assert comp_calls == [] and tree_calls == []     # nothing inline
     panel._in_model_timer.timeout.emit()
     outliner._refresh_timer.timeout.emit()
     assert len(comp_calls) == 1 and len(tree_calls) == 1
+
+
+def test_a_selection_leaves_the_in_model_lists_as_they_are(win, monkeypatch):
+    """A click bumps only the view: on the plant of #158 it rebuilt the
+    «In model» list and rescanned every material (over a second)."""
+    from PySide6.QtGui import QVector3D as V
+    from core.group import Group
+    from core.mesh import Mesh
+    m = Mesh()
+    m.add_face([V(0, 0, 0), V(1, 0, 0), V(1, 1, 0), V(0, 1, 0)])
+    g = Group(m, "placed")
+    g.component = True
+    vp = win.viewport
+    vp.scene.groups.append(g)
+    vp.scene.version += 1
+    panel = win.tray.components
+    panel.refresh_in_model()
+    win.tray.materials.refresh_in_model()
+    _app.processEvents()
+    timer = getattr(win.tray, "_mat_refresh_timer", None)
+    if timer is not None:
+        timer.stop()                            # the edit above, done
+    comp_calls = _count_calls(monkeypatch, panel, "refresh_in_model")
+    vp.scene.select([g])                        # a view-only change
+    win.tray.on_scene_changed()
+    timer = getattr(win.tray, "_mat_refresh_timer", None)
+    assert comp_calls == []
+    assert timer is None or not timer.isActive()
+    vp.scene.version += 1                       # an edit refreshes again
+    win.tray.on_scene_changed()
+    if panel._in_model_timer.isActive():
+        panel._in_model_timer.timeout.emit()
+    assert len(comp_calls) == 1
+    assert win.tray._mat_refresh_timer.isActive()
 
 
 def test_hidden_panels_let_the_previous_document_go(win):

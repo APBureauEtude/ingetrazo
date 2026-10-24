@@ -337,3 +337,20 @@ def test_room_is_made_once_per_event(vp):
     vp._input_serial = 2
     vp._pick_materialize(("px", *pts[4]))
     assert len(_live(vp)) == 2           # the next event makes room
+
+
+def test_the_kept_edge_projection_is_the_full_one(vp):
+    # Each lazy chunk's screen projection is kept while the view stays:
+    # the index rebuilt with new placements must read the same pixels
+    # as projecting every edge again.
+    import numpy as np
+    _lazy(vp, True, cap=6 * 12)
+    for name in ("C00", "C31", "C52", "C13", "C00", "C43"):
+        x, y = vp._world_to_pixel(_centre(vp, name))[:2]
+        vp._pick_index(near=("snap", x, y))
+        idx = vp._pick_index(near="skip")
+        got = vp._gedge_screen()
+        ax, ay, oka = vp._project_px(idx.gedge_a)
+        bx, by, okb = vp._project_px(idx.gedge_b)
+        for g, w in zip(got, (ax, ay, bx, by, oka & okb)):
+            assert np.array_equal(g, w)

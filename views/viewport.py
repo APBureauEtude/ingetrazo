@@ -595,6 +595,33 @@ def _cache_ver(vp):
     return frozen if frozen is not None else vp.scene.version
 
 
+def _content_ver(vp):
+    """``_cache_ver`` without the view-only bumps (a selection, a group
+    opened: ``Scene.bump_view``) — for caches of what the model IS, which a
+    click must not throw away: on the plant of #158 every click re-walked
+    21 406 placements and rebuilt every edge and outline (~1 s)."""
+    frozen = getattr(vp, "_frozen_cache_version", None)
+    if frozen is not None:
+        return ("frozen", frozen)
+    sc = vp.scene
+    return getattr(sc, "content_version", sc.version)
+
+
+def _slab_far(t):
+    """``nanmax`` over the last (x, y, z) axis of a slab test, column by
+    column: a reduction along an axis of three was ~4x slower, and the
+    lazy pick index runs one per ray query (25 a mouse move with Line over
+    the plant of #158)."""
+    import numpy as np
+    return np.fmax(np.fmax(t[..., 0], t[..., 1]), t[..., 2])
+
+
+def _slab_near(t):
+    """``nanmin`` twin of :func:`_slab_far`."""
+    import numpy as np
+    return np.fmin(np.fmin(t[..., 0], t[..., 1]), t[..., 2])
+
+
 #: How the rest of the model reads while a group is open for editing.
 #: ``normal`` draws it as always, ``fade`` washes it out behind the group
 #: being edited (the default), ``hide`` leaves it out of the frame.
@@ -2741,8 +2768,10 @@ class Viewport(QOpenGLWidget):
         # the cheap switches moved, nothing the walk reads can have changed
         # — every edit of a group goes through a command that bumps the
         # version. Orbiting a model of 21 406 placements walked them all on
-        # every frame, ~55 ms (issue #158).
-        cheap = (sc.version, id(sc.edit_group), id(sc.mesh),
+        # every frame, ~55 ms (issue #158). The CONTENT version: a click
+        # (a view-only bump) changes none of what the walk reads either.
+        cheap = (getattr(sc, "content_version", sc.version),
+                 id(sc.edit_group), id(sc.mesh),
                  getattr(self, "_preview_epoch", 0),
                  bool(getattr(self, "_preview_groups", None)),
                  getattr(self, "_edit_rest_mode", None),
@@ -5658,6 +5687,16 @@ class Viewport(QOpenGLWidget):
                       if isinstance(s, (Edge, Face)) and not alive(s)]:
                 self.scene.selection.discard(s)
 
+        # Only the selection moved (a click: a view-only bump) — the edge,
+        # face and outline buffers hold the model as it is. On the plant of
+        # #158 rebuilding them took ~0.4 s of every click.
+        ckey = self._sync_content_key()
+        if ckey == getattr(self, "_edges_content_key", None):
+            self._sync_selection_buffers()
+            self._edges_version = _cache_ver(self)
+            self.sceneVersionChanged.emit(self._edges_version)
+            return
+
         # Inside a group, the surroundings can fade out or leave the frame
         # altogether (Model Info ▸ Components). Hidden means gone
         # from the VBOs, not merely skipped at draw time — that is what makes
@@ -5756,63 +5795,7 @@ class Viewport(QOpenGLWidget):
         self._edges_count = self._upload_vbo(
             self._edges_vbo, "edges", edge_parts) // 12
 
-        # The selection set is heterogeneous (edges, faces and/or whole
-        # groups). A selected GROUP highlights via its cached chunk — walking
-        # + re-triangulating a 100k-face imported group froze the app the
-        # moment the user clicked it.
-        sel_loose = array("f")
-        sel_edge_parts = []
-        for ent in self.scene.selection:
-            if isinstance(ent, Edge):
-                sel_loose.extend([ent.a.x(), ent.a.y(), ent.a.z(),
-                                  ent.b.x(), ent.b.y(), ent.b.z()])
-            elif isinstance(ent, Group):
-                if getattr(ent, "billboard", False):
-                    # A face-me billboard's mesh quad is NOT what's on screen
-                    # (the drawn quad rotates to face the camera every frame)
-                    # — tinting it painted a stray plane through the figure.
-                    # Its selection cue is the per-frame outline drawn in
-                    # _draw_billboard_outlines instead.
-                    continue
-                if id(ent) in pv:
-                    # Mid Move/Rotate drag: the scratch preview draws the
-                    # mover WITH its own orange cue at the cursor — tinting
-                    # the chunk here left an orange GHOST at the origin
-                    # until the commit (user report).
-                    continue
-                # A selected group reads as its BOUNDING BOX, the way
-                # modellers usually show one — twelve segments instead of the whole
-                # object. Highlighting the geometry meant uploading every
-                # edge AND a triangle copy of every face on each click: the
-                # 230k-face hedge in piscina.igz pushed 416k edges through
-                # the selection buffers just to say "this is selected". The
-                # box also reads better on a dense group, where an all-orange
-                # mass says less than an outline does.
-                sel_edge_parts.append(_box_edges(*self._group_obb(ent)))
-        self._selected_count = self._upload_vbo(
-            self._selected_vbo, "sel_edges",
-            [sel_loose.tobytes()] + sel_edge_parts) // 12
-
-        sel_face_runs: dict = {}     # (front_dot, back_dot) -> array
-        for ent in self.scene.selection:
-            if isinstance(ent, Face):
-                buf = sel_face_runs.setdefault(
-                    self._selection_dot_colors(ent), array("f"))
-                for t0, t1, t2 in ent.triangulate():
-                    buf.extend([
-                        t0.x(), t0.y(), t0.z(),
-                        t1.x(), t1.y(), t1.z(),
-                        t2.x(), t2.y(), t2.z(),
-                    ])
-        self._sel_faces_spans = []
-        first = 0
-        for (front, back), buf in sel_face_runs.items():
-            n = len(buf) // 3
-            self._sel_faces_spans.append((front, back, first, n))
-            first += n
-        self._sel_faces_count = self._upload_vbo(
-            self._sel_faces_vbo, "sel_faces",
-            [buf.tobytes() for buf in sel_face_runs.values()]) // 12
+        self._sync_selection_buffers()
 
         # Faces: triangulate each face (fan when simple, hole-aware when the
         # face has been divided) into one VBO, but grouped by material colour
@@ -6129,7 +6112,81 @@ class Viewport(QOpenGLWidget):
         if _PERF:
             _plog("sync_edges", (_time_mod.perf_counter() - _st0) * 1000.0)
         self._edges_version = _cache_ver(self)
+        self._edges_content_key = ckey
         self.sceneVersionChanged.emit(self._edges_version)
+
+    def _sync_content_key(self) -> tuple:
+        """What the edge and face buffers of ``_sync_edges`` depend on:
+        everything but the selection."""
+        sc = self.scene
+        sup = self._suppressed_faces
+        return (_content_ver(self), self._placements_epoch(), id(sc.mesh),
+                id(sc.edit_group), self._rest_is_hidden(),
+                tuple(sorted(getattr(self, "_preview_groups", None) or ())),
+                frozenset(map(id, sup)) if sup else None,
+                bool(getattr(sc, "show_hidden_objects", False)),
+                bool(getattr(sc, "show_hidden_geometry", False)))
+
+    def _sync_selection_buffers(self) -> None:
+        """The selection's highlight buffers (``_sync_edges``)."""
+        pv = getattr(self, "_preview_groups", None) or ()
+        # The selection set is heterogeneous (edges, faces and/or whole
+        # groups). A selected GROUP highlights via its cached chunk — walking
+        # + re-triangulating a 100k-face imported group froze the app the
+        # moment the user clicked it.
+        sel_loose = array("f")
+        sel_edge_parts = []
+        for ent in self.scene.selection:
+            if isinstance(ent, Edge):
+                sel_loose.extend([ent.a.x(), ent.a.y(), ent.a.z(),
+                                  ent.b.x(), ent.b.y(), ent.b.z()])
+            elif isinstance(ent, Group):
+                if getattr(ent, "billboard", False):
+                    # A face-me billboard's mesh quad is NOT what's on screen
+                    # (the drawn quad rotates to face the camera every frame)
+                    # — tinting it painted a stray plane through the figure.
+                    # Its selection cue is the per-frame outline drawn in
+                    # _draw_billboard_outlines instead.
+                    continue
+                if id(ent) in pv:
+                    # Mid Move/Rotate drag: the scratch preview draws the
+                    # mover WITH its own orange cue at the cursor — tinting
+                    # the chunk here left an orange GHOST at the origin
+                    # until the commit (user report).
+                    continue
+                # A selected group reads as its BOUNDING BOX, the way
+                # modellers usually show one — twelve segments instead of the whole
+                # object. Highlighting the geometry meant uploading every
+                # edge AND a triangle copy of every face on each click: the
+                # 230k-face hedge in piscina.igz pushed 416k edges through
+                # the selection buffers just to say "this is selected". The
+                # box also reads better on a dense group, where an all-orange
+                # mass says less than an outline does.
+                sel_edge_parts.append(_box_edges(*self._group_obb(ent)))
+        self._selected_count = self._upload_vbo(
+            self._selected_vbo, "sel_edges",
+            [sel_loose.tobytes()] + sel_edge_parts) // 12
+
+        sel_face_runs: dict = {}     # (front_dot, back_dot) -> array
+        for ent in self.scene.selection:
+            if isinstance(ent, Face):
+                buf = sel_face_runs.setdefault(
+                    self._selection_dot_colors(ent), array("f"))
+                for t0, t1, t2 in ent.triangulate():
+                    buf.extend([
+                        t0.x(), t0.y(), t0.z(),
+                        t1.x(), t1.y(), t1.z(),
+                        t2.x(), t2.y(), t2.z(),
+                    ])
+        self._sel_faces_spans = []
+        first = 0
+        for (front, back), buf in sel_face_runs.items():
+            n = len(buf) // 3
+            self._sel_faces_spans.append((front, back, first, n))
+            first += n
+        self._sel_faces_count = self._upload_vbo(
+            self._sel_faces_vbo, "sel_faces",
+            [buf.tobytes() for buf in sel_face_runs.values()]) // 12
 
     def _bucket_back_face(self, face, back):
         """Build the back-side override copy of a two-side-painted face.
@@ -6554,7 +6611,7 @@ class Viewport(QOpenGLWidget):
         # they stay on the geometry, only WHICH edges outline lags.
         import time as _time
         now = _time.monotonic()
-        key = (_cache_ver(self), id(self.scene.mesh))
+        key = (_content_ver(self), id(self.scene.mesh))
         last = getattr(self, "_sil_last", None)
         wait = 0.08
         # While the camera is moving (it moved since the last frame) and
@@ -10431,6 +10488,9 @@ class Viewport(QOpenGLWidget):
     #: Lazy placements baked by one query at most (the nearest first) —
     #: by all the footprint queries of one input event together.
     _PICK_NEW_PER_QUERY = 300
+    #: A snap's footprint skips placements under this many framebuffer
+    #: pixels across — the ones the frame does not draw.
+    _PICK_MIN_PX = 1.0
     #: Screen margin, in pixels, around the cursor for «near the cursor».
     _PICK_NEAR_PX = 32.0
 
@@ -10563,8 +10623,8 @@ class Viewport(QOpenGLWidget):
                 inv = 1.0 / np.where(np.abs(d) > 1e-12, d, 1e-12)
                 t1 = (lo - o) * inv
                 t2 = (hi - o) * inv
-            tmin = np.nanmax(np.minimum(t1, t2), axis=1)
-            tmax = np.nanmin(np.maximum(t1, t2), axis=1)
+            tmin = _slab_far(np.minimum(t1, t2))
+            tmax = _slab_near(np.maximum(t1, t2))
             hit = tmax >= np.maximum(tmin, 0.0)
             if reach is not None:
                 # A bounded query (the walkthrough's wall feelers, half a
@@ -10616,6 +10676,15 @@ class Viewport(QOpenGLWidget):
                     near_pt = np.clip(e, lo[need], hi[need])
                     dist = np.linalg.norm(near_pt - e, axis=1)
                     need = need[dist <= far]
+                if len(need) and self._PICK_MIN_PX > 0.0:
+                    # Nor what the frame leaves out for being under a pixel
+                    # (see _instances_below_a_pixel): from the whole plant
+                    # of #158 the snap's footprint met more placements
+                    # than the cap, and each pointer move threw out the
+                    # last move's to bring in as many again.
+                    ctr, rad = self._bounding_spheres(lo[need], hi[need])
+                    need = need[~self._spheres_below_a_pixel(
+                        ctr, rad, self._PICK_MIN_PX)]
                 iset = self._pick_instance_set(table) if len(need) else None
                 if iset is not None:
                     # Of the boxes near the cursor, the placements with a
@@ -10793,6 +10862,7 @@ class Viewport(QOpenGLWidget):
         # empty space / lines-only group) walked every group edge in
         # Python (~300 ms per mouse move against a 300k-edge import).
         b_gea, b_geb, b_ggi = [], [], []
+        b_gbase: list = []    # each chunk's (n, 2, 3) edge array, kept
         b_gsel: list = []     # per edge: may pick_group land on it
         b_ggroups: list = []
         # Lazy placements (#158) keep their triangles in their own
@@ -10856,6 +10926,7 @@ class Viewport(QOpenGLWidget):
                         np.frombuffer(chunk["edges"], dtype=np.float32)
                         .reshape(-1, 2, 3).astype(np.float64))
                 ge = ge[1]
+                b_gbase.append(ge)
                 b_gea.append(ge[:, 0])
                 b_geb.append(ge[:, 1])
                 b_ggi.append(np.full(len(ge), n_ggroups + len(b_ggroups),
@@ -10867,7 +10938,7 @@ class Viewport(QOpenGLWidget):
                 "own": b_own, "static_key": static_key,
                 "v0": b_v0, "e1": b_e1, "e2": b_e2, "te": b_te,
                 "spans": b_spans, "gea": b_gea, "geb": b_geb, "ggi": b_ggi,
-                "gsel": b_gsel, "ggroups": b_ggroups,
+                "gsel": b_gsel, "ggroups": b_ggroups, "gbase": b_gbase,
                 "n_ent": n_ent + count, "n_plist": n_plist + len(b_plist),
                 "n_tri": b_tri_off,
                 "n_ggroups": n_ggroups + len(b_ggroups)}
@@ -10920,6 +10991,10 @@ class Viewport(QOpenGLWidget):
             "gedge_gi": cat("ggi", None) if gea else None,
             "gedge_sel": cat("gsel", None) if gea else None,
             "gedge_groups": fixed["ggroups"] + lazy["ggroups"],
+            # The fixed part's edges lead, and that part outlives many lazy
+            # rebuilds: their screen projection is kept across them.
+            "gedge_fixed": (fixed, sum(map(len, fixed["gea"])),
+                            lazy["gbase"]),
             "spans": fixed["spans"] + lazy["spans"],
         }
 
@@ -10942,7 +11017,7 @@ class Viewport(QOpenGLWidget):
             # through here: the same cursor query in the same tick has
             # nothing new to bake (#158).
             pos = getattr(self, "_last_mouse_pos", None)
-            qkey = (getattr(self, "_tick", 0), _cache_ver(self),
+            qkey = (getattr(self, "_tick", 0), _content_ver(self),
                     (pos.x(), pos.y()) if near is None and pos is not None
                     else repr(near) if not isinstance(near, tuple) or
                     near[0] != "ray" else None)
@@ -10955,7 +11030,9 @@ class Viewport(QOpenGLWidget):
         # plaza its children are the objects, not the plaza): a stale index
         # kept answering "the plaza" after a double-click opened it, so the
         # arch inside never opened (Marco, 2026-09-14).
-        key = (_cache_ver(self), id(self.scene.mesh), oculto,
+        # The content version: a click (a view-only bump) changes nothing
+        # in it — on the plant of #158 it rebuilt it on every click.
+        key = (_content_ver(self), id(self.scene.mesh), oculto,
                id(self.scene.edit_group), getattr(self, "_pick_gen", 0))
         cached = getattr(self, "_pick_index_cache", None)
         if cached is not None and cached[0] == key:
@@ -11032,31 +11109,29 @@ class Viewport(QOpenGLWidget):
         # out of the index while you were inside one — so a group's children
         # were drawn and could not be clicked, and «todo está combinado»
         # (Marco, 2026-09-11).
-        del_contexto = self._context_placements()
-        tocables = {id(g) for g in del_contexto}
-        # What the snap engine may LAND ON is the whole model. Inside a
-        # group the snap still infers against the rest — faded, but every
-        # corner and edge of it is a reference. Holding only the context
-        # here meant no green dot on the pavement while moving a nested
-        # group onto it («me debería salir un punto verde de la referencia»,
-        # Marco, 2026-09-11). So the index carries every placement and the
-        # context decides SELECTABILITY, not membership: the rest occludes
-        # and snaps, and cannot be picked. What the open group itself owns is
-        # already here as the loose part. «Hide» is the exception — what is
-        # not drawn is not there.
-        ctx = scene.edit_group
-        if ctx is None or oculto:
-            candidatos = del_contexto
-        else:
-            candidatos = [g for g in self._placements()
-                          if g is not ctx and self._owner_of(g) is not ctx]
         lazy = (self._pick_lazy_table()
                 if hasattr(self, "_pick_lazy_table") else None)
+        epoch_of = getattr(self, "_placements_epoch", None)   # stub VPs in tests
+        # The context's placements, split into fixed and lazy, last as long
+        # as the placements and the context: walking all 21 000 of them on
+        # each change of the lazy set was ~20 ms of every such rebuild, a
+        # few times a mouse move over the plant of #158.
+        ckey = ((epoch_of(), id(scene.edit_group), oculto, id(lazy))
+                if epoch_of is not None else None)
+        cmemo = getattr(self, "_pick_cands_memo", None)
+        if ckey is None or cmemo is None or cmemo[0] != ckey:
+            cmemo = (ckey, *Viewport._pick_candidates(self, oculto, lazy))
+            if ckey is not None:
+                self._pick_cands_memo = cmemo
+        _ck, tocables, fixed_c, lazy_pos = cmemo
         if lazy is not None:
             live = getattr(self, "_pick_live", None) or {}
-            lazy_ids = lazy[4]
-            candidatos = [g for g in candidatos
-                          if id(g) not in lazy_ids or id(g) in live]
+            lazies_c = [lazy_pos[k][1] for k in sorted(
+                (k for k in live if k in lazy_pos),
+                key=lambda k: lazy_pos[k][0])]
+        else:
+            lazies_c = [g for _p, g in lazy_pos.values()]
+        candidatos = fixed_c + lazies_c
         if candidatos:
             # The group block is cached across versions (keyed by each
             # chunk's identity + rev + flags): re-deriving per-face masks and
@@ -11066,7 +11141,6 @@ class Viewport(QOpenGLWidget):
             # keyed on the placements epoch: a loose edit — every frame of a
             # Move drag — no longer walks 1 300 chunks to learn that none of
             # them changed (2026-09-14).
-            epoch_of = getattr(self, "_placements_epoch", None)   # stub VPs in tests
             sig = (epoch_of() if epoch_of is not None else _cache_ver(self),
                    oculto, len(candidatos), getattr(self, "_pick_gen", 0))
             blk = getattr(self, "_pick_block", None)
@@ -11079,8 +11153,7 @@ class Viewport(QOpenGLWidget):
                 # placements, half a million faces) was most of every hover
                 # that met new lazy placements on the plant of #158.
                 lazy_set = (lazy[4] if lazy is not None else ())
-                fixed = [g for g in candidatos if id(g) not in lazy_set]
-                lazies = [g for g in candidatos if id(g) in lazy_set]
+                fixed, lazies = fixed_c, lazies_c
                 fkey = (sig[0], oculto, len(fixed), id(scene.edit_group))
                 fpart = getattr(self, "_pick_fixed_part", None)
                 if fpart is None or fpart[0] != fkey:
@@ -11119,7 +11192,7 @@ class Viewport(QOpenGLWidget):
                 own_spans = [(bb, a, b, c, te, o + offset)
                              for bb, a, b, c, te, o in block.get("own", ())]
 
-        gedge_a = gedge_b = gedge_gi = gedge_sel = None
+        gedge_a = gedge_b = gedge_gi = gedge_sel = gedge_fixed = None
         gedge_groups: list = []
         if candidatos:
             block = self._pick_block[1] if getattr(self, "_pick_block", None) \
@@ -11129,6 +11202,7 @@ class Viewport(QOpenGLWidget):
             gedge_gi = block.get("gedge_gi")
             gedge_sel = block.get("gedge_sel")
             gedge_groups = block.get("gedge_groups", [])
+            gedge_fixed = block.get("gedge_fixed")
 
         edges: list = []
         ea: list = []
@@ -11173,6 +11247,7 @@ class Viewport(QOpenGLWidget):
             gedge_gi=gedge_gi,
             gedge_sel=gedge_sel,
             gedge_groups=gedge_groups,
+            gedge_fixed=gedge_fixed,
             tri_spans=None,
         )
         # Spans must tile the triangle array exactly, or the prefilter would
@@ -11292,8 +11367,8 @@ class Viewport(QOpenGLWidget):
                 inv_d = 1.0 / np.where(np.abs(d) > 1e-12, d, 1e-12)
                 t1 = (blo - o) * inv_d
                 t2 = (bhi - o) * inv_d
-            tmin = np.nanmax(np.minimum(t1, t2), axis=1)
-            tmax = np.nanmin(np.maximum(t1, t2), axis=1)
+            tmin = _slab_far(np.minimum(t1, t2))
+            tmax = _slab_near(np.maximum(t1, t2))
             meet = tmax >= np.maximum(tmin, 0.0)
             if reach is not None:
                 meet &= tmin <= reach
@@ -11618,6 +11693,7 @@ class Viewport(QOpenGLWidget):
         camera moves. Shared by pick_group's edge fallback and the snap
         prefilter (during a drawing hover the camera is still, so the two
         big projections run once, not per mouse move)."""
+        import numpy as np
         idx = self._pick_index(near="skip")
         if idx.gedge_a is None or not len(idx.gedge_a):
             return None
@@ -11633,9 +11709,48 @@ class Viewport(QOpenGLWidget):
         if (cached is not None and cached[0] == key and len(cached) > 2
                 and cached[2] is idx.gedge_a):
             return cached[1]
-        ax, ay, oka = self._project_px(idx.gedge_a)
-        bx, by, okb = self._project_px(idx.gedge_b)
-        data = (ax, ay, bx, by, oka & okb)
+        # A hover that brings new lazy placements in rebuilds the index:
+        # the fixed part's edges lead it unchanged and each lazy chunk
+        # keeps its edge array, so only what is new to this view is
+        # projected (all 1.6 M edges, four times a mouse move with Line
+        # beside the plant of #158).
+        fx = getattr(idx, "gedge_fixed", None)
+        head = getattr(self, "_gedge_px_head", None)
+        vkey = key[1:]
+        if fx is None or fx[1] + sum(map(len, fx[2])) != len(idx.gedge_a):
+            ax, ay, oka = self._project_px(idx.gedge_a)
+            bx, by, okb = self._project_px(idx.gedge_b)
+            data = (ax, ay, bx, by, oka & okb)
+        else:
+            n = fx[1]
+            if (head is None or head[0] != vkey or head[1] is not fx[0]
+                    or head[2] != n):
+                ax, ay, oka = self._project_px(idx.gedge_a[:n])
+                bx, by, okb = self._project_px(idx.gedge_b[:n])
+                head = self._gedge_px_head = (vkey, fx[0], n,
+                                              (ax, ay, bx, by, oka & okb))
+            memo = getattr(self, "_gedge_px_pieces", None)
+            if memo is None or memo[0] != vkey:
+                memo = self._gedge_px_pieces = (vkey, {})
+            pieces, todo = memo[1], []
+            for ge in fx[2]:
+                hit = pieces.get(id(ge))
+                if hit is None or hit[0] is not ge:
+                    todo.append(ge)
+            if todo:
+                # The new chunks in one projection, split back after.
+                flat = np.concatenate([ge.reshape(-1, 3) for ge in todo])
+                x, y, ok = self._project_px(flat)
+                o = 0
+                for ge in todo:
+                    m = 2 * len(ge)
+                    sx, sy, sk = x[o:o + m], y[o:o + m], ok[o:o + m]
+                    pieces[id(ge)] = (ge, (sx[0::2], sy[0::2], sx[1::2],
+                                           sy[1::2], sk[0::2] & sk[1::2]))
+                    o += m
+            parts = [head[3]] + [pieces[id(ge)][1] for ge in fx[2]]
+            data = tuple(np.concatenate([p[k] for p in parts])
+                         for k in range(5))
         self._gedge_px_cache = (key, data, idx.gedge_a)
         return data
 
@@ -11718,7 +11833,7 @@ class Viewport(QOpenGLWidget):
         if idx.edge_a is None or not len(idx.edge_a):
             return None
         M = self._np_mvp()
-        key = (self.scene.version, id(self.scene.mesh), M.tobytes(),
+        key = (_content_ver(self), id(self.scene.mesh), M.tobytes(),
                self.width(), self.height())
         cached = getattr(self, "_ledge_px_cache", None)
         if cached is not None and cached[0] == key:
@@ -11785,7 +11900,14 @@ class Viewport(QOpenGLWidget):
                  else Viewport._gedge_dist(self, px, py))
         cand = np.where(d < radius_px)[0]
         if len(cand) > cap:
-            cand = cand[np.argsort(d[cand])[:cap]]
+            # The nearest ``cap`` first, then those in order: sorting all
+            # of them was 90 ms a move with the whole plant of #158 in view
+            # (half a million edges inside the radius).
+            dc = d[cand]
+            if len(cand) > 4 * cap:
+                part = np.argpartition(dc, cap - 1)[:cap]
+                cand, dc = cand[part], dc[part]
+            cand = cand[np.lexsort((cand, dc))[:cap]]
         return [_group_pseudo_edge(idx, int(i)) for i in cand]
 
     def pick_edge_any(self, screen_x: float, screen_y: float):
@@ -11829,7 +11951,9 @@ class Viewport(QOpenGLWidget):
         lies near the cursor. One projection per placement."""
         import numpy as np
         cache = getattr(self, "_corigin_cache", None)
-        key = (self.scene.version, id(self.scene.edit_group))
+        # The content's version: a view-only bump (a hover's highlight, a
+        # click) moves no origin — 21 000 of them re-mapped a mouse move.
+        key = (_content_ver(self), id(self.scene.edit_group))
         if cache is None or cache[0] != key:
             groups, pts = [], []
             for g in self._placements():
@@ -11848,9 +11972,18 @@ class Viewport(QOpenGLWidget):
         d = np.where(ok, np.hypot(sx - px, sy - py), np.inf)
         moving = getattr(self.active_tool, "_group", None)
         out: list = []
-        for i in np.flatnonzero(d <= self.POINT_INFERENCE_PX):
+        near = np.flatnonzero(d <= self.POINT_INFERENCE_PX)
+        cap = Viewport.GEDGE_ENOUGH
+        if len(near) > cap:
+            # The nearest ones, as with the group edges: with the whole
+            # plant of #158 in view 17 000 origins fell inside the radius
+            # and the snap weighed each in Python (~0.1 s a mouse move).
+            near = near[np.lexsort((near, d[near]))[:cap + 1]]
+        for i in near:
             if groups[i] is moving:
                 continue
+            if len(out) >= cap:
+                break
             o = QVector3D(*pts[i])
             out.append(_SnapEdge(o, QVector3D(o), component_origin=True))
         return out
@@ -12090,7 +12223,7 @@ class Viewport(QOpenGLWidget):
             cache = getattr(self, "_container_obb", None)
             if cache is None:
                 cache = self._container_obb = {}
-            key = _cache_ver(self)
+            key = _content_ver(self)
             hit = cache.get(id(group))
             if hit is not None and hit[0] == key:
                 return hit[1]
@@ -12830,8 +12963,8 @@ class Viewport(QOpenGLWidget):
                 inv_d = 1.0 / np.where(np.abs(D) > 1e-12, D, 1e-12)  # (R, 3)
                 t1 = (blo[None, :, :] - o) * inv_d[:, None, :]        # (R, S, 3)
                 t2 = (bhi[None, :, :] - o) * inv_d[:, None, :]
-                tmin = np.nanmax(np.minimum(t1, t2), axis=2)
-                tmax = np.nanmin(np.maximum(t1, t2), axis=2)
+                tmin = _slab_far(np.minimum(t1, t2))
+                tmax = _slab_near(np.maximum(t1, t2))
                 meet = tmax >= np.maximum(tmin, 0.0)
             else:
                 par = np.abs(D) < 1e-12                               # (R, 3)
@@ -13558,6 +13691,41 @@ class Viewport(QOpenGLWidget):
         """Whether the model outside the edited group is out of this frame."""
         return (self.scene.edit_group is not None
                 and self._edit_rest_mode == "hide")
+
+    def _pick_candidates(self, oculto, lazy):
+        """What the pick index takes from the placements: the ids the
+        context lets you touch, the fixed placements in order, and the lazy
+        ones as ``id → (position, group)`` (see ``_pick_index``)."""
+        scene = self.scene
+        del_contexto = self._context_placements()
+        tocables = {id(g) for g in del_contexto}
+        # What the current context lets you TOUCH: the whole scene at the
+        # root, the children of the group you are inside otherwise. This
+        # used to be `if scene.edit_group is None`, which took EVERY group
+        # out of the index while you were inside one — so a group's children
+        # were drawn and could not be clicked, and «todo está combinado»
+        # (Marco, 2026-09-11).
+        # What the snap engine may LAND ON is the whole model. Inside a
+        # group the snap still infers against the rest — faded, but every
+        # corner and edge of it is a reference. Holding only the context
+        # here meant no green dot on the pavement while moving a nested
+        # group onto it («me debería salir un punto verde de la referencia»,
+        # Marco, 2026-09-11). So the index carries every placement and the
+        # context decides SELECTABILITY, not membership: the rest occludes
+        # and snaps, and cannot be picked. What the open group itself owns is
+        # already here as the loose part. «Hide» is the exception — what is
+        # not drawn is not there.
+        ctx = scene.edit_group
+        if ctx is None or oculto:
+            candidatos = del_contexto
+        else:
+            candidatos = [g for g in self._placements()
+                          if g is not ctx and self._owner_of(g) is not ctx]
+        lazy_ids = lazy[4] if lazy is not None else ()
+        fixed = [g for g in candidatos if id(g) not in lazy_ids]
+        lazy_pos = {id(g): (i, g) for i, g in enumerate(candidatos)
+                    if id(g) in lazy_ids}
+        return tocables, fixed, lazy_pos
 
     def _context_placements(self):
         """The placements the CURRENT context lets you touch.

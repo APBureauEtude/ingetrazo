@@ -1225,7 +1225,17 @@ class ComponentsPanel(QWidget):
         thumbnail changed: on the Plaza that was +20 ms on every edit, its
         section folded or its tab hidden (release_check, 09-10). Refreshed
         now when on screen, on showing otherwise — like the Browser. A
-        window not shown yet (scripts, tests) refreshes at once, as before."""
+        window not shown yet (scripts, tests) refreshes at once, as before.
+
+        A change of the view alone (a selection, a group opened) leaves the
+        list as it is and only marks the selected row: on the plant of #158
+        every click rebuilt it — 0.1 s of ~1 s per click."""
+        cv = self._window.viewport.scene.content_version
+        if (cv == getattr(self, "_in_model_cv", None)
+                and not getattr(self, "_in_model_stale", False)
+                and self._in_model.count()):
+            self._mark_selected_row()
+            return
         if not self._window.isVisible():
             self.refresh_in_model()
             return
@@ -1255,6 +1265,7 @@ class ComponentsPanel(QWidget):
 
     def refresh_in_model(self) -> None:
         from views.component_thumbs import thumbnail
+        self._in_model_cv = self._window.viewport.scene.content_version
         self._in_model.clear()
         for name, faces, gs, kept in self._components_in_model():
             copies = len(gs)
@@ -2222,6 +2233,7 @@ class MaterialsPanel(QWidget):
 
     def refresh_in_model(self) -> None:
         """Rebuild the 'En el modelo' swatches from the materials in use."""
+        self._in_model_cv = self._window.viewport.scene.content_version
         # Keep the tray where the user left it. The old swatches only went
         # away at the next event-loop turn (deleteLater), so for a moment
         # the grid held both sets, grew, and the scroll area jumped — the
@@ -4294,13 +4306,19 @@ class Tray(QDockWidget):
         # The materials panel scans every render face for its swatches —
         # ~0.5 s on an exploded 28k-face mesh, paid per EDIT when run
         # inline. Debounced: one refresh 300 ms after the last edit.
-        timer = getattr(self, "_mat_refresh_timer", None)
-        if timer is None:
-            from PySide6.QtCore import QTimer
-            timer = self._mat_refresh_timer = QTimer(self)
-            timer.setSingleShot(True)
-            timer.timeout.connect(self.materials.refresh_in_model)
-        timer.start(300)
+        # Only when the document changed: a selection (a view-only bump)
+        # leaves every material where it was, and on the plant of #158 the
+        # scan of 32 million face paints after each click froze the window
+        # for over a second.
+        cv = self.materials._window.viewport.scene.content_version
+        if cv != getattr(self.materials, "_in_model_cv", None):
+            timer = getattr(self, "_mat_refresh_timer", None)
+            if timer is None:
+                from PySide6.QtCore import QTimer
+                timer = self._mat_refresh_timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(self.materials.refresh_in_model)
+            timer.start(300)
         self.layers.refresh()
         self.scenes.refresh()
         self.components.on_scene_changed()

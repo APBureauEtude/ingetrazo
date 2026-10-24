@@ -2233,7 +2233,11 @@ class MaterialsPanel(QWidget):
 
     def refresh_in_model(self) -> None:
         """Rebuild the 'En el modelo' swatches from the materials in use."""
-        self._in_model_cv = self._window.viewport.scene.content_version
+        vp = self._window.viewport
+        self._in_model_cv = vp.scene.content_version
+        hist = getattr(vp, "history", None)
+        if hist is not None:
+            hist.paint_cv = self._in_model_cv
         # Keep the tray where the user left it. The old swatches only went
         # away at the next event-loop turn (deleteLater), so for a moment
         # the grid held both sets, grew, and the scroll area jumped — the
@@ -4310,8 +4314,13 @@ class Tray(QDockWidget):
         # leaves every material where it was, and on the plant of #158 the
         # scan of 32 million face paints after each click froze the window
         # for over a second.
-        cv = self.materials._window.viewport.scene.content_version
-        if cv != getattr(self.materials, "_in_model_cv", None):
+        # Nor after a Move: a command that keeps paint (History.paint_cv)
+        # leaves the swatches as they were (~0.4 s a drop on the plant).
+        vp = self.materials._window.viewport
+        cv = vp.scene.content_version
+        if (cv != getattr(self.materials, "_in_model_cv", None)
+                and cv != getattr(getattr(vp, "history", None),
+                                  "paint_cv", None)):
             timer = getattr(self, "_mat_refresh_timer", None)
             if timer is None:
                 from PySide6.QtCore import QTimer

@@ -134,3 +134,58 @@ def test_hidden_panels_let_the_previous_document_go(win):
     alive = [o for o in gc.get_objects() if isinstance(o, Group)
              and o.name == "previous-document-marker"]
     assert alive == []
+
+
+def test_a_selection_notice_leaves_the_browser_rows_as_they_are(win, monkeypatch):
+    """Its rows show what the model is: after a click (a view-only bump)
+    the Browser read all 21 406 of them again on the plant of #158."""
+    from PySide6.QtGui import QVector3D as V
+    from core.group import Group
+    from core.mesh import Mesh
+    m = Mesh()
+    m.add_face([V(0, 0, 0), V(1, 0, 0), V(1, 1, 0), V(0, 1, 0)])
+    g = Group(m, "row")
+    vp = win.viewport
+    vp.scene.groups.append(g)
+    vp.scene.version += 1
+    outliner = win.project_browser.outliner
+    outliner.refresh()
+    rows = _count_calls(monkeypatch, outliner, "_update_rows")
+    vp.scene.select([g])                        # a view-only change
+    outliner.refresh(rows_if_changed=True)
+    assert rows == []
+    vp.scene.version += 1                       # an edit
+    outliner.refresh(rows_if_changed=True)
+    assert len(rows) == 1
+    outliner.refresh()                          # asked directly: always
+    assert len(rows) == 2
+
+
+def test_a_move_leaves_the_material_swatches_as_they_are(win):
+    """Moving a group changes no material: on the plant of #158 each drop
+    rescanned every face paint (~0.4 s). A paint does rescan."""
+    from PySide6.QtGui import QVector3D as V
+    from core.group import Group
+    from core.history import MoveGroupCommand, SetFaceColorCommand
+    from core.mesh import Mesh
+    m = Mesh()
+    f = m.add_face([V(0, 0, 0), V(1, 0, 0), V(1, 1, 0), V(0, 1, 0)])
+    g = Group(m, "moved")
+    vp = win.viewport
+    vp.scene.groups.append(g)
+    vp.scene.version += 1
+    win.tray.materials.refresh_in_model()
+    _app.processEvents()
+    timer = getattr(win.tray, "_mat_refresh_timer", None)
+    if timer is not None:
+        timer.stop()
+    vp.history.execute(MoveGroupCommand(g, V(2, 0, 0)))
+    win.tray.on_scene_changed()
+    timer = getattr(win.tray, "_mat_refresh_timer", None)
+    assert timer is None or not timer.isActive()
+    vp.history.undo()                           # undoing it: the same
+    win.tray.on_scene_changed()
+    assert timer is None or not timer.isActive()
+    vp.history.execute(SetFaceColorCommand([f], (1.0, 0.0, 0.0)))
+    win.tray.on_scene_changed()
+    assert win.tray._mat_refresh_timer.isActive()

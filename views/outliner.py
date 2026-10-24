@@ -1238,7 +1238,8 @@ class OutlinerPanel(QWidget):
             from PySide6.QtCore import QTimer
             timer = self._refresh_timer = QTimer(self)
             timer.setSingleShot(True)
-            timer.timeout.connect(self.refresh)
+            timer.timeout.connect(
+                lambda: self.refresh(rows_if_changed=True))
         timer.start(300)
 
     def showEvent(self, ev) -> None:
@@ -1270,11 +1271,13 @@ class OutlinerPanel(QWidget):
             return path.name
         return getattr(w, "_import_name", None) or tr("Untitled")
 
-    def refresh(self) -> None:
+    def refresh(self, rows_if_changed: bool = False) -> None:
         """Bring the tree up to date: rows rebuilt only when groups came or
         went, otherwise updated in place — a refresh follows every edit and
         every click, and a rebuild would lose the scroll and the branches
-        the user unfolded."""
+        the user unfolded. ``rows_if_changed`` (the model's own change
+        notice): the rows are read again only if the content or the open
+        path changed since they last were."""
         if self.tree.state() == QAbstractItemView.EditingState:
             return                      # a rename in progress: leave it be
         self._stale = False
@@ -1286,7 +1289,16 @@ class OutlinerPanel(QWidget):
         if shape != self._shape:
             self._rebuild(scene)
             self._shape = shape
-        self._update_rows(scene)
+        # A click changes the view, not the rows: with the content and the
+        # open path as they were, every row reads as it did (21 406 rows
+        # read again after each click on the plant of #158, ~0.15 s).
+        rows_key = (getattr(scene, "content_version", None), id(scene),
+                    shape, tuple(id(g) for g in outliner.open_path(scene)),
+                    self._kind_providers, self._document_name())
+        if (not rows_if_changed or rows_key[0] is None
+                or rows_key != getattr(self, "_rows_key", None)):
+            self._update_rows(scene)
+        self._rows_key = rows_key
         self._sync_sections(scene)
         if self._query:
             self._apply_filter()
@@ -1316,6 +1328,7 @@ class OutlinerPanel(QWidget):
         self._items = {}
         self._groups = {}
         self._state = {}
+        self._rows_key = None
         self._root = None
         self._shape = None
 

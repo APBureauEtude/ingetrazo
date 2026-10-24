@@ -189,3 +189,41 @@ def test_a_move_leaves_the_material_swatches_as_they_are(win):
     vp.history.execute(SetFaceColorCommand([f], (1.0, 0.0, 0.0)))
     win.tray.on_scene_changed()
     assert win.tray._mat_refresh_timer.isActive()
+
+
+def test_a_move_leaves_the_browser_rows_as_they_are(win, monkeypatch):
+    """No row shows where a thing is: on the plant of #158 each drop read
+    the 21 406 rows again. A paint does read them, and so does a Move
+    when an extension's kind adds properties (they may be sizes)."""
+    from PySide6.QtGui import QVector3D as V
+    from core.group import Group
+    from core.history import MoveGroupCommand, SetFaceColorCommand
+    from core.mesh import Mesh
+    m = Mesh()
+    f = m.add_face([V(0, 0, 0), V(1, 0, 0), V(1, 1, 0), V(0, 1, 0)])
+    g = Group(m, "moved")
+    vp = win.viewport
+    vp.scene.groups.append(g)
+    vp.scene.version += 1
+    outliner = win.project_browser.outliner
+    outliner.refresh()
+    rows = _count_calls(monkeypatch, outliner, "_update_rows")
+    vp.history.execute(MoveGroupCommand(g, V(2, 0, 0)))
+    outliner.refresh(rows_if_changed=True)
+    vp.history.undo()
+    outliner.refresh(rows_if_changed=True)
+    assert rows == []
+    vp.history.execute(SetFaceColorCommand([f], (1.0, 0.0, 0.0)))
+    outliner.refresh(rows_if_changed=True)
+    assert len(rows) == 1
+    vp.history.execute(MoveGroupCommand(g, V(2, 0, 0)))
+    outliner.refresh(rows_if_changed=True)
+    assert len(rows) == 1
+    vp.scene.version += 1                       # an edit outside history
+    vp.history.execute(MoveGroupCommand(g, V(2, 0, 0)))
+    outliner.refresh(rows_if_changed=True)
+    assert len(rows) == 2
+    win._outliner_kinds = [lambda grp: None]
+    vp.history.execute(MoveGroupCommand(g, V(2, 0, 0)))
+    outliner.refresh(rows_if_changed=True)
+    assert len(rows) == 3

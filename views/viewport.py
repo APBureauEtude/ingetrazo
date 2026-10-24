@@ -376,6 +376,13 @@ def _ray_aabb(o, d, lo, hi, reach=float("inf")) -> bool:
 _chunk_uid = itertools.count(1)
 
 
+def _pv_hole(raw):
+    """Zeros the size of ``raw``: a moving group's place in the static
+    buffers while its preview draws it elsewhere. All-zero triangles and
+    lines have no area and no length, so they draw nothing in any pass."""
+    return bytes(len(raw))
+
+
 class _LazyChunk(dict):
     """A chunk whose draw-only fields are computed on first use: a component
     placement baked for the pick index (#158's lazy placements, hundreds per
@@ -4517,6 +4524,8 @@ class Viewport(QOpenGLWidget):
         self._pick_lazy_memo = None
         self._pick_near_memo = None
         self._proto_draw_fast = None
+        self._run_joins = None            # joined from the old chunks
+        self._arc_mid_cache = None
 
     def reset_texture_cache(self) -> None:
         """Return the document's cached GL textures to the driver.
@@ -5909,13 +5918,17 @@ class Viewport(QOpenGLWidget):
             parts: list = []
             spans: list = []                  # (bbox, start RELATIVE, n)
             for g in groups:
-                if (self.scene.entity_visible(g) and id(g) not in pv
+                if (self.scene.entity_visible(g)
                         and not getattr(g, "billboard", False)
                         and not self._instanced_eligible(g)):
                     ch = self._group_chunk(g)
-                    parts.append(ch["edges"])
                     n = len(ch["edges"]) // 12
-                    spans.append((ch.get("bbox"), rel, n))
+                    if id(g) in pv:
+                        # A mover keeps its place as zeros (see _pv_hole).
+                        parts.append(_pv_hole(ch["edges"]))
+                    else:
+                        parts.append(ch["edges"])
+                        spans.append((ch.get("bbox"), rel, n))
                     rel += n
             return parts, spans, rel
 
@@ -5950,6 +5963,23 @@ class Viewport(QOpenGLWidget):
         # with its own uniform. Loose faces rebuild fresh; untouched groups
         # contribute their cached chunk buffers (a 17k-face reference model
         # made every stroke pay a ~1 s re-triangulation otherwise).
+        # The translucent and back-side runs are joined from chunk parts
+        # that a Move leaves as they were: the same parts give back the same
+        # bytes object (which the upload then passes over by identity) —
+        # re-joining them was ~0.1 s of picking up and of putting down.
+        join_old = getattr(self, "_run_joins", None) or {}
+        join_new: dict = {}
+
+        def joined(key, parts):
+            hit = join_old.get(key)
+            if (hit is not None and len(hit[0]) == len(parts)
+                    and all(a is b for a, b in zip(hit[0], parts))):
+                join_new[key] = hit
+                return hit[1]
+            raw = b"".join(parts)
+            join_new[key] = (list(parts), raw)
+            return raw
+
         suppressed_faces = self._suppressed_faces
         vcol = array("f")            # loose faces, interleaved pos(3)+rgb(3)
         by_texture: dict = {}        # image path -> interleaved pos+uv array
@@ -6085,8 +6115,23 @@ class Viewport(QOpenGLWidget):
                 self._edit_split_db = dback_start  # same rule, same moment
             if (not self.scene.entity_visible(g)
                     or getattr(g, "billboard", False)
-                    or id(g) in pv_faces
                     or self._instanced_eligible(g)):
+                continue
+            if id(g) in pv_faces:
+                # A mover leaves the buffers as zeros of its own size, not
+                # as a gap: everything after it keeps its offset, so picking
+                # it up and putting it down re-send its part alone. Closing
+                # the gap re-sent the whole tail — up to 0.4 GB of faces on
+                # the plant of #158, ~0.3 s each way.
+                chunk = self._group_chunk(g)
+                if chunk.get("dback"):
+                    dback_parts.append(_pv_hole(chunk["dback"]))
+                    dback_start += len(chunk["dback"]) // 12
+                face_parts.append(_pv_hole(chunk["vcol"]))
+                gface_start += len(chunk["vcol"]) // 24
+                for path, raw in chunk["by_texture"].items():
+                    group_texture.setdefault(path, []).append(
+                        (_pv_hole(raw), None, False))
                 continue
             if suppressed_faces and any(f in suppressed_faces
                                         for f in g.mesh.faces):
@@ -6163,22 +6208,22 @@ class Viewport(QOpenGLWidget):
         start = self._faces_count
         for key in sorted(tcol_runs):
             a, fc = key
-            raw = b"".join(tcol_runs[key])
+            raw = joined(("tcol", key), tcol_runs[key])
             all_face_parts.append(raw)
             count = len(raw) // 24
             self._tcol_runs.append((a, fc, start, count))
             start += count
-        back_vcol_raw = b"".join(back_vcol_parts)
+        back_vcol_raw = joined("back_vcol", back_vcol_parts)
         self._back_vcol_run = (start, len(back_vcol_raw) // 24)
         all_face_parts.append(back_vcol_raw)
         start += self._back_vcol_run[1]
-        fvcol_raw = b"".join(fcull_vcol_parts)
+        fvcol_raw = joined("fvcol", fcull_vcol_parts)
         self._fvcol_run = (start, len(fvcol_raw) // 24)
         all_face_parts.append(fvcol_raw)
         start += self._fvcol_run[1]
         self._back_tcol_runs = []
         for a in sorted(back_tcol_runs):
-            raw = b"".join(back_tcol_runs[a])
+            raw = joined(("back_tcol", a), back_tcol_runs[a])
             all_face_parts.append(raw)
             count = len(raw) // 24
             self._back_tcol_runs.append((a, start, count))
@@ -6239,14 +6284,14 @@ class Viewport(QOpenGLWidget):
         self._ttex_runs = []
         for full in sorted(ttex_runs):
             key, a, fc = full
-            raw = b"".join(ttex_runs[full])
+            raw = joined(("ttex", full), ttex_runs[full])
             tex_parts.append(raw)
             count = len(raw) // 20
             self._ttex_runs.append((key, a, fc, start, count))
             start += count
         self._back_tex_runs = []
         for key in sorted(back_tex_runs):
-            raw = b"".join(back_tex_runs[key])
+            raw = joined(("back_tex", key), back_tex_runs[key])
             tex_parts.append(raw)
             count = len(raw) // 20
             self._back_tex_runs.append((key, start, count))
@@ -6254,13 +6299,14 @@ class Viewport(QOpenGLWidget):
         self._back_ttex_runs = []
         for full in sorted(back_ttex_runs):
             key, a = full
-            raw = b"".join(back_ttex_runs[full])
+            raw = joined(("back_ttex", full), back_ttex_runs[full])
             tex_parts.append(raw)
             count = len(raw) // 20
             self._back_ttex_runs.append((key, a, start, count))
             start += count
         self._tex_faces_count = self._upload_vbo(
             self._tex_faces_vbo, "tex", tex_parts, empty=40) // 20
+        self._run_joins = join_new
 
         if _PERF:
             _plog("sync_edges", (_time_mod.perf_counter() - _st0) * 1000.0)
@@ -6873,8 +6919,16 @@ class Viewport(QOpenGLWidget):
         # The groups being previewed are left out when drawn, not here: the
         # list (and the per-prototype table made from it) then lasts while
         # a Move picks an object up — rebuilt, it was ~1 s on the plant.
+        # Matrices alone (a Move picking up or putting down) change none of
+        # the three tests: the list is kept, re-stamped (~0.1 s each way).
         gkey = (self._placements_epoch(), skip_context)
         gmemo = getattr(self, "_sil_groups", None)
+        if gmemo is not None and gmemo[0] != gkey and \
+                gmemo[0][1] == skip_context and \
+                gmemo[2] is self.scene.mesh and \
+                self._epoch_only_matrices(gmemo[0][0], gkey[0]):
+            self._placements()        # nested proxies: composed matrices
+            gmemo = self._sil_groups = (gkey,) + gmemo[1:]
         if gmemo is not None and gmemo[0] == gkey:
             groups = gmemo[1]
         else:
@@ -6882,7 +6936,7 @@ class Viewport(QOpenGLWidget):
                       if self.scene.entity_visible(g)
                       and not getattr(g, "billboard", False)
                       and not (skip_context and self._draws_in_edit_context(g))]
-            self._sil_groups = (gkey, groups)
+            self._sil_groups = (gkey, groups, self.scene.mesh)
         if groups:
             import numpy as np
             e_np = np.array([eye.x(), eye.y(), eye.z()])
@@ -10734,6 +10788,29 @@ class Viewport(QOpenGLWidget):
         memo = getattr(self, "_pick_lazy_memo", None)
         if memo is not None and memo[0] == key:
             return memo[1]
+        if memo is not None and self._epoch_only_matrices(memo[0], key):
+            # A Move: picking up changes no row, putting down the rows of
+            # what moved. Made again, the table framed 20 500 placements
+            # (~0.55 s) on the first pointer move after either.
+            table, xfs = memo[1], memo[2]
+            if table is not None:
+                # The nested placements' proxies take their composed
+                # matrices here: the rows are read through them.
+                self._placements()
+                groups, lo, hi = table[0], table[1], table[2]
+                moved = [i for i, g in enumerate(groups)
+                         if tuple(g.xform.data()) != xfs[i]]
+                if moved:
+                    inf = float("inf")
+                    lo, hi, xfs = lo.copy(), hi.copy(), list(xfs)
+                    for i in moved:
+                        box = self._placement_frame(groups[i])[0]
+                        lo[i], hi[i] = (box if box
+                                        else ((-inf,) * 3, (inf,) * 3))
+                        xfs[i] = tuple(groups[i].xform.data())
+                    table = (groups, lo, hi) + table[3:]
+            self._pick_lazy_memo = (key, table, xfs)
+            return table
         groups = [g for g in self._placements()
                   if getattr(g, "xform", None) is not None
                   and not getattr(g, "billboard", False)]
@@ -10749,7 +10826,9 @@ class Viewport(QOpenGLWidget):
                 box = self._placement_frame(g)[0]
                 lo[i], hi[i] = box if box else ((-inf,) * 3, (inf,) * 3)
             table = (groups, lo, hi, nf, {id(g) for g in groups})
-        self._pick_lazy_memo = (key, table)
+        xfs = ([tuple(g.xform.data()) for g in groups]
+               if table is not None else None)
+        self._pick_lazy_memo = (key, table, xfs)
         return table
 
     def _pick_instance_set(self, table):
@@ -10976,9 +11055,13 @@ class Viewport(QOpenGLWidget):
                     break
                 if k in keep:
                     continue
-                faces -= live.pop(k)[1]
-                if inst is not None:
-                    inst.pop(k, None)     # its world bake goes with it
+                gone, nf_k = live.pop(k)
+                faces -= nf_k
+                # Its world bake goes with it — unless the static buffers
+                # draw it, and then the next sync baked it all over again
+                # (13 placements, ~0.15 s of picking an object up on #158).
+                if inst is not None and self._instanced_eligible(gone):
+                    inst.pop(k, None)
                 changed = True
         if changed:
             self._pick_gen = getattr(self, "_pick_gen", 0) + 1
@@ -12220,7 +12303,10 @@ class Viewport(QOpenGLWidget):
         midpoint). Closed curves (circles) have none. Computed once per
         scene version, offered when near the cursor."""
         cache = getattr(self, "_arc_mid_cache", None)
-        if cache is None or cache[0] != self.scene.version:
+        # On the content, not the version: a click's selection bump made
+        # every placement's midpoints over again.
+        ckey = (_content_ver(self), id(self.scene.mesh))
+        if cache is None or cache[0] != ckey:
             # Per MESH, keyed by its mutation serial: a scene version bump
             # (every frame of a drag) used to walk every prototype's curves
             # again — 31 ms a frame while moving a face (2026-09-14). Now a
@@ -12229,12 +12315,18 @@ class Viewport(QOpenGLWidget):
             by_mesh = getattr(self, "_arc_mid_by_mesh", None)
             if by_mesh is None:
                 by_mesh = self._arc_mid_by_mesh = {}
+            # Only the meshes met in this pass are kept. Emptying the whole
+            # memo past 2 048 meshes emptied it on EVERY pass on a model
+            # with more (2 721 on the plant of #158): all of them were
+            # worked out again, ~0.5 s of the first hover after an edit.
+            seen: dict = {}
 
             def local_mids(mesh):
                 serial = getattr(mesh, "_mut_serial", None)
-                hit = by_mesh.get(id(mesh))
-                if hit is None or hit[0] != serial:
-                    hit = by_mesh[id(mesh)] = (serial, self._mesh_arc_midpoints(mesh))
+                hit = seen.get(id(mesh)) or by_mesh.get(id(mesh))
+                if hit is None or hit[0] != serial or hit[2] is not mesh:
+                    hit = (serial, self._mesh_arc_midpoints(mesh), mesh)
+                seen[id(mesh)] = hit
                 return hit[1]
             mids = list(local_mids(self.scene.mesh))
             # …and the arcs inside every placed group / component, through
@@ -12248,9 +12340,8 @@ class Viewport(QOpenGLWidget):
                     continue
                 xf = getattr(g, "xform", None)
                 mids += [xf.map(m) if xf is not None else QVector3D(m) for m in lm]
-            if len(by_mesh) > 2048:
-                by_mesh.clear()
-            cache = (self.scene.version, mids)
+            self._arc_mid_by_mesh = seen
+            cache = (ckey, mids)
             self._arc_mid_cache = cache
         out: list = []
         for m in cache[1]:

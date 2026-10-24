@@ -1295,9 +1295,18 @@ class OutlinerPanel(QWidget):
         rows_key = (getattr(scene, "content_version", None), id(scene),
                     shape, tuple(id(g) for g in outliner.open_path(scene)),
                     self._kind_providers, self._document_name())
+        # Nor does a Move (History.rows_cv) — unless an extension's kind
+        # adds properties to the rows, which may well be sizes.
+        old_key = getattr(self, "_rows_key", None)
+        hist = getattr(self._window.viewport, "history", None)
+        moved_only = (old_key is not None and not self._kind_providers
+                      and old_key[1:] == rows_key[1:]
+                      and getattr(hist, "rows_cv", None) == rows_key[0])
         if (not rows_if_changed or rows_key[0] is None
-                or rows_key != getattr(self, "_rows_key", None)):
+                or (rows_key != old_key and not moved_only)):
             self._update_rows(scene)
+            if hist is not None:
+                hist.rows_cv = rows_key[0]
         self._rows_key = rows_key
         self._sync_sections(scene)
         if self._query:

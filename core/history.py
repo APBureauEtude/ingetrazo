@@ -181,11 +181,17 @@ class History:
         #: it (it sets this): a Move needs no new scan — 0.4 s on the plant
         #: of #158. Anything else, history or not, leaves it behind.
         self.paint_cv = None
+        #: The same, for the Browser's rows (views/outliner.py): a command
+        #: that keeps paint moves things, and no row shows where a thing is.
+        self.rows_cv = None
 
     def _keep_paint_cv(self, cmd, before) -> None:
-        if (getattr(cmd, "keeps_paint", False) and before is not None
-                and self.paint_cv == before):
-            self.paint_cv = getattr(self.scene, "content_version", None)
+        if getattr(cmd, "keeps_paint", False) and before is not None:
+            cv = getattr(self.scene, "content_version", None)
+            if self.paint_cv == before:
+                self.paint_cv = cv
+            if self.rows_cv == before:
+                self.rows_cv = cv
 
     def execute(self, cmd: Command) -> None:
         _t0 = _time_mod.perf_counter() if _PERF else 0.0

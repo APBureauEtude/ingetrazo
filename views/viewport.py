@@ -4793,7 +4793,7 @@ class Viewport(QOpenGLWidget):
         self._placements_memo = None
         self._epoch_same = None
         self._pick_lazy_memo = None
-        self._pick_near_memo = None
+        self._pick_near_memo = self._edge_near_memo = None
         self._proto_draw_fast = None
         self._arc_mid_cache = None
         self._epoch_hist = None           # ids of the old document's objects
@@ -11587,46 +11587,7 @@ class Viewport(QOpenGLWidget):
             else:
                 x, y = float(near[1]), float(near[2])
             footprint = True
-            ckey = (self._placements_epoch(), round(x), round(y),
-                    tuple(self._np_mvp().ravel()))
-            cmemo = getattr(self, "_pick_near_memo", None)
-            if cmemo is not None and cmemo[0] == ckey:
-                need = cmemo[1]
-            else:
-                need = self._placements_under_px(lo, hi, x, y)
-                far = self._visible_depth_limit(x, y)
-                if far is not None and len(need):
-                    # What lies wholly behind what is on screen around the
-                    # cursor can be neither picked nor snapped to (hidden
-                    # snaps are dropped): a dense plant stacks thousands of
-                    # placements under one pixel (#158).
-                    e = self.camera.eye()
-                    e = np.array([e.x(), e.y(), e.z()])
-                    near_pt = np.clip(e, lo[need], hi[need])
-                    dist = np.linalg.norm(near_pt - e, axis=1)
-                    need = need[dist <= far]
-                if len(need) and self._PICK_MIN_PX > 0.0:
-                    # Nor what the frame leaves out for being under a pixel
-                    # (see _instances_below_a_pixel): from the whole plant
-                    # of #158 the snap's footprint met more placements
-                    # than the cap, and each pointer move threw out the
-                    # last move's to bring in as many again.
-                    ctr, rad = self._bounding_spheres(lo[need], hi[need])
-                    need = need[~self._spheres_below_a_pixel(
-                        ctr, rad, self._PICK_MIN_PX)]
-                iset = self._pick_instance_set(table) if len(need) else None
-                if iset is not None:
-                    # Of the boxes near the cursor, the placements with a
-                    # hard edge within the farthest reach a snap measures
-                    # or a triangle within the footprint (with margins).
-                    M = self._np_mvp()
-                    need = np.asarray(iset.screen_filter(
-                        need.astype(np.int64),
-                        np.ascontiguousarray(M.T).ravel().tolist(),
-                        float(self.width()), float(self.height()), x, y,
-                        Viewport.GEDGE_REACH_PX + 2.0,
-                        self._PICK_NEAR_PX + 2.0), dtype=np.int64)
-                self._pick_near_memo = (ckey, need)
+            need = self._footprint_need(table, x, y)
         if footprint and len(need):
             # A footprint takes in the placements nearest the eye that fit
             # in most of the cap, and those stay (see the eviction below):
@@ -11777,6 +11738,61 @@ class Viewport(QOpenGLWidget):
             out[k] = dist > lim[iy[k], ix[k]]
         return out
 
+    def _footprint_need(self, table, x: float, y: float, reach=None):
+        """The rows of the lazy ``table`` a snap's footprint at widget pixel
+        ``(x, y)`` takes in (see _pick_materialize): the boxes near the
+        pixel, but what lies wholly behind what the frame shows there or
+        under a pixel, and of those the ones the spatial index finds
+        something near the cursor in. ``reach`` widens the boxes' margin
+        past ``_PICK_NEAR_PX`` (the edges near the cursor are looked for
+        farther out). Memoised per view and pixel."""
+        import numpy as np
+        lo, hi = table[1], table[2]
+        r = max(float(reach or 0.0), self._PICK_NEAR_PX)
+        ckey = (self._placements_epoch(), round(x), round(y),
+                tuple(self._np_mvp().ravel()), r)
+        # One per margin: a hover asks for both (the pick's, the edges').
+        slot = ("_pick_near_memo" if r == self._PICK_NEAR_PX
+                else "_edge_near_memo")
+        cmemo = getattr(self, slot, None)
+        if cmemo is not None and cmemo[0] == ckey:
+            return cmemo[1]
+        need = self._placements_under_px(lo, hi, x, y, r)
+        far = self._visible_depth_limit(x, y)
+        if far is not None and len(need):
+            # What lies wholly behind what is on screen around the
+            # cursor can be neither picked nor snapped to (hidden
+            # snaps are dropped): a dense plant stacks thousands of
+            # placements under one pixel (#158).
+            e = self.camera.eye()
+            e = np.array([e.x(), e.y(), e.z()])
+            near_pt = np.clip(e, lo[need], hi[need])
+            dist = np.linalg.norm(near_pt - e, axis=1)
+            need = need[dist <= far]
+        if len(need) and self._PICK_MIN_PX > 0.0:
+            # Nor what the frame leaves out for being under a pixel
+            # (see _instances_below_a_pixel): from the whole plant
+            # of #158 the snap's footprint met more placements
+            # than the cap, and each pointer move threw out the
+            # last move's to bring in as many again.
+            ctr, rad = self._bounding_spheres(lo[need], hi[need])
+            need = need[~self._spheres_below_a_pixel(
+                ctr, rad, self._PICK_MIN_PX)]
+        iset = self._pick_instance_set(table) if len(need) else None
+        if iset is not None:
+            # Of the boxes near the cursor, the placements with a
+            # hard edge within the farthest reach a snap measures
+            # or a triangle within the footprint (with margins).
+            M = self._np_mvp()
+            need = np.asarray(iset.screen_filter(
+                need.astype(np.int64),
+                np.ascontiguousarray(M.T).ravel().tolist(),
+                float(self.width()), float(self.height()), x, y,
+                Viewport.GEDGE_REACH_PX + 2.0,
+                r + 2.0), dtype=np.int64)
+        setattr(self, slot, (ckey, need))
+        return need
+
     def _visible_depth_limit(self, x: float, y: float):
         """The farthest distance from the eye of what the last frame shows
         within ``_PICK_NEAR_PX`` of widget pixel ``(x, y)``, with a margin —
@@ -11805,12 +11821,24 @@ class Viewport(QOpenGLWidget):
                - self.camera.eye()).length()
         return far * 1.02 + 0.05
 
-    def _placements_under_px(self, lo, hi, x, y):
+    def _placements_under_px(self, lo, hi, x, y, r=None):
         """Indices of the boxes ``lo``/``hi`` whose screen footprint comes
-        within ``_PICK_NEAR_PX`` of widget pixel ``(x, y)``; a box that
+        within ``r`` (``_PICK_NEAR_PX``) of widget pixel ``(x, y)``; a box that
         crosses the eye plane counts (it can be anywhere on screen)."""
         import numpy as np
+        from core import _native
         M = self._np_mvp()
+        r = self._PICK_NEAR_PX if r is None else r
+        mod = _native.native
+        if mod is not None and hasattr(mod, "boxes_near_px"):
+            # The same test in parallel: ~9 ms of NumPy a pointer move over
+            # the 21 406 boxes of #158, twice (the pick's, the edges').
+            return mod.boxes_near_px(
+                np.ascontiguousarray(lo, np.float64),
+                np.ascontiguousarray(hi, np.float64),
+                np.ascontiguousarray(M, np.float64).ravel().tolist(),
+                float(self.width()), float(self.height()), float(x),
+                float(y), float(r))
         corners = np.stack([np.where(np.array([(i >> k) & 1 for k in range(3)],
                                               bool), hi, lo)
                             for i in range(8)], axis=1)          # (P, 8, 3)
@@ -11827,7 +11855,6 @@ class Viewport(QOpenGLWidget):
         x1 = np.where(front, sx, -big).max(axis=1)
         y0 = np.where(front, sy, big).min(axis=1)
         y1 = np.where(front, sy, -big).max(axis=1)
-        r = self._PICK_NEAR_PX
         inside = (x0 - r <= x) & (x <= x1 + r) & (y0 - r <= y) & (y <= y1 + r)
         straddle = front.any(axis=1) & ~front.all(axis=1)
         return np.flatnonzero((inside & front.all(axis=1)) | straddle
@@ -12917,6 +12944,11 @@ class Viewport(QOpenGLWidget):
         # edges are read from that same one. Asking again bakes more and
         # reorders the lazy part: the measured positions then pointed at
         # other edges, or past the end (the SPR, hovering with Line).
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        if (nat is not None and radius_px <= Viewport.GEDGE_REACH_PX
+                and cap <= Viewport.GEDGE_ENOUGH):
+            return self._nearby_edges_unbaked(px, py, radius_px, cap, nat)
         idx = self._pick_index(near=("snap", px, py))
         proj = self._gedge_screen()
         if proj is None:
@@ -12944,6 +12976,53 @@ class Viewport(QOpenGLWidget):
             cand = cand[np.lexsort((cand, dc))[:cap]]
         return [_group_pseudo_edge(idx, int(i)) for i in cand]
 
+    def _nearby_edges_unbaked(self, px, py, radius, cap, nat,
+                              with_d=False) -> list:
+        """``_nearby_group_edges`` with the lazy placements' edges from the
+        native engine, none of them baked (#158): the fixed placements'
+        edges as the index holds them, those of the placements the snap's
+        footprint takes in as their bakes would hold them — the nearest
+        ``cap`` within ``radius`` px, nearest first (with their distances
+        as ``(d, edge)`` when ``with_d``)."""
+        import numpy as np
+        iset, snap, _vis = nat
+        idx = self._pick_index(near="skip")
+        fx = getattr(idx, "gedge_fixed", None)
+        m = fx[1] if fx is not None else 0
+        out = []                           # (d, edge)
+        if m and self._gedge_screen() is not None:
+            d = self._gedge_dist(px, py)[:m]
+            cand = np.flatnonzero(d < radius)
+            if len(cand) > cap:
+                dc = d[cand]
+                if len(cand) > 4 * cap:
+                    part = np.argpartition(dc, cap - 1)[:cap]
+                    cand, dc = cand[part], dc[part]
+                cand = cand[np.lexsort((cand, dc))[:cap]]
+            out += [(float(d[i]), _group_pseudo_edge(idx, int(i)))
+                    for i in cand]
+        table = self._pick_lazy_table()
+        rows = self._footprint_need(table, float(px), float(py), radius)
+        rows = rows[np.isin(rows, snap)] if len(rows) else rows
+        if len(rows):
+            M = self._np_mvp()
+            pl, _e, a, b, d = iset.edges_near(
+                np.ascontiguousarray(rows, np.int64),
+                np.ascontiguousarray(M.T).ravel().tolist(),
+                float(self.width()), float(self.height()), float(px),
+                float(py), float(radius), int(cap))
+            groups = table[0]
+            for i, aa, bb, dd in zip(pl.tolist(), a.tolist(), b.tolist(),
+                                     d.tolist()):
+                owner = self._owner_of(groups[i])
+                comp = getattr(owner, "is_instance", None)
+                out.append((dd, _SnapEdge(
+                    QVector3D(*aa), QVector3D(*bb), in_group=True,
+                    context=("component" if comp is not None and comp()
+                             else "group"), group=owner)))
+        out.sort(key=lambda de: de[0])        # stable: the fixed ones first
+        return out[:cap] if with_d else [e for _d, e in out[:cap]]
+
     def pick_edge_any(self, screen_x: float, screen_y: float):
         """The edge under the cursor, loose OR a group's (as a world
         pseudo-edge with ``in_group``), nearest first — what the linear
@@ -12951,6 +13030,27 @@ class Viewport(QOpenGLWidget):
         the reference lock, Push/Pull level with it (groups are read
         from outside without opening them)."""
         loose = self.pick_edge(screen_x, screen_y)
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        if nat is not None:
+            # The nearest group edge under the threshold, fixed or lazy
+            # (see _nearby_edges_unbaked), against the loose one as below.
+            near = self._nearby_edges_unbaked(screen_x, screen_y,
+                                              self.pick_threshold_px, 1, nat,
+                                              with_d=True)
+            if not near:
+                return loose
+            dg, g = near[0]
+            if loose is not None:
+                pa = self._world_to_pixel(loose.a)
+                pb = self._world_to_pixel(loose.b)
+                if pa is not None and pb is not None:
+                    from core.snap import _closest_on_segment_2d
+                    dl, _t = _closest_on_segment_2d((screen_x, screen_y),
+                                                    pa, pb)
+                    if dl <= dg:
+                        return loose
+            return g
         # The index this pixel asks for, then its projection: the edge is
         # read from the index it was measured on (see _nearby_group_edges).
         idx = self._pick_index(near=("px", screen_x, screen_y))

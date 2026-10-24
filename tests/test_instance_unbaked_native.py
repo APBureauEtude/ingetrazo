@@ -29,8 +29,9 @@ pytestmark = pytest.mark.skipif(
 W, H = 1200, 800
 
 
-def _proto(rng):
-    n = int(rng.integers(1, 60))
+def _proto(rng, big=False):
+    # Big ones (hundreds to thousands of edges) go through the edge BVH.
+    n = int(rng.integers(300, 3000)) if big else int(rng.integers(1, 60))
     c = rng.uniform(-2, 2, size=(n, 1, 3))
     tri = c + rng.normal(scale=rng.choice([0.05, 0.5, 2.0]), size=(n, 3, 3))
     v0 = tri[:, 0]
@@ -92,9 +93,9 @@ def _camera(rng):
     return proj * view, eye
 
 
-def _scene(seed, P):
+def _scene(seed, P, big=False):
     rng = np.random.default_rng(seed)
-    protos = [_proto(rng) for _ in range(5)]
+    protos = [_proto(rng, big) for _ in range(5)]
     of = rng.integers(0, len(protos), P)
     xfs = [_matrix(rng) for _ in range(P)]
     bakes = [_bake(protos[of[i]], xfs[i]) for i in range(P)]
@@ -110,10 +111,11 @@ def _scene(seed, P):
     return rng, bakes, iset
 
 
-@pytest.mark.parametrize("seed", range(6))
-def test_corners_near_are_the_baked_ends_at_their_pixels(seed):
+@pytest.mark.parametrize("seed,big", [(s, False) for s in range(6)]
+                         + [(s, True) for s in range(100, 103)])
+def test_corners_near_are_the_baked_ends_at_their_pixels(seed, big):
     from views.viewport import Viewport
-    rng, bakes, iset = _scene(seed, 120)
+    rng, bakes, iset = _scene(seed, 40 if big else 120, big)
     P = len(bakes)
     found_any = 0
     for _ in range(12):
@@ -250,3 +252,75 @@ def test_corners_the_frame_hides_are_left_out_as_python_leaves_them(seed):
                 for a, b, c in zip(got[0], got[1], got[2])} == want
         dropped += int((~keep).sum())
     assert dropped > 10
+
+
+@pytest.mark.parametrize("seed,big", [(s, False) for s in range(6)]
+                         + [(s, True) for s in range(400, 403)])
+def test_edges_near_are_the_baked_edges_at_their_distances(seed, big):
+    """``edges_near`` gives the hard edges of the bakes within the radius at
+    the distance ``segment_distances`` measures on ``_project_px``'s pixels,
+    bit for bit, the nearest ``cap`` of them, nearest first."""
+    from core.edge_grid import segment_distances
+    from views.viewport import Viewport
+    rng, bakes, iset = _scene(300 + seed, 40 if big else 120, big)
+    P = len(bakes)
+    found = 0
+    for _ in range(12):
+        mvp, _eye = _camera(rng)
+        eye = _Eye(mvp)
+        colmajor = list(mvp.data())
+        for _k in range(6):
+            px, py = rng.uniform(0, W), rng.uniform(0, H)
+            radius = float(rng.choice([8.0, 48.0, 64.0]))
+            cap = int(rng.choice([1, 48, 10 ** 6]))
+            cand = rng.permutation(P).astype(np.int64)
+            pos = {int(i): k for k, i in enumerate(cand)}
+            want = []
+            for i in range(P):
+                ends = bakes[i][3]
+                if not len(ends):
+                    continue
+                ax, ay, oka = Viewport._project_px(eye, ends[:, 0])
+                bx, by, okb = Viewport._project_px(eye, ends[:, 1])
+                d = segment_distances(ax, ay, bx, by, oka & okb, px, py)
+                for e in np.flatnonzero(d < radius):
+                    want.append((float(d[e]), pos[i], int(e), i,
+                                 *ends[e, 0].tolist(), *ends[e, 1].tolist()))
+            want.sort(key=lambda t: t[:3])
+            want = [(t[3], t[2], *t[4:], t[0]) for t in want[:cap]]
+            pl, ed, a, b, d = iset.edges_near(cand, colmajor, float(W),
+                                              float(H), px, py, radius, cap)
+            got = [(int(p), int(e), *aa.tolist(), *bb.tolist(), float(dd))
+                   for p, e, aa, bb, dd in zip(pl, ed, a, b, d)]
+            assert got == want
+            found += len(got)
+    assert found > 50
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_boxes_near_px_is_the_numpy_footprint(seed):
+    """``boxes_near_px`` keeps the boxes ``_placements_under_px`` keeps:
+    near the pixel, crossing the eye plane, or not finite."""
+    from views.viewport import Viewport
+    if not hasattr(mod, "boxes_near_px"):
+        pytest.skip("older module")
+    rng = np.random.default_rng(700 + seed)
+    P = 3000
+    c = rng.uniform(-80, 80, (P, 3))
+    s = rng.uniform(0.01, 6, (P, 3))
+    lo, hi = c - s, c + s
+    lo[rng.random(P) < 0.01, 0] = -np.inf
+    for _ in range(10):
+        mvp, _eye = _camera(rng)
+        eye = _Eye(mvp)
+        eye._PICK_NEAR_PX = Viewport._PICK_NEAR_PX
+        x, y = rng.uniform(0, W), rng.uniform(0, H)
+        r = float(rng.choice([32.0, 48.0]))
+        keep, _native.native = _native.native, None      # the NumPy path
+        try:
+            want = Viewport._placements_under_px(eye, lo, hi, x, y, r)
+        finally:
+            _native.native = keep
+        got = mod.boxes_near_px(lo, hi, np.ascontiguousarray(eye._m).ravel()
+                                .tolist(), float(W), float(H), x, y, r)
+        assert np.array_equal(np.asarray(got), np.asarray(want))

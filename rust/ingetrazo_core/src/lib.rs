@@ -30,6 +30,7 @@ fn ingetrazo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(face_geometry, m)?)?;
     m.add_function(wrap_pyfunction!(qt_vector_probe, m)?)?;
     m.add_function(wrap_pyfunction!(weld_points, m)?)?;
+    m.add_function(wrap_pyfunction!(boxes_near_px, m)?)?;
     m.add_class::<GlReplay>()?;
     m.add_class::<InstanceProto>()?;
     m.add_class::<InstanceSet>()?;
@@ -202,6 +203,59 @@ fn hypot_of(name: &str) -> PyResult<facegeom::Hypot> {
         "libstdc++" => Ok(facegeom::Hypot::LibStdCxx),
         _ => Err(pyo3::exceptions::PyValueError::new_err("unknown hypot")),
     }
+}
+
+/// views.viewport.Viewport._placements_under_px: the indices of the boxes
+/// ``lo``/``hi`` (P,3) whose screen footprint through ``mvp`` (the 4×4,
+/// row-major: clip = M·(p, 1)) comes within ``r`` px of ``(x, y)`` in a
+/// ``w``×``h`` widget; a box crossing the eye plane, or not finite, counts.
+/// The same operations, in parallel.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn boxes_near_px<'py>(py: Python<'py>, lo: PyReadonlyArray2<'py, f64>,
+                      hi: PyReadonlyArray2<'py, f64>, mvp: Vec<f64>, w: f64, h: f64,
+                      x: f64, y: f64, r: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
+    use rayon::prelude::*;
+    if mvp.len() != 16 {
+        return Err(pyo3::exceptions::PyValueError::new_err("mvp"));
+    }
+    let (lo, hi) = (rows3(&lo.as_array()), rows3(&hi.as_array()));
+    if lo.len() != hi.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err("boxes"));
+    }
+    let m = |j: usize, k: usize| mvp[4 * j + k];
+    let keep: Vec<i64> = py.detach(|| (0..lo.len()).into_par_iter().filter(|&i| {
+        let (a, b) = (lo[i], hi[i]);
+        let (mut x0, mut x1, mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY,
+                                                f64::INFINITY, f64::NEG_INFINITY);
+        let (mut any_front, mut all_front) = (false, true);
+        for c in 0..8 {
+            let p = [if c & 1 != 0 { b[0] } else { a[0] },
+                     if c & 2 != 0 { b[1] } else { a[1] },
+                     if c & 4 != 0 { b[2] } else { a[2] }];
+            if !p.iter().all(|v| v.is_finite()) {
+                return true;
+            }
+            let clip = |j: usize| p[0] * m(j, 0) + p[1] * m(j, 1) + p[2] * m(j, 2) + m(j, 3);
+            let cw = clip(3);
+            if cw > 1e-9 {
+                any_front = true;
+                let sx = (clip(0) / cw * 0.5 + 0.5) * w;
+                let sy = (1.0 - (clip(1) / cw * 0.5 + 0.5)) * h;
+                x0 = x0.min(sx);
+                x1 = x1.max(sx);
+                y0 = y0.min(sy);
+                y1 = y1.max(sy);
+            } else {
+                all_front = false;
+            }
+        }
+        if any_front && !all_front {
+            return true;
+        }
+        all_front && x0 - r <= x && x <= x1 + r && y0 - r <= y && y <= y1 + r
+    }).map(|i| i as i64).collect());
+    Ok(PyArray1::from_vec(py, keep))
 }
 
 /// QVector3D's own arithmetic on each row of ``v`` (N,3) float32, for the
@@ -441,6 +495,7 @@ impl InstanceProto {
 struct InstanceSet {
     protos: Vec<std::sync::Arc<instances::Proto>>,
     places: Vec<instances::Placement>,
+    bvh: instances::PlaceBvh,
 }
 
 #[pymethods]
@@ -489,7 +544,8 @@ impl InstanceSet {
                                                inv: instances::affine_inverse(&mm),
                                                lo: blo, hi: bhi });
         }
-        Ok(Self { protos: pr, places })
+        let bvh = instances::PlaceBvh::new(&places);
+        Ok(Self { protos: pr, places, bvh })
     }
 
     fn __len__(&self) -> usize {
@@ -625,39 +681,35 @@ impl InstanceSet {
         self.check(&c)?;
         let mut a = [0.0f64; 16];
         a.copy_from_slice(&mvp);
-        let found: Vec<(usize, i64, Vec<instances::NearEdge>)> = py.detach(|| c.par_iter().enumerate()
+        // The candidates by how near their boxes come on screen, nearest
+        // first: once the heap holds ``cap`` edges, a box farther than the
+        // worst of them holds none that could enter, nor do the rest.
+        let mut gaps: Vec<(f64, usize, i64)> = py.detach(|| c.par_iter().enumerate()
             .filter_map(|(k, &i)| {
-                let p = &self.places[i as usize];
-                if !p.screen_may_reach(&a, w, h, px, py_, radius) {
-                    return None;
-                }
-                let mut out = Vec::new();
-                self.protos[p.proto].edges_near(&p.m, &a, w, h, px, py_, radius, &mut out);
-                if out.is_empty() { None } else { Some((k, i, out)) }
+                let g = self.places[i as usize].screen_gap(&a, w, h, px, py_);
+                if g < radius { Some((g, k, i)) } else { None }
             }).collect());
-        let mut all: Vec<(f64, usize, u32, i64, [f64; 3], [f64; 3])> = found.into_iter()
-            .flat_map(|(k, i, es)| es.into_iter().map(move |e| (e.d, k, e.edge, i, e.a, e.b)))
-            .collect();
-        let key = |x: &(f64, usize, u32, i64, [f64; 3], [f64; 3])| (x.0, x.1, x.2);
-        let cmp = |x: &(f64, usize, u32, i64, [f64; 3], [f64; 3]),
-                   y: &(f64, usize, u32, i64, [f64; 3], [f64; 3])| {
-            let (a, b) = (key(x), key(y));
-            a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2))
-        };
-        if cap > 0 && all.len() > cap {
-            all.select_nth_unstable_by(cap - 1, cmp);
-            all.truncate(cap);
-        }
-        all.sort_by(cmp);
+        gaps.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+        let all = py.detach(|| {
+            let mut heap = instances::NearHeap::new(cap, radius);
+            for &(g, k, i) in &gaps {
+                if !heap.may_take(g) {
+                    break;
+                }
+                let p = &self.places[i as usize];
+                self.protos[p.proto].edges_near(&p.m, &a, w, h, px, py_, k, i, &mut heap);
+            }
+            heap.into_sorted()
+        });
         let n = all.len();
         let (mut pl, mut ed, mut d) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
         let (mut av, mut bv) = (Vec::with_capacity(n), Vec::with_capacity(n));
-        for (dd, _k, e, i, ea, eb) in all {
-            pl.push(i);
-            ed.push(e as i64);
-            d.push(dd);
-            av.push(ea.to_vec());
-            bv.push(eb.to_vec());
+        for e in all {
+            pl.push(e.place);
+            ed.push(e.edge as i64);
+            d.push(e.d);
+            av.push(e.a.to_vec());
+            bv.push(e.b.to_vec());
         }
         let arr = |v: Vec<Vec<f64>>| -> PyResult<Bound<'py, PyArray2<f64>>> {
             if v.is_empty() {
@@ -688,8 +740,13 @@ impl InstanceSet {
         if l.len() != d.len() {
             return Err(pyo3::exceptions::PyValueError::new_err("limit"));
         }
+        // The candidates as a mask: each ray walks the placements' BVH.
+        let mut mask = vec![false; self.places.len()];
+        for &i in &c {
+            mask[i as usize] = true;
+        }
         let out: Vec<(bool, bool)> = py.detach(|| (0..d.len()).into_par_iter()
-            .map(|r| self.occluded_ray(&c, o, d[r], l[r])).collect());
+            .map(|r| self.occluded_ray(&mask, o, d[r], l[r])).collect());
         let (hid, dbt): (Vec<bool>, Vec<bool>) = out.into_iter().unzip();
         Ok((PyArray1::from_vec(py, hid), PyArray1::from_vec(py, dbt)))
     }
@@ -736,16 +793,23 @@ impl InstanceSet {
 }
 
 impl InstanceSet {
-    fn occluded_ray(&self, cand: &[i64], o: [f64; 3], d: [f64; 3], limit: f64) -> (bool, bool) {
+    /// Whether the placements in ``mask`` hide the point at ``limit`` along
+    /// the ray: ``(hidden, doubt)``. Any one that hides it settles it, so
+    /// the order they are met in does not matter.
+    fn occluded_ray(&self, mask: &[bool], o: [f64; 3], d: [f64; 3], limit: f64) -> (bool, bool) {
         let mut doubt = false;
-        for &i in cand {
-            let p = &self.places[i as usize];
+        let mut found = false;
+        self.bvh.on_ray(o, d, limit, |i| {
+            if !mask[i] {
+                return true;
+            }
+            let p = &self.places[i];
             if !p.ray_meets_box(o, d, limit) {
-                continue;
+                return true;
             }
             let Some((lo, ld)) = p.local_ray(o, d) else {
                 doubt = true;
-                continue;
+                return true;
             };
             let pr = &self.protos[p.proto];
             let mut hidden = false;
@@ -764,10 +828,12 @@ impl InstanceSet {
                 }
             });
             if hidden {
-                return (true, false);
+                found = true;
+                return false;
             }
-        }
-        (false, doubt)
+            true
+        });
+        if found { (true, false) } else { (false, doubt) }
     }
 
     fn check(&self, c: &[i64]) -> PyResult<()> {

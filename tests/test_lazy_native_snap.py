@@ -157,3 +157,37 @@ def test_a_point_is_hidden_unbaked_as_it_is_baked(pair):
         hidden += sum(want)
     assert 0 < hidden < 4 * 300
     assert not getattr(va, "_pick_live", None)
+
+
+def _edge_key(e):
+    return (_key(e.a), _key(e.b), getattr(e, "in_group", False),
+            getattr(e, "context", None),
+            getattr(getattr(e, "group", None), "name", None))
+
+
+def test_the_edges_near_the_cursor_are_the_baked_ones(pair):
+    """The group edges a snap is fed and the one the linear inferences
+    hover come from the engine for the lazy copies, and they are the pick
+    index's."""
+    va, vb = pair
+    seen = 0
+    for view in VIEWS:
+        _set_view(va, view)
+        _set_view(vb, view)
+        for x in np.arange(11.3, 900, 23.0):
+            for y in np.arange(7.9, 640, 29.0):
+                va._input_serial = vb._input_serial = (x, y)
+                got = va._nearby_group_edges(float(x), float(y))
+                want = vb._nearby_group_edges(float(x), float(y))
+                # The same edges; their order is the index's, which for the
+                # lazy part is the order the placements were baked in.
+                assert (sorted(map(_edge_key, got))
+                        == sorted(map(_edge_key, want))), (view, x, y)
+                g1 = va.pick_edge_any(float(x), float(y))
+                g2 = vb.pick_edge_any(float(x), float(y))
+                assert ((g1 is None) == (g2 is None)
+                        and (g1 is None or _edge_key(g1) == _edge_key(g2))), \
+                    (view, x, y)
+                seen += len(want) + (g2 is not None)
+    assert not getattr(va, "_pick_live", None)
+    assert seen > 200

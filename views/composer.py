@@ -36,7 +36,7 @@ from core.composition import (COMMON_SCALES, NEW_FRAME_STYLE, PAPER_SIZES_MM, RE
                               AddItemCommand, BarraEscala, Cajetin,
                               ComposerHistory, Composicion, CompoundCommand, CotaAngularItem, CotaItem,
                               CotaRadialItem,
-                              EditItemCommand, EtiquetaItem, expand_fields, set_field_context, FlechaNorte, FormaItem, LlamadaItem, NivelItem,
+                              EditItemCommand, EtiquetaItem, expand_fields, local_field_names, set_field_context, FlechaNorte, FormaItem, LlamadaItem, NivelItem,
                               ImagenItem, Leyenda, MarcoVista,
                               PerfilTerreno, RemoveItemCommand, TextoItem,
                               apply_frame_camera, cota_line_deg,
@@ -6282,10 +6282,10 @@ class ComposerWindow(QMainWindow):
         tpl_btn.clicked.connect(self._on_templates_menu)
         mgr.addWidget(tpl_btn)
         dis_lay.addLayout(mgr)
-        fields_note = QLabel(tr(
+        fields_note = QLabel(local_field_names(tr(
             "Dynamic fields for texts and the title block: {proyecto} "
             "{autor} {lamina} {escala} {escena} {fecha} {archivo} {hoja} "
-            "{total}"))
+            "{total}")))
         fields_note.setWordWrap(True)
         theme_style(fields_note, "color:{muted}; font-size: 11px;")
         dis_lay.addWidget(fields_note)
@@ -6710,11 +6710,11 @@ class ComposerWindow(QMainWindow):
         self.paper_bg_check.toggled.connect(self._on_frame_props)
         form.addRow("", self.paper_bg_check)
         self.title_check = QCheckBox(tr("View title"))
-        self.title_check.setToolTip(tr(
+        self.title_check.setToolTip(local_field_names(tr(
             "The label of the view: a numbered bubble, the title and the "
             "scale over a rule, a vertical bar beside the frame, "
             "or a plain centred line. Fields like {escala}, {lamina} and "
-            "{escena} expand."))
+            "{escena} expand.")))
         self.title_check.toggled.connect(self._on_frame_props)
         form.addRow(self.title_check)
         self.title_style_combo = QComboBox()
@@ -6740,9 +6740,9 @@ class ComposerWindow(QMainWindow):
         _row(self._title_rows, tr("Number"), self.title_number_edit)
         self.title_sheet_edit = QLineEdit()
         self.title_sheet_edit.setPlaceholderText(tr("none"))
-        self.title_sheet_edit.setToolTip(tr(
+        self.title_sheet_edit.setToolTip(local_field_names(tr(
             "The bubble's lower half: the sheet the view lives on "
-            "(«A101», or {lamina} to read the title block)."))
+            "(«A101», or {lamina} to read the title block).")))
         self.title_sheet_edit.textChanged.connect(self._on_frame_title)
         _row(self._title_rows, tr("Sheet in the bubble"), self.title_sheet_edit)
         self.title_scale_check = QCheckBox(tr("Append the scale"))
@@ -6926,9 +6926,9 @@ class ComposerWindow(QMainWindow):
         w = QWidget()
         form = QFormLayout(w)
         self.text_edit = QPlainTextEdit()
-        self.text_edit.setToolTip(tr(
+        self.text_edit.setToolTip(local_field_names(tr(
             "Dynamic fields: {proyecto} {autor} {lamina} {escala} {escena} "
-            "{fecha} {archivo} {nombre} {hoja} {total}"))
+            "{fecha} {archivo} {nombre} {hoja} {total}")))
         self.text_edit.setFixedHeight(70)
         self.text_edit.textChanged.connect(self._on_text_props)
         form.addRow(tr("Text"), self.text_edit)
@@ -7224,9 +7224,9 @@ class ComposerWindow(QMainWindow):
         self.ll_number.textChanged.connect(self._on_llamada_props)
         form.addRow(tr("Detail number"), self.ll_number)
         self.ll_sheet = QLineEdit()
-        self.ll_sheet.setToolTip(tr(
+        self.ll_sheet.setToolTip(local_field_names(tr(
             "The sheet the detail is drawn on (lower half): «L-05», or "
-            "{lamina} for this sheet's own name."))
+            "{lamina} for this sheet's own name.")))
         self.ll_sheet.textChanged.connect(self._on_llamada_props)
         form.addRow(tr("Detail sheet"), self.ll_sheet)
         self.ll_shape = QComboBox()
@@ -7336,9 +7336,9 @@ class ComposerWindow(QMainWindow):
         form = QFormLayout(w)
         self.et_text = QPlainTextEdit()
         self.et_text.setMaximumHeight(70)
-        self.et_text.setToolTip(tr(
+        self.et_text.setToolTip(local_field_names(tr(
             "Dynamic fields: {proyecto} {autor} {lamina} {escala} {escena} "
-            "{fecha} {archivo} {nombre} {hoja} {total}"))
+            "{fecha} {archivo} {nombre} {hoja} {total}")))
         self.et_text.textChanged.connect(self._on_etiqueta_props)
         form.addRow(tr("Text"), self.et_text)
         self.et_size = QDoubleSpinBox()

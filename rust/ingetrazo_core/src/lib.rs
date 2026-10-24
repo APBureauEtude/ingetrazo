@@ -446,10 +446,13 @@ struct InstanceSet {
 #[pymethods]
 impl InstanceSet {
     #[new]
+    #[pyo3(signature = (protos, proto_of, mats, lo=None, hi=None))]
     fn new(
         protos: Vec<PyRef<'_, InstanceProto>>,
         proto_of: PyReadonlyArray1<'_, i64>,
         mats: PyReadonlyArray2<'_, f64>,
+        lo: Option<PyReadonlyArray2<'_, f64>>,
+        hi: Option<PyReadonlyArray2<'_, f64>>,
     ) -> PyResult<Self> {
         let pr: Vec<std::sync::Arc<instances::Proto>> = protos.iter().map(|p| p.inner.clone()).collect();
         let po = proto_of.as_array();
@@ -457,6 +460,17 @@ impl InstanceSet {
         if m.shape()[0] != po.len() || (po.len() > 0 && m.shape()[1] != 16) {
             return Err(pyo3::exceptions::PyValueError::new_err("placements"));
         }
+        let boxes = match (&lo, &hi) {
+            (Some(a), Some(b)) => {
+                let (a, b) = (rows3(&a.as_array()), rows3(&b.as_array()));
+                if a.len() != po.len() || b.len() != po.len() {
+                    return Err(pyo3::exceptions::PyValueError::new_err("boxes"));
+                }
+                Some((a, b))
+            }
+            (None, None) => None,
+            _ => return Err(pyo3::exceptions::PyValueError::new_err("lo and hi")),
+        };
         let mut places = Vec::with_capacity(po.len());
         for i in 0..po.len() {
             let k = po[i];
@@ -467,7 +481,13 @@ impl InstanceSet {
             for j in 0..16 {
                 mm[j] = m[[i, j]];
             }
-            places.push(instances::Placement { proto: k as usize, m: mm, inv: instances::affine_inverse(&mm) });
+            let (blo, bhi) = match &boxes {
+                Some((a, b)) => instances::grown(a[i], b[i]),
+                None => ([f64::NEG_INFINITY; 3], [f64::INFINITY; 3]),
+            };
+            places.push(instances::Placement { proto: k as usize, m: mm,
+                                               inv: instances::affine_inverse(&mm),
+                                               lo: blo, hi: bhi });
         }
         Ok(Self { protos: pr, places })
     }
@@ -517,9 +537,239 @@ impl InstanceSet {
             self.protos[p.proto].screen_near(&m, w, h, px, py_, edge_reach, tri_reach)
         }).collect()))
     }
+
+    /// The hard-edge ends of placements ``cand`` within ``reach`` px of
+    /// ``(px, py)`` on a ``w``×``h`` view through ``mvp`` (16 floats,
+    /// column-major): ``(place, edge, end, xyz (N,3), sx, sy)`` — each end
+    /// as the bake would store it (float32) and its pixel as
+    /// ``Viewport._project_px`` gives it, bit for bit; an edge counts only
+    /// with both ends in front of the eye. In ``cand`` order, then edge,
+    /// then end.
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    #[pyo3(signature = (cand, mvp, w, h, px, py_, reach, seen=None))]
+    fn corners_near<'py>(&self, py: Python<'py>, cand: PyReadonlyArray1<'py, i64>, mvp: Vec<f64>,
+                         w: f64, h: f64, px: f64, py_: f64, reach: f64,
+                         seen: Option<(Vec<f64>, PyReadonlyArray2<'py, f64>, i64, i64, f64, i64)>)
+        -> PyResult<(Bound<'py, PyArray1<i64>>, Bound<'py, PyArray1<i64>>,
+                     Bound<'py, PyArray1<i64>>, Bound<'py, PyArray2<f64>>,
+                     Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<f64>>)> {
+        use rayon::prelude::*;
+        if mvp.len() != 16 {
+            return Err(pyo3::exceptions::PyValueError::new_err("mvp"));
+        }
+        let c = cand.as_array().to_vec();
+        self.check(&c)?;
+        let mut a = [0.0f64; 16];
+        a.copy_from_slice(&mvp);
+        // (eye, limits (gh, gw), x0, y0, dpr, device height): corners the
+        // frame shows something in front of are left out here.
+        let seen = match seen {
+            Some((eye, g, x0, y0, dpr, hdev)) if eye.len() == 3 => {
+                let ga = g.as_array();
+                Some(instances::DepthLimits {
+                    eye: [eye[0], eye[1], eye[2]], lim: ga.iter().copied().collect(),
+                    x0, y0, gw: ga.shape()[1] as i64, gh: ga.shape()[0] as i64, dpr, hdev })
+            }
+            Some(_) => return Err(pyo3::exceptions::PyValueError::new_err("seen")),
+            None => None,
+        };
+        let seen = seen.as_ref();
+        let found: Vec<(i64, Vec<instances::Corner>)> = py.detach(|| c.par_iter().filter_map(|&i| {
+            let p = &self.places[i as usize];
+            if !p.screen_may_reach(&a, w, h, px, py_, reach) {
+                return None;
+            }
+            let mut out = Vec::new();
+            self.protos[p.proto].corners_near(&p.m, &a, w, h, px, py_, reach, seen, &mut out);
+            if out.is_empty() { None } else { Some((i, out)) }
+        }).collect());
+        let n: usize = found.iter().map(|f| f.1.len()).sum();
+        let (mut pl, mut ed, mut en) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
+        let (mut xyz, mut sx, mut sy) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
+        for (i, cs) in found {
+            for k in cs {
+                pl.push(i);
+                ed.push(k.edge as i64);
+                en.push(k.end as i64);
+                xyz.push(vec![k.xyz[0], k.xyz[1], k.xyz[2]]);
+                sx.push(k.sx);
+                sy.push(k.sy);
+            }
+        }
+        let xyz = if xyz.is_empty() {
+            PyArray2::zeros(py, [0, 3], false)
+        } else {
+            PyArray2::from_vec2(py, &xyz).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+        };
+        Ok((PyArray1::from_vec(py, pl), PyArray1::from_vec(py, ed), PyArray1::from_vec(py, en),
+            xyz, PyArray1::from_vec(py, sx), PyArray1::from_vec(py, sy)))
+    }
+
+    /// The hard edges of placements ``cand`` within ``radius`` px of
+    /// ``(px, py)`` on a ``w``×``h`` view through ``mvp`` (both ends in
+    /// front), the nearest ``cap`` of them (0: all) by (distance, place in
+    /// ``cand``, edge): ``(place, edge, a (N,3), b (N,3), d)`` — the ends as
+    /// the bake stores them, the distance as ``segment_distances`` gives
+    /// it, bit for bit.
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    fn edges_near<'py>(&self, py: Python<'py>, cand: PyReadonlyArray1<'py, i64>, mvp: Vec<f64>,
+                       w: f64, h: f64, px: f64, py_: f64, radius: f64, cap: usize)
+        -> PyResult<(Bound<'py, PyArray1<i64>>, Bound<'py, PyArray1<i64>>,
+                     Bound<'py, PyArray2<f64>>, Bound<'py, PyArray2<f64>>,
+                     Bound<'py, PyArray1<f64>>)> {
+        use rayon::prelude::*;
+        if mvp.len() != 16 {
+            return Err(pyo3::exceptions::PyValueError::new_err("mvp"));
+        }
+        let c = cand.as_array().to_vec();
+        self.check(&c)?;
+        let mut a = [0.0f64; 16];
+        a.copy_from_slice(&mvp);
+        let found: Vec<(usize, i64, Vec<instances::NearEdge>)> = py.detach(|| c.par_iter().enumerate()
+            .filter_map(|(k, &i)| {
+                let p = &self.places[i as usize];
+                if !p.screen_may_reach(&a, w, h, px, py_, radius) {
+                    return None;
+                }
+                let mut out = Vec::new();
+                self.protos[p.proto].edges_near(&p.m, &a, w, h, px, py_, radius, &mut out);
+                if out.is_empty() { None } else { Some((k, i, out)) }
+            }).collect());
+        let mut all: Vec<(f64, usize, u32, i64, [f64; 3], [f64; 3])> = found.into_iter()
+            .flat_map(|(k, i, es)| es.into_iter().map(move |e| (e.d, k, e.edge, i, e.a, e.b)))
+            .collect();
+        let key = |x: &(f64, usize, u32, i64, [f64; 3], [f64; 3])| (x.0, x.1, x.2);
+        let cmp = |x: &(f64, usize, u32, i64, [f64; 3], [f64; 3]),
+                   y: &(f64, usize, u32, i64, [f64; 3], [f64; 3])| {
+            let (a, b) = (key(x), key(y));
+            a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2))
+        };
+        if cap > 0 && all.len() > cap {
+            all.select_nth_unstable_by(cap - 1, cmp);
+            all.truncate(cap);
+        }
+        all.sort_by(cmp);
+        let n = all.len();
+        let (mut pl, mut ed, mut d) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
+        let (mut av, mut bv) = (Vec::with_capacity(n), Vec::with_capacity(n));
+        for (dd, _k, e, i, ea, eb) in all {
+            pl.push(i);
+            ed.push(e as i64);
+            d.push(dd);
+            av.push(ea.to_vec());
+            bv.push(eb.to_vec());
+        }
+        let arr = |v: Vec<Vec<f64>>| -> PyResult<Bound<'py, PyArray2<f64>>> {
+            if v.is_empty() {
+                Ok(PyArray2::zeros(py, [0, 3], false))
+            } else {
+                PyArray2::from_vec2(py, &v).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+            }
+        };
+        Ok((PyArray1::from_vec(py, pl), PyArray1::from_vec(py, ed), arr(av)?, arr(bv)?,
+            PyArray1::from_vec(py, d)))
+    }
+
+    /// Whether the triangles of placements ``cand`` hide the point at
+    /// ``limit[r]`` along each ray from ``origin`` (``dirs`` (R,3)) — the
+    /// placements as baked, without baking them. ``(hidden, doubt)``: a
+    /// doubtful ray's answer could hang on the last bit (or a placement
+    /// cannot be inverted); the caller decides it on ``ray_tris``.
+    fn occluded<'py>(&self, py: Python<'py>, cand: PyReadonlyArray1<'py, i64>,
+                     origin: (f64, f64, f64), dirs: PyReadonlyArray2<'py, f64>,
+                     limit: PyReadonlyArray1<'py, f64>)
+        -> PyResult<(Bound<'py, PyArray1<bool>>, Bound<'py, PyArray1<bool>>)> {
+        use rayon::prelude::*;
+        let c = cand.as_array().to_vec();
+        self.check(&c)?;
+        let o = [origin.0, origin.1, origin.2];
+        let d = rows3(&dirs.as_array());
+        let l = limit.as_array().to_vec();
+        if l.len() != d.len() {
+            return Err(pyo3::exceptions::PyValueError::new_err("limit"));
+        }
+        let out: Vec<(bool, bool)> = py.detach(|| (0..d.len()).into_par_iter()
+            .map(|r| self.occluded_ray(&c, o, d[r], l[r])).collect());
+        let (hid, dbt): (Vec<bool>, Vec<bool>) = out.into_iter().unzip();
+        Ok((PyArray1::from_vec(py, hid), PyArray1::from_vec(py, dbt)))
+    }
+
+    /// The world triangles (v0, e1, e2), as baked, of placements ``cand``
+    /// that the ray from ``origin`` along ``d`` may meet before ``limit`` —
+    /// a superset of what the exact test accepts. A placement that cannot
+    /// be inverted gives all of its triangles.
+    #[allow(clippy::type_complexity)]
+    fn ray_tris<'py>(&self, py: Python<'py>, cand: PyReadonlyArray1<'py, i64>,
+                     origin: (f64, f64, f64), d: (f64, f64, f64), limit: f64)
+        -> PyResult<(Bound<'py, PyArray2<f64>>, Bound<'py, PyArray2<f64>>, Bound<'py, PyArray2<f64>>)> {
+        let c = cand.as_array().to_vec();
+        self.check(&c)?;
+        let (o, d) = ([origin.0, origin.1, origin.2], [d.0, d.1, d.2]);
+        let (mut a, mut b, mut e) = (Vec::new(), Vec::new(), Vec::new());
+        for &i in &c {
+            let p = &self.places[i as usize];
+            if !p.ray_meets_box(o, d, limit) {
+                continue;
+            }
+            let pr = &self.protos[p.proto];
+            let mut take = |r: usize| {
+                let (x, y, z) = pr.world_tri(&p.m, r);
+                a.push(x.to_vec());
+                b.push(y.to_vec());
+                e.push(z.to_vec());
+                true
+            };
+            match p.local_ray(o, d) {
+                Some((lo, ld)) => pr.for_tris_on_ray(lo, ld, limit, &mut take),
+                None => (0..pr.n_tris()).for_each(|r| { take(r); }),
+            }
+        }
+        let arr = |v: Vec<Vec<f64>>| -> PyResult<Bound<'py, PyArray2<f64>>> {
+            if v.is_empty() {
+                Ok(PyArray2::zeros(py, [0, 3], false))
+            } else {
+                PyArray2::from_vec2(py, &v).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+            }
+        };
+        Ok((arr(a)?, arr(b)?, arr(e)?))
+    }
 }
 
 impl InstanceSet {
+    fn occluded_ray(&self, cand: &[i64], o: [f64; 3], d: [f64; 3], limit: f64) -> (bool, bool) {
+        let mut doubt = false;
+        for &i in cand {
+            let p = &self.places[i as usize];
+            if !p.ray_meets_box(o, d, limit) {
+                continue;
+            }
+            let Some((lo, ld)) = p.local_ray(o, d) else {
+                doubt = true;
+                continue;
+            };
+            let pr = &self.protos[p.proto];
+            let mut hidden = false;
+            pr.for_tris_on_ray(lo, ld, limit, |r| {
+                let (v0, e1, e2) = pr.world_tri(&p.m, r);
+                match occlusion::tri_occludes(o, d, limit, v0, e1, e2) {
+                    Some(true) => {
+                        hidden = true;
+                        false
+                    }
+                    Some(false) => true,
+                    None => {
+                        doubt = true;
+                        true
+                    }
+                }
+            });
+            if hidden {
+                return (true, false);
+            }
+        }
+        (false, doubt)
+    }
+
     fn check(&self, c: &[i64]) -> PyResult<()> {
         if c.iter().any(|&i| i < 0 || i as usize >= self.places.len()) {
             return Err(pyo3::exceptions::PyValueError::new_err("placement index"));

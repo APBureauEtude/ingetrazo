@@ -493,6 +493,9 @@ def _occlusion_native():
 #: Lazy placements are filtered by core._native's spatial index before
 #: being baked for a pick (the experimental engine; tests compare both).
 _INSTANCE_FILTER = True
+#: The engine answers the corner and occlusion queries for the lazy
+#: placements without baking them (tests compare both ways).
+_LAZY_NATIVE = True
 #: Span lists this long are culled with NumPy (_visible_spans_np).
 _SPAN_VECTOR_MIN = 64
 #: Recorded instanced passes replayed by the native engine when it is on.
@@ -647,6 +650,47 @@ def _ctx_changed(vp, before):
     cc = getattr(getattr(vp, "history", None), "context_changed", None)
     if cc is not None:
         cc(before)
+
+
+def _occlusion_block(o, d, v0, e1, e2):
+    """``Viewport._occluded_many``'s NumPy block: the nearest accepted hit
+    of each ray ``d`` (r,3) from ``o`` on the triangles (inf: none)."""
+    import numpy as np
+    if not len(v0):
+        return np.full(len(d), np.inf)
+    s = o - v0
+    q = np.cross(s, e1)
+    uq = np.einsum("ij,ij->i", e2, q)
+    p = np.cross(d[:, None, :], e2[None, :, :])
+    det = np.einsum("nj,rnj->rn", e1, p)
+    ok = np.abs(det) > 1e-6
+    inv = np.where(ok, 1.0 / np.where(ok, det, 1.0), 0.0)
+    u = np.einsum("nj,rnj->rn", s, p) * inv
+    v = (d @ q.T) * inv
+    t = uq[None, :] * inv
+    hit = (ok & (u >= 0.0) & (u <= 1.0) & (v >= 0.0) & (u + v <= 1.0)
+           & (t > 1e-6))
+    return np.where(hit, t, np.inf).min(axis=1)
+
+
+def _placed_maps(xf):
+    """``(L, tv, tp)`` of a placement matrix (QMatrix4x4): its linear part
+    and the maps a component bake puts local directions and positions
+    through. Term by term, not ``a @ L.T``: a BLAS product sums in an order
+    of its own (fused, blocked), and the native engine must find the very
+    same world triangles and corners without baking them (#158) —
+    ((x·L0 + y·L1) + z·L2) + t, as core/instances.rs writes it."""
+    import numpy as np
+    m = np.array(xf.data(), dtype=np.float64).reshape(4, 4, order="F")
+    L, t = m[:3, :3], m[:3, 3]
+
+    def tv(a):                           # direction vectors (no translation)
+        return (a[:, 0:1] * L[:, 0] + a[:, 1:2] * L[:, 1]
+                + a[:, 2:3] * L[:, 2])
+
+    def tp(a):                           # positions
+        return tv(a) + t
+    return L, tv, tp
 
 
 def _cat_kept(vp, slot, parts):
@@ -4742,6 +4786,8 @@ class Viewport(QOpenGLWidget):
         self._pick_cat_memo = None        # ...and its pick triangles
         self._pick_te_memo = None
         self._pick_loose_memo = None
+        self._lazy_native_memo = None
+        self._static_occl_memo = None
         self._sil_groups = None
         self._billboard_groups = None
         self._placements_memo = None
@@ -10360,17 +10406,22 @@ class Viewport(QOpenGLWidget):
                 d = QVector3D(new[12] - old[12], new[13] - old[13],
                               new[14] - old[14])
                 self._shift_instance_entry(cur, d)
+                # What the pick index reads is made as a fresh bake makes
+                # it: shifted, it was the old bake plus a float32 offset,
+                # which the native engine — answering for placements it
+                # does not bake (#158) — cannot know.
+                _L, tv, tp = _placed_maps(xf)
+                a = np.frombuffer(base["edges"], np.float32).reshape(-1, 3)
+                cur["edges"] = tp(a.astype(np.float64)).astype(
+                    np.float32).tobytes()
+                if base["v0"] is not None:
+                    cur["v0"] = tp(base["v0"])
+                    cur["e1"] = tv(base["e1"])
+                    cur["e2"] = tv(base["e2"])
                 cur["ikey"] = key
                 cur["rev"] += 1
                 return cur
-        m = np.array(xf.data(), dtype=np.float64).reshape(4, 4, order="F")
-        L, t = m[:3, :3], m[:3, 3]
-
-        def tp(a):                       # positions
-            return a @ L.T + t
-
-        def tv(a):                       # direction vectors (no translation)
-            return a @ L.T
+        L, tv, tp = _placed_maps(xf)
 
         det = float(np.linalg.det(L))
         mirrored = det < 0.0
@@ -11078,7 +11129,11 @@ class Viewport(QOpenGLWidget):
         exact math of :meth:`_world_to_pixel`, vectorised."""
         import numpy as np
         M = self._np_mvp()
-        clip = pts @ M[:, :3].T + M[:, 3]
+        # Term by term, as _instance_chunk bakes (and core/instances.rs
+        # projects the corners it does not bake): a BLAS product sums in an
+        # order of its own.
+        clip = (pts[:, 0:1] * M[:, 0] + pts[:, 1:2] * M[:, 1]
+                + pts[:, 2:3] * M[:, 2] + M[:, 3])
         w = clip[:, 3]
         ok = w > 0
         safe = np.where(ok, w, 1.0)
@@ -11360,9 +11415,98 @@ class Viewport(QOpenGLWidget):
             proto_of[i] = k
             mats[i] = g.xform.data()
         self._inst_proto_cache = keep
-        iset = mod.InstanceSet(protos, proto_of, mats)
+        iset = mod.InstanceSet(protos, proto_of, mats,
+                               np.ascontiguousarray(table[1], np.float64),
+                               np.ascontiguousarray(table[2], np.float64))
         self._inst_set_memo = (table, iset)
         return iset
+
+    def _static_occluders(self, idx):
+        """core._native's InstanceSet over the pick index's own triangles
+        that hide what is behind them, placed by the identity (which the
+        engine maps bit for bit): the fixed placements' as one prototype,
+        kept while those triangles and their visibility are — a stroke
+        changes only the loose part, the other prototype. Made once per
+        index."""
+        import numpy as np
+        hit = getattr(idx, "_static_occl", None)
+        if hit is not None:
+            return hit
+        mod = _occlusion_native()
+        if mod is None or not hasattr(mod, "InstanceSet"):
+            return None
+        st = getattr(self, "_pick_static_memo", None)
+        fv0 = st[1]["v0"] if st is not None else None
+        n = len(idx.tri_v0)
+        nf = len(fv0) if fv0 is not None else 0
+        if nf > n or (nf and not np.array_equal(idx.tri_v0[n - nf], fv0[0])):
+            nf = 0                       # not the index's tail: one part
+        vis = idx.ent_vis[idx.tri_ent]
+
+        def proto(lo, hi):
+            keep = np.flatnonzero(vis[lo:hi]) + lo
+            return mod.InstanceProto(
+                np.ascontiguousarray(idx.tri_v0[keep], np.float64),
+                np.ascontiguousarray(idx.tri_e1[keep], np.float64),
+                np.ascontiguousarray(idx.tri_e2[keep], np.float64),
+                np.zeros((0, 6)))
+        memo = getattr(self, "_static_occl_memo", None)
+        fkeep = vis[n - nf:]
+        if (nf and memo is not None and memo[0] is fv0
+                and np.array_equal(memo[1], fkeep)):
+            fixed = memo[2]
+        elif nf:
+            fixed = proto(n - nf, n)
+            self._static_occl_memo = (fv0, fkeep.copy(), fixed)
+        else:
+            fixed = None
+        protos = [proto(0, n - nf)] + ([fixed] if fixed is not None else [])
+        iset = mod.InstanceSet(protos, np.arange(len(protos), dtype=np.int64),
+                               np.tile(np.eye(4).reshape(1, 16),
+                                       (len(protos), 1)))
+        idx._static_occl = (iset, np.arange(len(protos), dtype=np.int64))
+        return idx._static_occl
+
+    def _lazy_native(self):
+        """What the experimental engine answers for the context's lazy
+        placements without baking them (#158): ``(iset, snap, vis)`` —
+        core._native's InstanceSet over the lazy table, and the table rows
+        of the placements the pick index would take that a snap may land
+        on and that hide what is behind them, in the index's order — or
+        ``None`` (no lazy table, no engine)."""
+        if not _LAZY_NATIVE:
+            return None
+        table = self._pick_lazy_table()
+        if table is None:
+            return None
+        iset = self._pick_instance_set(table)
+        if iset is None or not hasattr(iset, "corners_near"):
+            return None
+        oculto = getattr(self, "_rest_is_hidden", None)
+        oculto = bool(oculto()) if callable(oculto) else False
+        ckey = (self._placements_epoch(), id(self.scene.edit_group), oculto,
+                id(table))
+        cmemo = getattr(self, "_pick_cands_memo", None)
+        if cmemo is None or cmemo[0] != ckey:
+            self._pick_index(near="skip")         # the candidates it takes
+            cmemo = getattr(self, "_pick_cands_memo", None)
+            if cmemo is None or cmemo[0] != ckey:
+                return None
+        memo = getattr(self, "_lazy_native_memo", None)
+        if memo is not None and memo[0] is cmemo and memo[1] is iset:
+            return memo[2]
+        import numpy as np
+        scene = self.scene
+        row = {id(g): i for i, g in enumerate(table[0])}
+        ordered = [g for _p, g in sorted(cmemo[3].values(),
+                                         key=lambda pg: pg[0])]
+        snap = np.fromiter((row[id(g)] for g in ordered
+                            if scene.entity_selectable(g)), np.int64)
+        vis = np.fromiter((row[id(g)] for g in ordered
+                           if scene.entity_visible(g)), np.int64)
+        out = (iset, snap, vis)
+        self._lazy_native_memo = (cmemo, iset, out)
+        return out
 
     def _pick_materialize(self, near) -> None:
         """Bake into the pick index the lazy placements a query needs:
@@ -11565,6 +11709,73 @@ class Viewport(QOpenGLWidget):
                 changed = True
         if changed:
             self._pick_gen = getattr(self, "_pick_gen", 0) + 1
+
+    def _depth_limits(self, x: float, y: float, r: float):
+        """What the last frame shows within ``r`` px of widget pixel
+        ``(x, y)``: per device pixel of that patch, the distance from the
+        eye past which a point there is hidden by something drawn — the
+        farthest surface drawn at the pixel and the 8 around it, plus what
+        the depth buffer cannot tell apart (8 steps of a 24-bit depth),
+        0.2 % and 2 cm; inf where it cannot say (sky at the pixel, the edge
+        of the frame). ``(eye, limits (gh, gw), x0, y0, dpr, device height)``
+        as core.instances.DepthLimits reads it, or None without a frame."""
+        import numpy as np
+        if self._depth_world_at(x, y) is None:
+            return None
+        buf, inv, w, h = (self._depth_snap[0], self._depth_snap[2],
+                          self._depth_snap[3], self._depth_snap[4])
+        dpr = w / max(1, self.width())
+        x0 = int(np.floor((x - r) * dpr)) - 1
+        x1 = int(np.floor((x + r) * dpr)) + 1
+        yb0 = h - 1 - (int(np.floor((y + r) * dpr)) + 1)
+        yb1 = h - 1 - (int(np.floor((y - r) * dpr)) - 1)
+        ix, iy = np.meshgrid(np.arange(x0, x1 + 1), np.arange(yb0, yb1 + 1))
+        inside = (ix >= 1) & (ix < w - 1) & (iy >= 1) & (iy < h - 1)
+        cx, cy = np.clip(ix, 1, w - 2), np.clip(iy, 1, h - 2)
+        # The farthest of what is drawn among the nine (the sky among them
+        # is nothing in front): a corner on a silhouette is measured
+        # against the farther side of it.
+        d = np.zeros(ix.shape, dtype=np.float64)
+        for oy in (-1, 0, 1):
+            for ox in (-1, 0, 1):
+                b = buf[cy + oy, cx + ox]
+                d = np.maximum(d, np.where(b < 1.0, b, 0.0))
+        M = np.array(inv.data(), dtype=np.float64).reshape(4, 4, order="F")
+        e = self.camera.eye()
+        e = np.array([e.x(), e.y(), e.z()])
+
+        def dist_at(depth):
+            ndc = np.stack([(ix + 0.5) / w * 2.0 - 1.0,
+                            (iy + 0.5) / h * 2.0 - 1.0,
+                            depth * 2.0 - 1.0, np.ones(ix.shape)], axis=-1)
+            q = ndc @ M.T
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r_ = np.linalg.norm(q[..., :3] / q[..., 3:4] - e, axis=-1)
+            return np.where(np.abs(q[..., 3]) >= 1e-12, r_, np.nan)
+        far = dist_at(d)
+        step = dist_at(np.minimum(d + 8.0 / (1 << 24), 1.0)) - far
+        lim = far + np.abs(step) + 0.0005 * far + 0.01
+        ok = (inside & (buf[cy, cx] < 1.0) & np.isfinite(lim)
+              & (far <= 1.01 * self.camera.far_plane()))
+        lim = np.ascontiguousarray(np.where(ok, lim, np.inf))
+        return (e.tolist(), lim, x0, yb0, float(dpr), int(h))
+
+    @staticmethod
+    def _depth_hidden(seen, pts, sx, sy):
+        """core.instances.DepthLimits.hides for arrays: per point (N,3) at
+        widget pixel ``(sx, sy)``, whether it lies past its pixel's limit."""
+        import numpy as np
+        eye, lim, x0, y0, dpr, hdev = seen
+        gh, gw = lim.shape
+        ix = np.floor(sx * dpr).astype(np.int64) - x0
+        iy = hdev - 1 - np.floor(sy * dpr).astype(np.int64) - y0
+        at = (ix >= 0) & (iy >= 0) & (ix < gw) & (iy < gh)
+        out = np.zeros(len(pts), dtype=bool)
+        k = np.flatnonzero(at)
+        if len(k):
+            dist = np.sqrt(((pts[k] - np.array(eye)) ** 2).sum(axis=1))
+            out[k] = dist > lim[iy[k], ix[k]]
+        return out
 
     def _visible_depth_limit(self, x: float, y: float):
         """The farthest distance from the eye of what the last frame shows
@@ -13414,6 +13625,10 @@ class Viewport(QOpenGLWidget):
         ascending screen distance, so the nearest visible corner wins — the
         same answer the old per-edge scan produced)."""
         import numpy as np
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        if nat is not None:
+            return self._pick_vertex_unbaked(screen_x, screen_y, nat)
         idx = self._pick_index(near=("px", screen_x, screen_y))
         # On the projections the viewport already caches per camera pose
         # (this runs on EVERY hover now — encouraged points): one numpy
@@ -13495,6 +13710,90 @@ class Viewport(QOpenGLWidget):
             hidden = (many(batch) if many is not None
                       else [self._is_occluded(v) for v in batch])
             for v, h in zip(batch, hidden):
+                if not h:
+                    return v
+            k += size
+            size = min(size * 2, 1024)
+        return None
+
+    def _pick_vertex_unbaked(self, screen_x, screen_y, nat):
+        """``pick_vertex`` with the lazy placements' corners from the
+        native engine, none of them baked (#158): the loose edges' and the
+        fixed placements' corners as the index holds them, every lazy
+        placement's as its bake would hold them, at the same pixels —
+        nearest first, the hidden ones left out, as there."""
+        import numpy as np
+        iset, snap, _vis = nat
+        idx = self._pick_index(near="skip")
+        thr = self.pick_threshold_px
+        parts = []                       # (px, py, in front, points)
+        ledge = getattr(self, "_ledge_screen", None)
+        lp = ledge() if ledge is not None else None
+        if lp is None and idx.edge_a is not None and len(idx.edge_a):
+            ax, ay, oka = self._project_px(idx.edge_a)
+            bx, by, okb = self._project_px(idx.edge_b)
+            lp = (ax, ay, bx, by, oka & okb)
+        if lp is not None:
+            ax, ay, bx, by, ok = lp
+            parts += [(ax, ay, ok, idx.edge_a), (bx, by, ok, idx.edge_b)]
+        fx = getattr(idx, "gedge_fixed", None)
+        m = fx[1] if fx is not None else 0
+        gp = self._gedge_screen() if m else None
+        if gp is not None:
+            # The fixed placements' edges lead the index's; the lazy ones
+            # it holds now are among those the engine answers for.
+            ax, ay, bx, by, ok = gp
+            parts += [(ax[:m], ay[:m], ok[:m], idx.gedge_a[:m]),
+                      (bx[:m], by[:m], ok[:m], idx.gedge_b[:m])]
+        # What the frame shows in front of a corner hides it: zoomed out
+        # over the plant of #158 some 800 000 corners of the copies lay
+        # under the cursor, nearly all hidden, and a ray each took 15 s.
+        # The rule that kept such placements out of the index unbaked (see
+        # _pick_materialize), per corner at its own pixel. A corner whose
+        # pixel and the 8 around it all show something nearer is not to be
+        # seen on screen, even where an ideal ray to its very point grazes
+        # past (a post rising beside it, seen from afar): one such corner
+        # in 109 cursor positions over that plant, left for another a pixel
+        # away. Whatever comes back is still a ray's visible answer.
+        seen = self._depth_limits(float(screen_x), float(screen_y), thr)
+        ds, ps = [], []
+        for x, y, ok, pts in parts:
+            d = np.where(ok, np.hypot(x - screen_x, y - screen_y), np.inf)
+            k = np.flatnonzero(d < thr)
+            if len(k) and seen is not None:
+                k = k[~self._depth_hidden(seen, pts[k], x[k], y[k])]
+            if len(k):
+                ds.append(d[k])
+                ps.append(pts[k])
+        if len(snap):
+            M = self._np_mvp()
+            pl, _e, _n, xyz, rx, ry = iset.corners_near(
+                snap, np.ascontiguousarray(M.T).ravel().tolist(),
+                float(self.width()), float(self.height()),
+                float(screen_x), float(screen_y), thr * (1.0 + 1e-9) + 1e-9,
+                seen)
+            if len(pl):
+                d = np.hypot(rx - screen_x, ry - screen_y)
+                k = np.flatnonzero(d < thr)
+                if len(k):
+                    ds.append(d[k])
+                    ps.append(xyz[k])
+        if not ds:
+            return None
+        d = np.concatenate(ds)
+        pts = np.concatenate(ps)[np.argsort(d, kind="stable")]
+        first = QVector3D(*pts[0].tolist())
+        if not self._is_occluded(first):
+            return first
+        if len(pts) > 1:
+            # Each point once, where it first comes (see pick_vertex).
+            _u, at = np.unique(pts, axis=0, return_index=True)
+            at.sort()
+            pts = pts[at]
+        k, size = 1, 8
+        while k < len(pts):
+            batch = [QVector3D(*p) for p in pts[k:k + size].tolist()]
+            for v, h in zip(batch, self._occluded_many(batch)):
                 if not h:
                     return v
             k += size
@@ -13711,6 +14010,10 @@ class Viewport(QOpenGLWidget):
             return True
         if self._effective_style().face_mode in ("xray", "wireframe"):
             return False
+        if (sp is None and hasattr(self, "_lazy_native")
+                and self._lazy_native() is not None):
+            # Every lazy placement, unbaked, through the batched pass.
+            return self._occluded_many([world])[0]
         idx = self._pick_index()
         if getattr(idx, "tri_v0", None) is None \
                 and not getattr(idx, "own_spans", None):
@@ -13769,9 +14072,18 @@ class Viewport(QOpenGLWidget):
         if not worlds or self._effective_style().face_mode in ("xray",
                                                                "wireframe"):
             return out
-        idx = self._pick_index()
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        # Unbaked, the lazy placements need nothing around the cursor here.
+        idx = self._pick_index(near="skip" if nat is not None else None)
         own = getattr(idx, "own_spans", None) or ()
-        if getattr(idx, "tri_v0", None) is None and not own:
+        if nat is not None:
+            # The lazy placements are asked of the engine, every one the
+            # index would take — not only those baked now (#158).
+            own = ()
+            if not len(nat[2]):
+                nat = None
+        if getattr(idx, "tri_v0", None) is None and not own and nat is None:
             return out
         if _active_cut(self.scene) is not None:
             return [self._is_occluded(w) for w in worlds]
@@ -13791,13 +14103,29 @@ class Viewport(QOpenGLWidget):
         o = np.array([origin.x(), origin.y(), origin.z()])
         D = np.array(dirs, dtype=np.float64)
         best = np.full(len(rows), np.inf)
-        spans = ([] if idx.tri_v0 is None else
+        settled = None
+        stat = (self._static_occluders(idx) if nat is not None
+                and getattr(idx, "tri_v0", None) is not None else None)
+        if stat is not None:
+            # The loose and fixed triangles in the engine too: span by span
+            # in NumPy, the tens of thousands of corners a roof hides from
+            # far off took a second a pointer move (#158). Only the rays it
+            # cannot call bit for bit go through the spans below.
+            hid, doubt = stat[0].occluded(
+                stat[1], (float(o[0]), float(o[1]), float(o[2])),
+                D, np.array(dists) - 1e-3)
+            best[hid] = -np.inf
+            settled = hid | ~doubt
+        spans = ([] if idx.tri_v0 is None
+                 or (settled is not None and settled.all()) else
                  list(getattr(idx, "tri_spans", None)
                       or [(None, 0, len(idx.tri_v0))]))
         spans += list(own)
         inf = float("inf")
         boxes = getattr(idx, "_span_boxes", None)
-        if boxes is None or boxes[0] != len(spans):
+        if not spans:
+            boxes = (0, np.empty((0, 3)), np.empty((0, 3)))   # not kept
+        elif boxes is None or boxes[0] != len(spans):
             blo = np.array([sp[0][0] if sp[0] is not None else (-inf,) * 3
                             for sp in spans], dtype=np.float64).reshape(-1, 3)
             bhi = np.array([sp[0][1] if sp[0] is not None else (inf,) * 3
@@ -13866,6 +14194,8 @@ class Viewport(QOpenGLWidget):
         # enters its box before that), and spans go nearest first so a ray
         # settled as hidden stops asking.
         meet = meet & (tmin < limit[:, None])                         # (R, S)
+        if settled is not None:
+            meet &= ~settled[:, None]
         ent_mask = idx.ent_vis
         native = _occlusion_native()
         o3 = (float(o[0]), float(o[1]), float(o[2]))
@@ -13925,6 +14255,22 @@ class Viewport(QOpenGLWidget):
                        & (u + v <= 1.0) & (t > 1e-6))
                 tm = np.where(hit, t, np.inf).min(axis=1)
                 best[r] = np.minimum(best[r], tm)
+        if nat is not None:
+            left = np.flatnonzero(best >= limit)
+            if len(left):
+                iset, _snap, vis = nat
+                hid, doubt = iset.occluded(
+                    vis, o3, np.ascontiguousarray(D[left]),
+                    np.ascontiguousarray(limit[left]))
+                best[left[hid]] = -np.inf
+                for r in left[doubt]:
+                    # Too close to call bit for bit: the block above, on
+                    # the triangles the ray may meet, as baked.
+                    v0, e1, e2 = iset.ray_tris(vis, o3, tuple(D[r].tolist()),
+                                               float(limit[r]))
+                    if _occlusion_block(o, D[r:r + 1], v0, e1, e2)[0] \
+                            < limit[r]:
+                        best[r] = -np.inf
         for j, i in enumerate(rows):
             out[i] = bool(best[j] < limit[j])
         return out

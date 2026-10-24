@@ -98,3 +98,62 @@ pub fn span(o: [f64; 3], dirs: &[[f64; 3]], best: &[f64], limit: &[f64],
     };
     out.into_iter().unzip()
 }
+
+/// ``x ≥ thr`` when ``x`` may be off by ``err``: Some when sure, None when
+/// the last bits could decide.
+#[inline]
+fn at_least(x: f64, thr: f64, err: f64) -> Option<bool> {
+    if x - thr > err {
+        Some(true)
+    } else if thr - x > err {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Whether one world triangle hides the point at ``limit`` along the ray
+/// (``_occluded_many``'s acceptance, and its hit nearer than the point):
+/// Some(true) / Some(false) when sure for any summation order, None when
+/// the answer could hang on the last bit.
+pub fn tri_occludes(o: [f64; 3], d: [f64; 3], limit: f64,
+                    v0: [f64; 3], e1: [f64; 3], e2: [f64; 3]) -> Option<bool> {
+    let s = [o[0] - v0[0], o[1] - v0[1], o[2] - v0[2]];
+    let q = cross(s, e1);
+    let uq = dot(e2, q);
+    let p = cross(d, e2);
+    let det = dot(e1, p);
+    let det_err = dot_err(e1, p);
+    if (det.abs() - DET_MIN).abs() <= det_err {
+        return None;
+    }
+    if !(det.abs() > DET_MIN) {
+        return Some(false);
+    }
+    let inv = 1.0 / det;
+    let rel = det_err / det.abs();
+    let u = dot(s, p) * inv;
+    let v = dot(d, q) * inv;
+    let t = uq * inv;
+    let u_err = dot_err(s, p) * inv.abs() + u.abs() * 2.0 * rel;
+    let v_err = dot_err(d, q) * inv.abs() + v.abs() * 2.0 * rel;
+    let t_err = dot_err(e2, q) * inv.abs() + t.abs() * 2.0 * rel;
+    if !(u.is_finite() && v.is_finite() && t.is_finite()) {
+        return None;
+    }
+    let tests = [
+        at_least(u, 0.0, u_err),
+        at_least(1.0, u, u_err),
+        at_least(v, 0.0, v_err),
+        at_least(1.0, u + v, u_err + v_err),
+        at_least(t, T_MIN, t_err),
+        at_least(limit, t, t_err),
+    ];
+    if tests.iter().any(|x| *x == Some(false)) {
+        return Some(false);
+    }
+    if tests.iter().all(|x| *x == Some(true)) {
+        return Some(true);
+    }
+    None
+}

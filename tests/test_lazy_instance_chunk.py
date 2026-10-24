@@ -122,3 +122,30 @@ def test_a_field_set_before_it_is_read_stays_as_set():
     with pytest.raises(KeyError):
         c["nada"]                       # noqa: B018
     assert c.get("nada", 7) == 7
+
+
+def test_a_moved_copy_reads_to_the_index_as_a_fresh_bake():
+    """A pure translation shifts a cached bake instead of making it again;
+    what the pick index reads (triangles, hard edges) comes out the same,
+    bit for bit, as a bake at the new place — the native engine answers
+    for the placements it does not bake from that formula (#158)."""
+    proto = _box()
+    vp = viewport.Viewport(None)
+    groups = _scene(vp, proto)
+    for g in groups:
+        vp._instance_chunk(g)
+        m = QMatrix4x4(g.xform)
+        m.translate(0.1234567, -7.654321, 3.3333333)  # in local axes
+        moved = QMatrix4x4()
+        moved.translate(0.3, 0.7, -0.1)
+        g.xform = moved * m
+    for g in groups:
+        old = tuple(vp._inst_chunks[id(g)]["ikey"][1])
+        shifted = vp._instance_chunk(g)
+        assert shifted["ikey"][1] != old
+        fresh_vp = viewport.Viewport(None)
+        fresh_vp.scene.groups.append(g)
+        fresh = fresh_vp._instance_chunk(g)
+        assert shifted["edges"] == fresh["edges"], g.name
+        for k in ("v0", "e1", "e2"):
+            assert np.array_equal(shifted[k], fresh[k]), (g.name, k)

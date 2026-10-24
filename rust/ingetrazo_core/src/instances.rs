@@ -292,6 +292,10 @@ pub struct Placement {
     pub proto: usize,
     pub m: [f64; 16],
     pub inv: Option<[f64; 12]>,
+    /// Its world box (the pick table's), grown past rounding; infinite
+    /// when the table has none.
+    pub lo: [f64; 3],
+    pub hi: [f64; 3],
 }
 
 /// The inverse of the affine part of a column-major 4×4: rows of the
@@ -344,4 +348,260 @@ pub fn mat_mul(a: &[f64; 16], b: &[f64; 16]) -> [f64; 16] {
         }
     }
     out
+}
+
+/// ``views.viewport._placed_maps``'s ``tv``: a local direction through the
+/// linear part of column-major ``m``, ((x·L0 + y·L1) + z·L2) term by term.
+#[inline]
+pub fn tv(m: &[f64; 16], a: [f64; 3]) -> [f64; 3] {
+    [a[0] * m[0] + a[1] * m[4] + a[2] * m[8],
+     a[0] * m[1] + a[1] * m[5] + a[2] * m[9],
+     a[0] * m[2] + a[1] * m[6] + a[2] * m[10]]
+}
+
+/// Its ``tp``: a local position, ``tv`` then the translation.
+#[inline]
+pub fn tp(m: &[f64; 16], a: [f64; 3]) -> [f64; 3] {
+    let v = tv(m, a);
+    [v[0] + m[12], v[1] + m[13], v[2] + m[14]]
+}
+
+/// A hard edge's end as the bake stores it: ``tp`` rounded to float32.
+#[inline]
+pub fn corner(m: &[f64; 16], a: [f64; 3]) -> [f64; 3] {
+    let p = tp(m, a);
+    [p[0] as f32 as f64, p[1] as f32 as f64, p[2] as f32 as f64]
+}
+
+/// ``Viewport._project_px`` for one world point: widget pixel, or None
+/// behind the eye (clip w not > 0). The same operations in the same order.
+#[inline]
+pub fn project(mvp: &[f64; 16], p: [f64; 3], w: f64, h: f64) -> Option<(f64, f64)> {
+    let c = |r: usize| p[0] * mvp[r] + p[1] * mvp[4 + r] + p[2] * mvp[8 + r] + mvp[12 + r];
+    let cw = c(3);
+    if !(cw > 0.0) {
+        return None;
+    }
+    let sx = (c(0) / cw * 0.5 + 0.5) * w;
+    let sy = (1.0 - (c(1) / cw * 0.5 + 0.5)) * h;
+    Some((sx, sy))
+}
+
+/// A box grown well past rounding, or the whole space when not finite.
+pub fn grown(lo: [f64; 3], hi: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+    let mut ext = 0.0f64;
+    let mut big = 0.0f64;
+    for k in 0..3 {
+        ext = ext.max(hi[k] - lo[k]);
+        big = big.max(lo[k].abs()).max(hi[k].abs());
+    }
+    let m = 1e-6 + 1e-6 * big + 1e-4 * ext;
+    let glo = [lo[0] - m, lo[1] - m, lo[2] - m];
+    let ghi = [hi[0] + m, hi[1] + m, hi[2] + m];
+    if glo.iter().chain(ghi.iter()).all(|v| v.is_finite()) {
+        (glo, ghi)
+    } else {
+        ([f64::NEG_INFINITY; 3], [f64::INFINITY; 3])
+    }
+}
+
+impl Placement {
+    /// Whether its box's screen footprint, ``reach`` px out, can hold
+    /// ``(px, py)`` — ``Viewport._placements_under_px``'s test, with a
+    /// pixel to spare; a box that is not finite or crosses the eye plane
+    /// may be anywhere.
+    pub fn screen_may_reach(&self, mvp: &[f64; 16], w: f64, h: f64, px: f64, py: f64,
+                            reach: f64) -> bool {
+        if !self.lo.iter().chain(self.hi.iter()).all(|v| v.is_finite()) {
+            return true;
+        }
+        let (mut x0, mut x1, mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY,
+                                                f64::INFINITY, f64::NEG_INFINITY);
+        for i in 0..8 {
+            let p = [if i & 1 != 0 { self.hi[0] } else { self.lo[0] },
+                     if i & 2 != 0 { self.hi[1] } else { self.lo[1] },
+                     if i & 4 != 0 { self.hi[2] } else { self.lo[2] }];
+            let cw = p[0] * mvp[3] + p[1] * mvp[7] + p[2] * mvp[11] + mvp[15];
+            if !(cw > 1e-9) {
+                return true;
+            }
+            match project(mvp, p, w, h) {
+                Some((sx, sy)) if sx.is_finite() && sy.is_finite() => {
+                    x0 = x0.min(sx);
+                    x1 = x1.max(sx);
+                    y0 = y0.min(sy);
+                    y1 = y1.max(sy);
+                }
+                _ => return true,
+            }
+        }
+        let r = reach + 1.0;
+        x0 - r <= px && px <= x1 + r && y0 - r <= py && py <= y1 + r
+    }
+
+    /// The ray's parameter range inside the (grown) box, if it meets it
+    /// before ``limit``.
+    pub fn ray_meets_box(&self, o: [f64; 3], d: [f64; 3], limit: f64) -> bool {
+        let mut tmin = 0.0f64;
+        let mut tmax = limit;
+        for k in 0..3 {
+            if d[k] == 0.0 {
+                if o[k] < self.lo[k] || o[k] > self.hi[k] {
+                    return false;
+                }
+                continue;
+            }
+            let inv = 1.0 / d[k];
+            let t1 = (self.lo[k] - o[k]) * inv;
+            let t2 = (self.hi[k] - o[k]) * inv;
+            let (a, b) = if t1 < t2 { (t1, t2) } else { (t2, t1) };
+            if a.is_nan() || b.is_nan() {
+                continue;
+            }
+            tmin = tmin.max(a);
+            tmax = tmax.min(b);
+        }
+        tmax * (1.0 + 1e-9) + 1e-9 >= tmin
+    }
+}
+
+/// One hard-edge end near the cursor: the edge, which end (0 = a, 1 = b),
+/// the end as baked (world, float32), and its pixel.
+pub struct Corner {
+    pub edge: u32,
+    pub end: u8,
+    pub xyz: [f64; 3],
+    pub sx: f64,
+    pub sy: f64,
+}
+
+impl Proto {
+    /// The ends of this prototype's hard edges, placed by ``m`` and seen
+    /// through ``mvp``, within ``reach`` px of ``(px, py)`` — both ends of
+    /// an edge in front of the eye, as ``Viewport.pick_vertex`` takes them.
+    #[allow(clippy::too_many_arguments)]
+    pub fn corners_near(&self, m: &[f64; 16], mvp: &[f64; 16], w: f64, h: f64, px: f64,
+                        py: f64, reach: f64, seen: Option<&DepthLimits>, out: &mut Vec<Corner>) {
+        let r2 = reach * reach;
+        for (i, e) in self.edges.iter().enumerate() {
+            let a = corner(m, e[0]);
+            let b = corner(m, e[1]);
+            let (Some(pa), Some(pb)) = (project(mvp, a, w, h), project(mvp, b, w, h)) else {
+                continue;
+            };
+            for (end, xyz, (sx, sy)) in [(0u8, a, pa), (1u8, b, pb)] {
+                let (dx, dy) = (sx - px, sy - py);
+                if dx * dx + dy * dy <= r2 && !seen.is_some_and(|g| g.hides(xyz, sx, sy)) {
+                    out.push(Corner { edge: i as u32, end, xyz, sx, sy });
+                }
+            }
+        }
+    }
+
+    /// Every triangle the BVH cannot rule out for the local ray ``lo`` +
+    /// t·``ld``, t ≤ ``lim``; ``f`` returns false to stop.
+    pub fn for_tris_on_ray(&self, lo: [f64; 3], ld: [f64; 3], lim: f64,
+                           mut f: impl FnMut(usize) -> bool) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        let mut inv = [0.0; 3];
+        for k in 0..3 {
+            let dv = if ld[k].abs() < 1e-300 { 1e-300 } else { ld[k] };
+            inv[k] = 1.0 / dv;
+        }
+        let lim = if lim.is_finite() { lim * (1.0 + 1e-6) + 1e-6 } else { f64::INFINITY };
+        let mut stack: Vec<u32> = vec![0];
+        while let Some(ni) = stack.pop() {
+            let n = &self.nodes[ni as usize];
+            if !Self::box_hit(n, lo, inv, lim) {
+                continue;
+            }
+            if !n.leaf {
+                stack.push(n.left);
+                stack.push(n.left + 1);
+                continue;
+            }
+            for &r in &self.order[n.start as usize..n.end as usize] {
+                if !f(r as usize) {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Triangle ``r`` in world space, as ``_instance_chunk`` bakes it.
+    #[inline]
+    pub fn world_tri(&self, m: &[f64; 16], r: usize) -> ([f64; 3], [f64; 3], [f64; 3]) {
+        (tp(m, self.v0[r]), tv(m, self.e1[r]), tv(m, self.e2[r]))
+    }
+}
+
+/// What the last frame shows around the cursor, as ``Viewport._depth_limits``
+/// gives it: per device pixel of a patch, the distance from the eye past
+/// which a point there is hidden by something drawn (inf: it cannot say).
+pub struct DepthLimits {
+    pub eye: [f64; 3],
+    pub lim: Vec<f64>,
+    pub x0: i64,
+    pub y0: i64,
+    pub gw: i64,
+    pub gh: i64,
+    pub dpr: f64,
+    pub hdev: i64,
+}
+
+impl DepthLimits {
+    /// Whether the point at widget pixel ``(sx, sy)`` lies past its limit.
+    #[inline]
+    pub fn hides(&self, p: [f64; 3], sx: f64, sy: f64) -> bool {
+        let ix = (sx * self.dpr).floor() as i64 - self.x0;
+        let iy = self.hdev - 1 - (sy * self.dpr).floor() as i64 - self.y0;
+        if ix < 0 || iy < 0 || ix >= self.gw || iy >= self.gh {
+            return false;
+        }
+        let l = self.lim[(iy * self.gw + ix) as usize];
+        let (dx, dy, dz) = (p[0] - self.eye[0], p[1] - self.eye[1], p[2] - self.eye[2]);
+        (dx * dx + dy * dy + dz * dz).sqrt() > l
+    }
+}
+
+/// ``core.edge_grid.segment_distances`` for one segment: the pixel
+/// distance from ``(px, py)`` to ``a``–``b``, operation for operation.
+#[inline]
+pub fn segment_distance(ax: f64, ay: f64, bx: f64, by: f64, px: f64, py: f64) -> f64 {
+    let (dx, dy) = (bx - ax, by - ay);
+    let l2 = dx * dx + dy * dy;
+    let safe = if l2 > 1e-12 { l2 } else { 1.0 };
+    let t = (((px - ax) * dx + (py - ay) * dy) / safe).clamp(0.0, 1.0);
+    (ax + t * dx - px).hypot(ay + t * dy - py)
+}
+
+/// One hard edge near the cursor: which, its ends as baked, its distance.
+pub struct NearEdge {
+    pub edge: u32,
+    pub a: [f64; 3],
+    pub b: [f64; 3],
+    pub d: f64,
+}
+
+impl Proto {
+    /// The hard edges of this prototype, placed by ``m`` and seen through
+    /// ``mvp``, within ``radius`` px of ``(px, py)`` (both ends in front),
+    /// at the distance ``segment_distances`` gives them.
+    #[allow(clippy::too_many_arguments)]
+    pub fn edges_near(&self, m: &[f64; 16], mvp: &[f64; 16], w: f64, h: f64, px: f64,
+                      py: f64, radius: f64, out: &mut Vec<NearEdge>) {
+        for (i, e) in self.edges.iter().enumerate() {
+            let a = corner(m, e[0]);
+            let b = corner(m, e[1]);
+            let (Some((ax, ay)), Some((bx, by))) = (project(mvp, a, w, h), project(mvp, b, w, h)) else {
+                continue;
+            };
+            let d = segment_distance(ax, ay, bx, by, px, py);
+            if d < radius {
+                out.push(NearEdge { edge: i as u32, a, b, d });
+            }
+        }
+    }
 }

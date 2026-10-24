@@ -391,3 +391,36 @@ def test_a_footprint_that_cannot_all_fit_keeps_its_nearest_and_stops_changing(vp
             vp._pick_materialize(("px", cx, cy))
             assert id(g) in _live(vp)
         assert foot <= _live(vp)
+
+
+def test_a_change_of_the_lazy_set_keeps_the_static_triangles_and_the_loose_part(vp):
+    # Each change of the lazy set rebuilds the index (#158): it joined the
+    # static triangles again (~100 MB on the plant) and walked the loose
+    # faces again. Kept while they are the same; the answers do not move.
+    from core.group import Group
+    vp.scene.mesh.add_face([V(-1, -1, 0), V(-0.5, -1, 0), V(-0.5, -0.5, 0),
+                            V(-1, -0.5, 0)])
+    big = Group(_cube(), name="fijo")                 # a group: static
+    vp.scene.groups.append(big)
+    vp.scene.version += 1
+    pts = [_centre(vp, f"C{i}{j}") for i in range(6) for j in range(4)]
+    pts += [V(-0.75, -0.75, 0.0), V(0.5, 0.5, 1.0)]
+    _lazy(vp, False)
+    full = _answers(vp, pts)
+    _lazy(vp, True)
+    x, y = vp._world_to_pixel(_centre(vp, "C00"))
+    a = vp._pick_index(near=("px", x, y))
+    x, y = vp._world_to_pixel(_centre(vp, "C53"))
+    b = vp._pick_index(near=("px", x, y))
+    assert a is not b and b.own_spans != a.own_spans  # the lazy set changed
+    assert b.tri_v0 is a.tri_v0 and b.tri_ent is a.tri_ent
+    assert b.entities[:1] == a.entities[:1]
+    assert _answers(vp, pts) == full
+    vp.scene.mesh.add_face([V(-3, -3, 0), V(-2.5, -3, 0), V(-2.5, -2.5, 0)])
+    vp.scene.version += 1                              # the loose part changed
+    c = vp._pick_index(near=("px", x, y))
+    assert c.tri_v0 is not b.tri_v0
+    assert len(c.tri_v0) == len(b.tri_v0) + 1
+    lazy_after = _answers(vp, pts)
+    _lazy(vp, False)
+    assert lazy_after == _answers(vp, pts)            # offsets moved along

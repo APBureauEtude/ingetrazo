@@ -641,6 +641,45 @@ def _content_ver(vp):
     return getattr(sc, "content_version", sc.version)
 
 
+def _cat_kept(vp, slot, parts):
+    """``np.concatenate(parts)``, the same array again while the parts are
+    the same objects: the pick index is rebuilt on each change of its lazy
+    set (#158), and joined its static triangles anew — 1.4 million rows,
+    ~100 MB, a few times a pointer move over the plant of #158. Nothing
+    writes into these arrays."""
+    import numpy as np
+    memo = getattr(vp, "_pick_cat_memo", None)
+    if memo is None:
+        memo = {}
+        try:
+            vp._pick_cat_memo = memo
+        except AttributeError:
+            pass
+    m = memo.get(slot)
+    if m is not None and len(m[0]) == len(parts) and all(
+            a is b for a, b in zip(m[0], parts)):
+        return m[1]
+    out = parts[0] if len(parts) == 1 else np.concatenate(parts)
+    memo[slot] = (list(parts), out)
+    return out
+
+
+def _offset_kept(vp, te, offset):
+    """``te + offset``, the same array again for the same ``te`` and
+    offset (see :func:`_cat_kept`)."""
+    if not offset:
+        return te
+    m = getattr(vp, "_pick_te_memo", None)
+    if m is not None and m[0] is te and m[1] == offset:
+        return m[2]
+    out = te + offset
+    try:
+        vp._pick_te_memo = (te, offset, out)
+    except AttributeError:
+        pass
+    return out
+
+
 def _slab_far(t):
     """``nanmax`` over the last (x, y, z) axis of a slab test, column by
     column: a reduction along an axis of three was ~4x slower, and the
@@ -4674,6 +4713,9 @@ class Viewport(QOpenGLWidget):
         self._edges_version = -1          # rebuild the VBOs from nothing
         self._frozen_cache_version = None
         self._sil_table = None            # holds the old document's bakes
+        self._pick_cat_memo = None        # ...and its pick triangles
+        self._pick_te_memo = None
+        self._pick_loose_memo = None
         self._sil_groups = None
         self._billboard_groups = None
         self._placements_memo = None
@@ -11818,27 +11860,41 @@ class Viewport(QOpenGLWidget):
                              t2.x(), t2.y(), t2.z()))
                 tri_ent.append(i)
 
-        for f in scene.faces:
-            add_face(f, None, scene.entity_visible(f),
-                     scene.entity_selectable(f))
-
-        # Loose part → arrays; groups append their cached chunk arrays.
-        if tris:
-            t = np.asarray(tris, dtype=np.float64).reshape(-1, 3, 3)
-            v0s = [t[:, 0]]
-            e1s = [t[:, 1] - t[:, 0]]
-            e2s = [t[:, 2] - t[:, 0]]
-            tents = [np.asarray(tri_ent, dtype=np.int64)]
+        # The loose part lasts while the content and the context do: a
+        # change of the lazy set (a few times a pointer move over the plant
+        # of #158) rebuilds the index, and walked the loose faces again.
+        lmemo = getattr(self, "_pick_loose_memo", None)
+        if lmemo is not None and lmemo[0] == key[:4]:
+            loose = lmemo[1]
+        else:
+            for f in scene.faces:
+                add_face(f, None, scene.entity_visible(f),
+                         scene.entity_selectable(f))
+            # Loose part → arrays; groups append their cached chunk arrays.
+            if tris:
+                t = np.asarray(tris, dtype=np.float64).reshape(-1, 3, 3)
+                lt = (t[:, 0], t[:, 1] - t[:, 0], t[:, 2] - t[:, 0],
+                      np.asarray(tri_ent, dtype=np.int64))
+            else:
+                lt = None
+            loose = (list(entities), lt, len(tris),
+                     np.asarray(ent_area, dtype=np.float64),
+                     np.asarray(ent_vis, dtype=bool),
+                     np.asarray(ent_sel, dtype=bool),
+                     np.asarray(ent_loose, dtype=bool))
+            self._pick_loose_memo = (key[:4], loose)
+        entities = list(loose[0])
+        lt, n_loose_tris = loose[1], loose[2]
+        if lt is not None:
+            v0s, e1s, e2s, tents = [lt[0]], [lt[1]], [lt[2]], [lt[3]]
         else:
             v0s, e1s, e2s, tents = [], [], [], []
-        areas = [np.asarray(ent_area, dtype=np.float64)]
-        vis_parts = [np.asarray(ent_vis, dtype=bool)]
-        sel_parts = [np.asarray(ent_sel, dtype=bool)]
-        loose_parts = [np.asarray(ent_loose, dtype=bool)]
+        areas, vis_parts, sel_parts, loose_parts = ([loose[3]], [loose[4]],
+                                                    [loose[5]], [loose[6]])
 
         # Per-chunk triangle spans (P3): a hover/zoom ray prefilters chunks
         # by AABB and runs Möller-Trumbore only on the spans it crosses.
-        tri_spans: list = [(None, 0, len(tris))] if tris else []
+        tri_spans: list = [(None, 0, n_loose_tris)] if n_loose_tris else []
         own_spans: list = []      # lazy placements' own arrays (#158)
         # What the current context lets you TOUCH: the whole scene at the
         # root, the children of the group you are inside otherwise. This
@@ -11923,8 +11979,8 @@ class Viewport(QOpenGLWidget):
                     v0s.append(block["v0"])
                     e1s.append(block["e1"])
                     e2s.append(block["e2"])
-                    tents.append(block["te"] + offset)
-                    tri_spans += [(bb, len(tris) + s, n)
+                    tents.append(_offset_kept(self, block["te"], offset))
+                    tri_spans += [(bb, n_loose_tris + s, n)
                                   for bb, s, n in block.get("spans", ())]
                 own_spans = [(bb, a, b, c, te, o + offset)
                              for bb, a, b, c, te, o in block.get("own", ())]
@@ -11970,10 +12026,10 @@ class Viewport(QOpenGLWidget):
             ent_vis=np.concatenate(vis_parts) if entities else np.empty(0, bool),
             ent_loose=(np.concatenate(loose_parts) if entities
                        else np.empty(0, bool)),
-            tri_v0=np.concatenate(v0s) if v0s else None,
-            tri_e1=np.concatenate(e1s) if v0s else None,
-            tri_e2=np.concatenate(e2s) if v0s else None,
-            tri_ent=np.concatenate(tents) if v0s else None,
+            tri_v0=_cat_kept(self, "v0", v0s) if v0s else None,
+            tri_e1=_cat_kept(self, "e1", e1s) if v0s else None,
+            tri_e2=_cat_kept(self, "e2", e2s) if v0s else None,
+            tri_ent=_cat_kept(self, "te", tents) if v0s else None,
             edges=edges,
             edge_a=np.asarray(ea, dtype=np.float64) if edges else None,
             edge_b=np.asarray(eb, dtype=np.float64) if edges else None,

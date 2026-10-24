@@ -242,3 +242,60 @@ def test_the_far_corner_lines_up_with_a_visited_corner():
     finally:
         win._saved_version = vp.scene.version
         win.close()
+
+
+def test_the_rotated_rectangle_reads_its_width_off_the_diagonal_too():
+    """The Rotated Rectangle's base edge IS a line from the first corner
+    (its inferences stay); its width is not. The snap still runs from the
+    first corner, and where the second protractor is seen edge-on — a flat
+    rectangle drawn from the top view — the tool takes the snapped point
+    as it comes: square off the wall, the width came out zero."""
+    win, vp = _scene()
+    try:
+        win._activate_tool("rotated_rect")
+        _app.processEvents()
+        tool = vp.active_tool
+        _press(vp, *_hover(vp, FIRST))
+        _press(vp, *_hover(vp, V(4.0, FIRST.y())))
+        assert tool.base_point is not None
+
+        _hover(vp, V(2.0, 1.05))
+        assert vp.last_snap.kind not in _LINE_KINDS, vp.last_snap.kind
+        width, _angle = tool._width_and_angle(tool.hover_point, tool._locked)
+        # Both clicks sit on whole pixels: within a pixel of 5 cm.
+        assert abs(width - 0.05) < 2 * _HALF_PX
+    finally:
+        win._saved_version = vp.scene.version
+        win.close()
+
+
+def test_the_rotated_rectangle_base_edge_keeps_its_line_inferences():
+    """Only the width is a diagonal: the base edge is a line drawn from
+    the first corner, and its axis and parallel inferences stay."""
+    from tools.rotated_rectangle import RotatedRectangleTool
+    tool = RotatedRectangleTool()
+    assert not tool.diagonal_span
+    tool.start_point = V(0, 0)
+    assert not tool.diagonal_span
+    tool.base_point = V(4, 0)
+    assert tool.diagonal_span
+
+
+def test_an_image_with_a_free_aspect_keeps_its_height():
+    """The Image tool's second click is the opposite corner as well; with
+    Shift's free aspect a thin strip lost its height the same way."""
+    from tools.image import ImageTool
+    win, vp = _scene()
+    try:
+        tool = ImageTool()
+        tool.load("plan.png", 1.0)
+        vp.set_active_tool(tool)
+        _press(vp, *_hover(vp, FIRST))
+        _hover(vp, V(4.0, 1.05))
+        assert vp.last_snap.kind not in _LINE_KINDS, vp.last_snap.kind
+        tool._free_aspect = True        # Shift, as the hover reads it
+        _u, v = tool._frame(tool.start_point, tool.hover_point)
+        assert abs(v.length() - 0.05) < 2 * _HALF_PX
+    finally:
+        win._saved_version = vp.scene.version
+        win.close()

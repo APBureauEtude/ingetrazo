@@ -505,6 +505,9 @@ _FRAME_CACHE = os.environ.get("INGETRAZO_FRAME_CACHE", "1") != "0"
 #: INGETRAZO_OCCLUSION_MEMO=0 asks every point again.
 _OCCLUSION_MEMO = os.environ.get("INGETRAZO_OCCLUSION_MEMO",
                                  "1") != "0"
+#: The first corner in sight asked of the native engine in one call
+#: (Viewport._first_clear); INGETRAZO_FIRST_CLEAR=0 asks in batches.
+_FIRST_CLEAR = os.environ.get("INGETRAZO_FIRST_CLEAR", "1") != "0"
 #: Span lists this long are culled with NumPy (_visible_spans_np).
 _SPAN_VECTOR_MIN = 64
 #: Recorded instanced passes replayed by the native engine when it is on.
@@ -14414,6 +14417,9 @@ class Viewport(QOpenGLWidget):
             return None
         d = np.concatenate(ds)
         pts = np.concatenate(ps)[np.argsort(d, kind="stable")]
+        at = self._first_clear(pts)
+        if at is not None:
+            return QVector3D(*pts[at].tolist()) if at >= 0 else None
         first = QVector3D(*pts[0].tolist())
         if not self._is_occluded(first):
             return first
@@ -14726,6 +14732,45 @@ class Viewport(QOpenGLWidget):
             for i, h in zip(ask, new):
                 known[pts[i]] = bool(h)
         return [known[p] for p in pts]
+
+    def _first_clear(self, pts):
+        """The index of the first of ``pts`` (N, 3), in order, that
+        ``_occluded_many`` calls seen (-1: none), asked of the native
+        engine in one call — the same rays, the same occluders, the rays it
+        cannot call bit for bit asked here as before — or None where it
+        cannot answer for ``_occluded_many_now``: no engine's placements,
+        a section cut (it asks face by face), no static set for the index's
+        triangles, or a library whose vector length the rays cannot copy.
+        Over the plant of #158 the ~7000 corners a roof hides near the
+        cursor took a dozen batches, the memo's bookkeeping and the rays'."""
+        import numpy as np
+        if not _FIRST_CLEAR or not len(pts):
+            return None
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        if nat is None or not hasattr(nat[0], "first_clear"):
+            return None
+        if _active_cut(self.scene) is not None or not _qv_hypot3():
+            return None
+        if self._effective_style().face_mode in ("xray", "wireframe"):
+            return 0                     # nothing hides anything
+        idx = self._pick_index(near="skip")
+        stat = None
+        if getattr(idx, "tri_v0", None) is not None:
+            stat = self._static_occluders(idx)
+            if stat is None:
+                return None
+        iset, _snap, vis = nat
+        e = self.camera.eye()
+        pts = np.ascontiguousarray(pts, dtype=np.float64).reshape(-1, 3)
+        first, doubts = iset.first_clear(
+            np.ascontiguousarray(vis, np.int64), (e.x(), e.y(), e.z()), pts,
+            stat[0] if stat is not None else None,
+            stat[1] if stat is not None else None)
+        for j in doubts.tolist():
+            if not self._occluded_many_now(pts[j:j + 1])[0]:
+                return j
+        return int(first)
 
     def _occluded_memo_key(self):
         """What ``_occluded_many_now``'s answer for a point hangs on, or

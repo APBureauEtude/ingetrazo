@@ -789,6 +789,97 @@ impl InstanceSet {
         Ok((PyArray1::from_vec(py, hid), PyArray1::from_vec(py, dbt)))
     }
 
+    /// The first of ``pts`` (N,3), in order, that nothing hides from
+    /// ``eye`` — ``Viewport._occluded_many_now`` asked of each in turn, in
+    /// one call: the ray to each point built as ``_unit_rays`` builds it
+    /// (float coordinates, libstdc++'s three-argument hypot, the float
+    /// division), the placements ``cand`` of this set and, when given,
+    /// those ``stat_cand`` of ``stat`` (the pick index's own triangles)
+    /// asked as there. ``(first, doubts)``: the index of the first point
+    /// both call seen (-1: none), and before it, in order, those either
+    /// could not call bit for bit — the caller asks them as before. A
+    /// point on the eye is seen, as there. Over the plant of #158 the
+    /// ~7000 corners a roof hides near the cursor were a dozen calls.
+    #[pyo3(signature = (cand, eye, pts, stat=None, stat_cand=None))]
+    fn first_clear<'py>(&self, py: Python<'py>, cand: PyReadonlyArray1<'py, i64>,
+                        eye: (f64, f64, f64), pts: PyReadonlyArray2<'py, f64>,
+                        stat: Option<PyRef<'py, InstanceSet>>,
+                        stat_cand: Option<PyReadonlyArray1<'py, i64>>)
+        -> PyResult<(i64, Bound<'py, PyArray1<i64>>)> {
+        use rayon::prelude::*;
+        let c = cand.as_array().to_vec();
+        self.check(&c)?;
+        let mut mask = vec![false; self.places.len()];
+        for &i in &c {
+            mask[i as usize] = true;
+        }
+        let st: Option<&InstanceSet> = stat.as_deref();
+        let smask = match (st, &stat_cand) {
+            (Some(t), Some(sc)) => {
+                let sc = sc.as_array().to_vec();
+                t.check(&sc)?;
+                let mut m = vec![false; t.places.len()];
+                for &i in &sc {
+                    m[i as usize] = true;
+                }
+                m
+            }
+            (None, None) => Vec::new(),
+            _ => return Err(pyo3::exceptions::PyValueError::new_err("stat and stat_cand")),
+        };
+        let p = rows3(&pts.as_array());
+        let e = [eye.0 as f32, eye.1 as f32, eye.2 as f32];
+        let o = [e[0] as f64, e[1] as f64, e[2] as f64];
+        // 0 seen, 1 hidden, 2 doubt.
+        let call = |q: [f64; 3]| -> u8 {
+            let Some((d, dist)) = occlusion::unit_ray(e, q) else {
+                return 0;
+            };
+            let limit = dist - 1e-3;
+            let mut doubt = false;
+            if let Some(t) = st {
+                let (h, db) = t.occluded_ray(&smask, o, d, limit);
+                if h {
+                    return 1;
+                }
+                doubt |= db;
+            }
+            let (h, db) = self.occluded_ray(&mask, o, d, limit);
+            if h {
+                return 1;
+            }
+            if doubt || db { 2 } else { 0 }
+        };
+        let (first, doubts) = py.detach(|| {
+            // Each point once, where it first comes: a corner shared by
+            // several edges comes once per end, and gives what it gave.
+            let key = |q: &[f64; 3]| q.map(|v| if v == 0.0 { 0u64 } else { v.to_bits() });
+            let mut seen = std::collections::HashSet::with_capacity(p.len());
+            let at: Vec<usize> = (0..p.len())
+                .filter(|&i| p[i].iter().any(|v| v.is_nan()) || seen.insert(key(&p[i])))
+                .collect();
+            let mut doubts: Vec<i64> = Vec::new();
+            // The nearest alone first (usually the answer), then batches
+            // growing four times over, as the caller's loop took them.
+            let (mut k, mut size) = (0usize, 1usize);
+            while k < at.len() {
+                let hi = (k + size).min(at.len());
+                let got: Vec<u8> = at[k..hi].par_iter().map(|&i| call(p[i])).collect();
+                for (j, g) in got.into_iter().enumerate() {
+                    match g {
+                        0 => return (at[k + j] as i64, doubts),
+                        2 => doubts.push(at[k + j] as i64),
+                        _ => {}
+                    }
+                }
+                k = hi;
+                size = if size == 1 { 8 } else { (size * 4).min(1024) };
+            }
+            (-1, doubts)
+        });
+        Ok((first, PyArray1::from_vec(py, doubts)))
+    }
+
     /// The world triangles (v0, e1, e2), as baked, of placements ``cand``
     /// that the ray from ``origin`` along ``d`` may meet before ``limit`` —
     /// a superset of what the exact test accepts. A placement that cannot

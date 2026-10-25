@@ -217,6 +217,93 @@ def test_occluded_is_the_baked_answer_and_doubts_settle_on_ray_tris(seed):
     assert doubt_n < 40
 
 
+@pytest.mark.parametrize("seed", range(8))
+def test_first_clear_is_occluded_asked_in_turn(seed):
+    """``first_clear`` over points in order: the first both sets call seen,
+    the ones in doubt before it — what ``occluded`` gives each point on the
+    ray ``_unit_rays`` builds to it, a repeat as its first, the eye seen."""
+    from views.viewport import _qv_hypot3, _unit_rays
+    if not hasattr(mod.InstanceSet, "first_clear") or not _qv_hypot3():
+        pytest.skip("no first_clear, or rays not reproducible here")
+    rng, bakes, iset = _scene(300 + seed, 120)
+    _r2, _b2, other = _scene(700 + seed, 30)       # a second set, as stat
+    P = len(bakes)
+    cand = np.arange(P, dtype=np.int64)
+    ocand = np.arange(30, dtype=np.int64)
+    for _ in range(12):
+        eye = QVector3D(*rng.uniform(-15, 15, 3))
+        e3 = (eye.x(), eye.y(), eye.z())
+        pts = []
+        for _k in range(int(rng.choice((1, 5, 40, 300)))):
+            v0, e1, e2, ends = bakes[int(rng.integers(P))]
+            r = int(rng.integers(len(v0)))
+            c = v0[r] + (e1[r] + e2[r]) / 3.0
+            k = rng.random()
+            if k < 0.35:
+                pts.append(c + (c - np.array(e3)) * rng.uniform(0.01, 0.5))
+            elif k < 0.5:
+                # Behind a triangle's corner: the ray grazes it, in doubt.
+                a = v0[r] + (e1[r] if rng.random() < 0.5 else 0.0)
+                pts.append(a + (a - np.array(e3)) * rng.uniform(0.01, 0.5))
+            elif k < 0.7 and len(ends):
+                pts.append(ends[0, 0])
+            else:
+                pts.append(v0[r] + e1[r] * rng.random())
+        pts = np.array(pts)
+        pts = np.concatenate([pts, pts[rng.integers(0, len(pts), 3)], [e3]])
+        pts = pts[rng.permutation(len(pts))]
+        rows, D, dists = _unit_rays(eye, pts)
+        lim = dists - 1e-3
+        h1, d1 = other.occluded(ocand, e3, np.ascontiguousarray(D), lim)
+        h2, d2 = iset.occluded(cand, e3, np.ascontiguousarray(D), lim)
+        state = np.zeros(len(pts), dtype=np.int64)       # 0 seen
+        hid = h1 | h2
+        state[rows[hid]] = 1
+        state[rows[~hid & (d1 | d2)]] = 2
+        want_first, want_doubts, met = -1, [], set()
+        for i in range(len(pts)):
+            key = tuple(pts[i].tolist())
+            if key in met:
+                continue
+            met.add(key)
+            if state[i] == 0:
+                want_first = i
+                break
+            if state[i] == 2:
+                want_doubts.append(i)
+        first, doubts = iset.first_clear(cand, e3, np.ascontiguousarray(pts),
+                                         other, ocand)
+        assert first == want_first
+        assert doubts.tolist() == want_doubts
+
+
+def test_first_clear_hands_back_the_rays_along_an_edge():
+    """A ray right along a triangle's edge (u = 0 to the last bit) is too
+    close to call: it comes back in doubt, with what comes before the
+    first point seen."""
+    if not hasattr(mod.InstanceSet, "first_clear"):
+        pytest.skip("no first_clear")
+    tri = (np.array([[0.0, 0.0, 0.0]]), np.array([[1.0, 0.0, 0.0]]),
+           np.array([[0.0, 1.0, 0.0]]), np.zeros((0, 6)))
+    iset = mod.InstanceSet([mod.InstanceProto(*tri)], np.zeros(1, np.int64),
+                           np.eye(4).reshape(1, 16))
+    cand = np.zeros(1, np.int64)
+    eye = (0.0, 0.0, 5.0)
+    pts = np.array([[0.3, 0.3, -5.0],         # under the face: hidden
+                    [0.0, 0.6, -5.0],         # along the edge x = 0
+                    [0.0, 1.2, -5.0],
+                    [0.6, 0.0, -5.0],         # along the edge y = 0
+                    [0.3, 0.3, -5.0],         # a repeat
+                    [9.0, 9.0, -5.0],         # beside it: seen
+                    [0.0, 0.4, -5.0]])
+    first, doubts = iset.first_clear(cand, eye, pts)
+    assert first == 5
+    assert doubts.tolist() == [1, 2, 3]
+    h, d = iset.occluded(cand, eye, np.array([[0.0, 0.0, -1.0]]),
+                         np.array([9.999]))
+    assert not h[0] and d[0]                  # the vertex itself too
+
+
 @pytest.mark.parametrize("seed", range(4))
 def test_placements_without_a_box_hide_as_baked_and_empty_ones_cost_nothing(
         seed):

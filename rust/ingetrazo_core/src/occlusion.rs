@@ -157,3 +157,31 @@ pub fn tri_occludes(o: [f64; 3], d: [f64; 3], limit: f64,
     }
     None
 }
+
+/// ``views.viewport._hypot3_f32`` for one vector: libstdc++'s
+/// three-argument ``std::hypot`` in float, the largest magnitude scaled
+/// out, as Qt's ``QVector3D::length`` computes it.
+#[inline]
+pub fn hypot3_f32(v: [f32; 3]) -> f32 {
+    let a = [v[0].abs(), v[1].abs(), v[2].abs()];
+    let m = a[0].max(a[1]).max(a[2]);
+    if !(m > 0.0) {
+        return 0.0;
+    }
+    let q = [a[0] / m, a[1] / m, a[2] / m];
+    let s = (q[0] * q[0] + q[1] * q[1]) + q[2] * q[2];
+    m * s.sqrt()
+}
+
+/// ``views.viewport._unit_rays`` for one point: the unit direction from
+/// ``eye`` (float) to ``p`` and the distance, both as float64 of the float
+/// values QVector3D holds — or None for a point on the eye.
+#[inline]
+pub fn unit_ray(eye: [f32; 3], p: [f64; 3]) -> Option<([f64; 3], f64)> {
+    let dl = [p[0] as f32 - eye[0], p[1] as f32 - eye[1], p[2] as f32 - eye[2]];
+    let l = hypot3_f32(dl);
+    if !((l as f64) >= 1e-9) {
+        return None;
+    }
+    Some(([(dl[0] / l) as f64, (dl[1] / l) as f64, (dl[2] / l) as f64], l as f64))
+}

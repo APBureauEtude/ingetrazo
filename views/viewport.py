@@ -664,28 +664,51 @@ def _ctx_changed(vp, before):
         cc(before)
 
 
-def _px_near(x, y, ok, px, py, thr):
+def _px_near(x, y, ok, px, py, thr, pts=None, seen=None):
     """The projected points ``(x, y)`` in front (``ok``) within ``thr`` px of
     ``(px, py)``: their indices in order and distances, as one ``np.hypot``
     pass over all of them gives them. The native engine finds the
     candidates (the 650 000 corners of the plant of #158 took 12 ms a
     pointer move in NumPy) a hair wider than ``thr``, and those are measured
-    here the same way."""
+    here the same way. With the points ``pts`` and the frame's limits
+    ``seen`` (see Viewport._depth_limits), those the frame hides are left
+    out as well, as Viewport._depth_hidden leaves them out."""
     import numpy as np
     from core import _native
     mod = _native.native
     if mod is not None and hasattr(mod, "points_near_px") and len(x) > 4096:
-        k = mod.points_near_px(np.ascontiguousarray(x, dtype=np.float64),
-                               np.ascontiguousarray(y, dtype=np.float64),
-                               np.ascontiguousarray(ok, dtype=bool),
-                               float(px), float(py),
-                               float(thr) * (1.0 + 1e-6) + 1e-6)
+        args = (np.ascontiguousarray(x, dtype=np.float64),
+                np.ascontiguousarray(y, dtype=np.float64),
+                np.ascontiguousarray(ok, dtype=bool),
+                float(px), float(py), float(thr) * (1.0 + 1e-6) + 1e-6)
+        hidden = None
+        if seen is not None and _NEAR_SEEN_NATIVE:
+            try:
+                k = mod.points_near_px(
+                    *args, np.ascontiguousarray(pts, dtype=np.float64), seen)
+            except TypeError:               # an older module
+                k = mod.points_near_px(*args)
+                hidden = True
+        else:
+            k = mod.points_near_px(*args)
+            hidden = seen is not None or None
         d = np.hypot(x[k] - px, y[k] - py)
         near = d < thr
-        return k[near], d[near]
-    d = np.where(ok, np.hypot(x - px, y - py), np.inf)
-    k = np.flatnonzero(d < thr)
-    return k, d[k]
+        k, d = k[near], d[near]
+    else:
+        d = np.where(ok, np.hypot(x - px, y - py), np.inf)
+        k = np.flatnonzero(d < thr)
+        d = d[k]
+        hidden = seen is not None or None
+    if hidden and len(k):
+        keep = ~Viewport._depth_hidden(seen, pts[k], x[k], y[k])
+        k, d = k[keep], d[keep]
+    return k, d
+
+
+#: The depth test of the corners near the cursor in the native engine
+#: (INGETRAZO_NEAR_SEEN=0: in NumPy, as before).
+_NEAR_SEEN_NATIVE = os.environ.get("INGETRAZO_NEAR_SEEN", "1") != "0"
 
 
 #: Whether QVector3D's length here is the three-argument hypot that
@@ -14416,10 +14439,7 @@ class Viewport(QOpenGLWidget):
         seen = self._depth_limits(float(screen_x), float(screen_y), thr)
         ds, ps = [], []
         for x, y, ok, pts in parts:
-            k, d = _px_near(x, y, ok, screen_x, screen_y, thr)
-            if len(k) and seen is not None:
-                keep = ~self._depth_hidden(seen, pts[k], x[k], y[k])
-                k, d = k[keep], d[keep]
+            k, d = _px_near(x, y, ok, screen_x, screen_y, thr, pts, seen)
             if len(k):
                 ds.append(d)
                 ps.append(pts[k])

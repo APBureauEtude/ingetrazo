@@ -260,20 +260,54 @@ fn boxes_near_px<'py>(py: Python<'py>, lo: PyReadonlyArray2<'py, f64>,
     Ok(PyArray1::from_vec(py, keep))
 }
 
+/// The frame's limits as Python hands them: ``(eye, limits (gh, gw), x0,
+/// y0, dpr, device height)`` (see ``Viewport._depth_limits``).
+#[allow(clippy::type_complexity)]
+fn depth_limits(s: (Vec<f64>, PyReadonlyArray2<'_, f64>, i64, i64, f64, i64))
+    -> PyResult<instances::DepthLimits> {
+    let (eye, g, x0, y0, dpr, hdev) = s;
+    if eye.len() != 3 {
+        return Err(pyo3::exceptions::PyValueError::new_err("seen"));
+    }
+    let ga = g.as_array();
+    Ok(instances::DepthLimits {
+        eye: [eye[0], eye[1], eye[2]], lim: ga.iter().copied().collect(),
+        x0, y0, gw: ga.shape()[1] as i64, gh: ga.shape()[0] as i64, dpr, hdev })
+}
+
 /// The indices, in order, of the projected points ``(x, y)`` in front
 /// (``ok``) whose squared distance to ``(px, py)`` is at most ``r``²: the
 /// candidates of views.viewport.Viewport._px_near, which measures them
 /// as NumPy does (650 000 corners a pointer move over the plant of #158).
+/// With the points ``pts`` (N, 3) and the frame's ``seen`` limits (as
+/// ``InstanceSet.corners_near`` takes them), those the frame shows
+/// something in front of are left out too, as
+/// ``Viewport._depth_hidden`` leaves them out: ~6 ms of NumPy over the
+/// fixed corners near the cursor in that plant.
 #[pyfunction]
-#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (x, y, ok, px, py_, r, pts=None, seen=None))]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn points_near_px<'py>(py: Python<'py>, x: PyReadonlyArray1<'py, f64>,
                        y: PyReadonlyArray1<'py, f64>, ok: PyReadonlyArray1<'py, bool>,
-                       px: f64, py_: f64, r: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
+                       px: f64, py_: f64, r: f64, pts: Option<PyReadonlyArray2<'py, f64>>,
+                       seen: Option<(Vec<f64>, PyReadonlyArray2<'py, f64>, i64, i64, f64, i64)>)
+    -> PyResult<Bound<'py, PyArray1<i64>>> {
     use rayon::prelude::*;
     let (x, y, ok) = (x.as_array(), y.as_array(), ok.as_array());
     if x.len() != y.len() || x.len() != ok.len() {
         return Err(pyo3::exceptions::PyValueError::new_err("lengths"));
     }
+    let seen = match (seen, &pts) {
+        (Some(s), Some(p)) => {
+            if p.as_array().shape() != [x.len(), 3] {
+                return Err(pyo3::exceptions::PyValueError::new_err("pts"));
+            }
+            Some(depth_limits(s)?)
+        }
+        (None, _) => None,
+        (Some(_), None) => return Err(pyo3::exceptions::PyValueError::new_err("pts")),
+    };
+    let pv = pts.as_ref().map(|p| p.as_array());
     // Read in place where contiguous (the cached projections and their
     // heads are): copying them cost as much as the pass.
     let cow = |a: numpy::ndarray::ArrayView1<'_, f64>| match a.to_slice() {
@@ -290,6 +324,10 @@ fn points_near_px<'py>(py: Python<'py>, x: PyReadonlyArray1<'py, f64>,
         .filter(|&i| {
             let (dx, dy) = (x[i] - px, y[i] - py_);
             ok[i] && dx * dx + dy * dy <= r2
+                && !seen.as_ref().is_some_and(|s| {
+                    let p = pv.as_ref().unwrap();
+                    s.hides([p[[i, 0]], p[[i, 1]], p[[i, 2]]], x[i], y[i])
+                })
         }).map(|i| i as i64).collect());
     Ok(PyArray1::from_vec(py, keep))
 }
@@ -710,13 +748,7 @@ impl InstanceSet {
         // (eye, limits (gh, gw), x0, y0, dpr, device height): corners the
         // frame shows something in front of are left out here.
         let seen = match seen {
-            Some((eye, g, x0, y0, dpr, hdev)) if eye.len() == 3 => {
-                let ga = g.as_array();
-                Some(instances::DepthLimits {
-                    eye: [eye[0], eye[1], eye[2]], lim: ga.iter().copied().collect(),
-                    x0, y0, gw: ga.shape()[1] as i64, gh: ga.shape()[0] as i64, dpr, hdev })
-            }
-            Some(_) => return Err(pyo3::exceptions::PyValueError::new_err("seen")),
+            Some(s) => Some(depth_limits(s)?),
             None => None,
         };
         let seen = seen.as_ref();

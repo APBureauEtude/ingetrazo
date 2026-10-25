@@ -585,7 +585,7 @@ pub fn ray_meets(lo: [f64; 3], hi: [f64; 3], o: [f64; 3], d: [f64; 3], limit: f6
 
 /// A BVH over the placements' world boxes, so a ray visits the placements
 /// along it instead of all of them; those without a finite box are always
-/// visited.
+/// visited, those it is told a ray can meet nothing in never.
 pub struct PlaceBvh {
     order: Vec<u32>,
     nodes: Vec<Node>,
@@ -593,11 +593,14 @@ pub struct PlaceBvh {
 }
 
 impl PlaceBvh {
-    pub fn new(places: &[Placement]) -> PlaceBvh {
+    pub fn new(places: &[Placement], may_meet: impl Fn(&Placement) -> bool) -> PlaceBvh {
         let mut ids = Vec::new();
         let mut always = Vec::new();
         let (mut lo, mut hi, mut cen) = (Vec::new(), Vec::new(), Vec::new());
         for (i, p) in places.iter().enumerate() {
+            if !may_meet(p) {
+                continue;
+            }
             if p.lo.iter().chain(p.hi.iter()).all(|v| v.is_finite()) {
                 ids.push(i as u32);
                 lo.push(p.lo);

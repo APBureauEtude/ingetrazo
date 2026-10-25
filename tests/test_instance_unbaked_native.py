@@ -218,6 +218,79 @@ def test_occluded_is_the_baked_answer_and_doubts_settle_on_ray_tris(seed):
 
 
 @pytest.mark.parametrize("seed", range(4))
+def test_placements_without_a_box_hide_as_baked_and_empty_ones_cost_nothing(
+        seed):
+    """The pick table has no box for a placement of nothing (an empty
+    group, a container of others): over the plant of #158 every ray
+    visited its 1 410 of them. Those of no triangles are left out of the
+    rays' BVH; those with triangles and no box are still asked."""
+    import time
+    rng = np.random.default_rng(900 + seed)
+    protos = [_proto(rng) for _ in range(4)]
+    empty = (np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 3)),
+             np.zeros((0, 6)))
+    P, E = 120, 3000
+    of = rng.integers(0, len(protos), P)
+    xfs = [_matrix(rng) for _ in range(P)]
+    bakes = [_bake(protos[of[i]], xfs[i]) for i in range(P)]
+    lo, hi = np.empty((P, 3)), np.empty((P, 3))
+    for i, (v0, e1, e2, ends) in enumerate(bakes):
+        pts = np.concatenate([v0, v0 + e1, v0 + e2, ends.reshape(-1, 3)])
+        lo[i], hi[i] = pts.min(axis=0), pts.max(axis=0)
+    unboxed = rng.random(P) < 0.3                 # these with triangles
+    lo[unboxed], hi[unboxed] = -np.inf, np.inf
+    all_protos = [mod.InstanceProto(*p) for p in protos + [empty]]
+    mats = np.array([m.data() for m in xfs], np.float64)
+
+    def iset_with(n_empty):
+        e_mats = np.array([_matrix(rng).data() for _ in range(n_empty)],
+                          np.float64).reshape(-1, 16)
+        inf = np.full((n_empty, 3), np.inf)
+        return mod.InstanceSet(
+            all_protos,
+            np.concatenate([of, np.full(n_empty, len(protos))])
+            .astype(np.int64),
+            np.concatenate([mats, e_mats]),
+            np.concatenate([lo, -inf]), np.concatenate([hi, inf]))
+    full, bare = iset_with(E), iset_with(0)
+    allv0 = np.concatenate([b[0] for b in bakes])
+    alle1 = np.concatenate([b[1] for b in bakes])
+    alle2 = np.concatenate([b[2] for b in bakes])
+    o = rng.uniform(-15, 15, 3)
+    pts = []
+    for _k in range(1000):
+        v0, e1, e2, _ends = bakes[int(rng.integers(P))]
+        r = int(rng.integers(len(v0)))
+        c = v0[r] + (e1[r] + e2[r]) / 3.0
+        pts.append(c + (c - o) * rng.uniform(-0.3, 0.5))
+    delta = np.array(pts) - o
+    dist = np.linalg.norm(delta, axis=1)
+    D = np.ascontiguousarray(delta / dist[:, None])
+    limit = dist - 1e-3
+    cand = np.arange(P + E, dtype=np.int64)
+    hid, dbt = full.occluded(cand, tuple(o), D, limit)
+    hidden = 0
+    for r in range(len(pts)):
+        if dbt[r]:
+            continue
+        want = _hidden_by(allv0, alle1, alle2, o, D[r], limit[r])
+        assert bool(hid[r]) == want, r
+        hidden += want
+    assert 100 < hidden < len(pts) - 100
+    # Each ray as fast as without the empty ones (it was ~10x slower).
+    few = np.arange(P, dtype=np.int64)
+
+    def best(iset, c):
+        ts = []
+        for _ in range(7):
+            t = time.perf_counter()
+            iset.occluded(c, tuple(o), D, limit)
+            ts.append(time.perf_counter() - t)
+        return min(ts)
+    assert best(full, cand) < 3.0 * best(bare, few) + 2e-3
+
+
+@pytest.mark.parametrize("seed", range(4))
 def test_corners_the_frame_hides_are_left_out_as_python_leaves_them(seed):
     """``corners_near`` with the frame's depth limits drops exactly the
     corners ``Viewport._depth_hidden`` would drop from its full answer."""

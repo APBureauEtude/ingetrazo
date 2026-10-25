@@ -579,7 +579,10 @@ impl InstanceSet {
                                                inv: instances::affine_inverse(&mm),
                                                lo: blo, hi: bhi });
         }
-        let bvh = instances::PlaceBvh::new(&places);
+        // A ray meets nothing in a placement of no triangles (an empty
+        // group, a container of others): it has no box in the pick table,
+        // and every ray visited its ~1 400 of them over the plant of #158.
+        let bvh = instances::PlaceBvh::new(&places, |p| pr[p.proto].n_tris() > 0);
         Ok(Self { protos: pr, places, bvh })
     }
 

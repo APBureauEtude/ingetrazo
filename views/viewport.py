@@ -12067,25 +12067,21 @@ class Viewport(QOpenGLWidget):
             return cmemo[1]
         need = self._placements_under_px(lo, hi, x, y, r)
         far = self._visible_depth_limit(x, y)
-        if far is not None and len(need):
-            # What lies wholly behind what is on screen around the
-            # cursor can be neither picked nor snapped to (hidden
-            # snaps are dropped): a dense plant stacks thousands of
-            # placements under one pixel (#158).
-            e = self.camera.eye()
-            e = np.array([e.x(), e.y(), e.z()])
-            near_pt = np.clip(e, lo[need], hi[need])
-            dist = np.linalg.norm(near_pt - e, axis=1)
-            need = need[dist <= far]
-        if len(need) and self._PICK_MIN_PX > 0.0:
-            # Nor what the frame leaves out for being under a pixel
-            # (see _instances_below_a_pixel): from the whole plant
-            # of #158 the snap's footprint met more placements
-            # than the cap, and each pointer move threw out the
-            # last move's to bring in as many again.
-            ctr, rad = self._bounding_spheres(lo[need], hi[need])
-            need = need[~self._spheres_below_a_pixel(
-                ctr, rad, self._PICK_MIN_PX)]
+        if len(need) and (far is not None or self._PICK_MIN_PX > 0.0):
+            dist, small = self._footprint_rows(table)
+            if far is not None:
+                # What lies wholly behind what is on screen around the
+                # cursor can be neither picked nor snapped to (hidden
+                # snaps are dropped): a dense plant stacks thousands of
+                # placements under one pixel (#158).
+                need = need[dist[need] <= far]
+            if small is not None:
+                # Nor what the frame leaves out for being under a pixel
+                # (see _instances_below_a_pixel): from the whole plant
+                # of #158 the snap's footprint met more placements
+                # than the cap, and each pointer move threw out the
+                # last move's to bring in as many again.
+                need = need[~small[need]]
         iset = self._pick_instance_set(table) if len(need) else None
         if iset is not None:
             # Of the boxes near the cursor, the placements with a
@@ -12100,6 +12096,33 @@ class Viewport(QOpenGLWidget):
                 r + 2.0), dtype=np.int64)
         setattr(self, slot, (ckey, need))
         return need
+
+    def _footprint_rows(self, table):
+        """For every row of the lazy ``table``, how far its box lies from
+        the eye and whether it spans under ``_PICK_MIN_PX`` (None when
+        that floor is off): what _footprint_need cuts by, the same for
+        any pixel of the view. Kept for the view: over the 16 000 rows
+        near the cursor in the plant of #158 they cost ~2 ms a search,
+        two searches a pointer move."""
+        import numpy as np
+        lo, hi = table[1], table[2]
+        e = self.camera.eye()
+        h = (self._export_size or self._fb_size())[1]
+        key = (self._placements_epoch(), tuple(self._np_mvp().ravel()),
+               (e.x(), e.y(), e.z()), h, bool(self.camera.perspective),
+               self._PICK_MIN_PX)
+        memo = getattr(self, "_footprint_rows_memo", None)
+        if (memo is not None and memo[0] == key and memo[1] is lo
+                and memo[2] is hi):
+            return memo[3]
+        eye = np.array([e.x(), e.y(), e.z()])
+        dist = np.linalg.norm(np.clip(eye, lo, hi) - eye, axis=1)
+        small = None
+        if self._PICK_MIN_PX > 0.0:
+            ctr, rad = self._bounding_spheres(lo, hi)
+            small = self._spheres_below_a_pixel(ctr, rad, self._PICK_MIN_PX)
+        self._footprint_rows_memo = (key, lo, hi, (dist, small))
+        return dist, small
 
     def _visible_depth_limit(self, x: float, y: float):
         """The farthest distance from the eye of what the last frame shows

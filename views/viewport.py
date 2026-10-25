@@ -501,6 +501,10 @@ _LAZY_NATIVE = True
 #: drew it (Viewport._frame_cache_key); INGETRAZO_FRAME_CACHE=0 turns it
 #: off, and every frame draws everything as before.
 _FRAME_CACHE = os.environ.get("INGETRAZO_FRAME_CACHE", "1") != "0"
+#: Occlusion answers kept a view (Viewport._occluded_many);
+#: INGETRAZO_OCCLUSION_MEMO=0 asks every point again.
+_OCCLUSION_MEMO = os.environ.get("INGETRAZO_OCCLUSION_MEMO",
+                                 "1") != "0"
 #: Span lists this long are culled with NumPy (_visible_spans_np).
 _SPAN_VECTOR_MIN = 64
 #: Recorded instanced passes replayed by the native engine when it is on.
@@ -14657,6 +14661,59 @@ class Viewport(QOpenGLWidget):
     _OCCL_BLOCK = 2_000_000
 
     def _occluded_many(self, worlds) -> list:
+        """``_occluded_many_now``, each point asked once a view: drawing over
+        the plant of #158 every pointer move asked again the ~7000 corners
+        a roof hides near the cursor, the same ones as the move before, and
+        they were 17 ms of it. What a point's ray meets hangs on the eye,
+        the model and the occluders the engine holds (``_occluded_memo_key``),
+        never on the cursor — only with the engine's placements (#158):
+        without them the index bakes what lies near the cursor."""
+        import numpy as np
+        if not len(worlds):
+            return []
+        key = self._occluded_memo_key()
+        if key is None:
+            return self._occluded_many_now(worlds)
+        memo = getattr(self, "_occluded_memo", None)
+        if memo is None or memo[0] != key or len(memo[1]) > 400_000:
+            memo = self._occluded_memo = (key, {})
+        known = memo[1]
+        if isinstance(worlds, np.ndarray):
+            pts = [tuple(p) for p in worlds.reshape(-1, 3).tolist()]
+        else:
+            worlds = list(worlds)
+            pts = [(w.x(), w.y(), w.z()) for w in worlds]
+        ask = [i for i, p in enumerate(pts) if p not in known]
+        if ask:
+            new = self._occluded_many_now(
+                np.array([pts[i] for i in ask], dtype=np.float64)
+                .reshape(-1, 3))
+            for i, h in zip(ask, new):
+                known[pts[i]] = bool(h)
+        return [known[p] for p in pts]
+
+    def _occluded_memo_key(self):
+        """What ``_occluded_many_now``'s answer for a point hangs on, or
+        None where it may hang on more (a section cut asks face by face,
+        X-ray and wireframe hide nothing, and without the engine's
+        placements the index bakes around the cursor)."""
+        if not _OCCLUSION_MEMO:
+            return None
+        if _active_cut(self.scene) is not None:
+            return None
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        if nat is None or not len(nat[2]):
+            return None
+        idx = self._pick_index(near="skip")
+        eye = self.camera.eye()
+        sc = self.scene
+        return (eye.x(), eye.y(), eye.z(), id(idx), id(nat[0]),
+                id(sc), sc.version, _cache_ver(self), _content_ver(self),
+                self._placements_epoch(), id(sc.edit_group),
+                self._rest_is_hidden(), self._effective_style().face_mode)
+
+    def _occluded_many_now(self, worlds) -> list:
         """``_is_occluded`` for several points at once — the snap engine's
         candidates, which all cast from the same eye. One ray at a time,
         each paid for its own span cull and a Möller–Trumbore pass per span

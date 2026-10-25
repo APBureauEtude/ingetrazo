@@ -746,6 +746,11 @@ def _nearest_within(d, radius, cap):
 _EDGES_SHARED = os.environ.get("INGETRAZO_EDGES_SHARED", "1") != "0"
 
 
+#: The front face at a pixel without gathering every face the ray meets
+#: (INGETRAZO_FRONT_LEAN=0: through _face_hits, as before).
+_FRONT_LEAN = os.environ.get("INGETRAZO_FRONT_LEAN", "1") != "0"
+
+
 #: The nearest group edges picked in the native engine
 #: (INGETRAZO_NEAREST=0: in NumPy, as before).
 _NEAREST_NATIVE = os.environ.get("INGETRAZO_NEAREST", "1") != "0"
@@ -10098,11 +10103,72 @@ class Viewport(QOpenGLWidget):
             return None
         import numpy as np
         idx = self._pick_index(near=Viewport._ray_near(self, x, y))
+        nat = (self._lazy_native() if hasattr(self, "_lazy_native")
+               else None)
+        if nat is not None and _FRONT_LEAN:
+            return Viewport._front_face_lean(self, idx, nat, o, d)
         hits = Viewport._face_hits(self, idx, o, d, "sel")
         if hits is None or len(hits.t) == 0:
             return None
         i = int(np.argmin(hits.t))
         return hits.ent(i)[0], hits.place(i)
+
+    def _front_face_lean(self, idx, nat, o, d):
+        """_front_face_at's answer over the engine's lazy placements (#158)
+        without gathering every face the ray meets: the index's nearest
+        face, then the lazy placements' only nearer than it (a tie goes to
+        the index's, as the argmin over the index's then the lazy faces
+        does), and of those only the nearest made into a face — the
+        first of equals in the order _lazy_face_hits keeps. Each probe of
+        a face crossing (see _crossing_on_screen) is one of these, ~2 ms
+        over the plant when every face met was made."""
+        import numpy as np
+        best_t, best = float("inf"), None
+        if len(idx.entities):
+            face_t = self._ray_hits(idx, o, d, idx.ent_sel, own=False)
+            if face_t is not None and len(face_t):
+                i = int(np.argmin(face_t))
+                if np.isfinite(face_t[i]):
+                    best_t = float(face_t[i])
+                    pidx = getattr(idx, "ent_place_idx", None)
+                    place = (idx.ent_placements[int(pidx[i])]
+                             if pidx is not None and i < len(pidx)
+                             and pidx[i] >= 0 else idx.entities[i][1])
+                    best = (idx.entities[i][0], place)
+        rows = Viewport._lazy_sel_rows(self, nat)
+        if not len(rows):
+            return best
+        iset = nat[0]
+        oo = np.array([o.x(), o.y(), o.z()])
+        dd = np.array([d.x(), d.y(), d.z()])
+        # A margin past the index's nearest: the engine's boxes decide
+        # which triangles to hand, the exact test below which win.
+        reach = (best_t * 1.001 + 1e-6 if np.isfinite(best_t)
+                 else float("inf"))
+        pl, tr, v0, e1, e2 = iset.ray_cands(
+            np.ascontiguousarray(rows, np.int64), tuple(oo.tolist()),
+            tuple(dd.tolist()), reach)
+        if not len(pl):
+            return best
+        t, hit = _moller_trumbore(oo, dd, v0, e1, e2)
+        k = np.flatnonzero(hit & (t < best_t))
+        if not len(k):
+            return best
+        tmin = t[k].min()
+        k = k[t[k] == tmin]
+        from core.group import effective_material
+        groups = self._pick_lazy_table()[0]
+        lazy_pos = self._pick_cands_memo[3]
+        win = None
+        for i, r in zip(pl[k].tolist(), tr[k].tolist()):
+            g = groups[i]
+            base = self._proto_base_chunk(g.mesh, effective_material(g))
+            j = int(base["tri_ent"][r])
+            key = (lazy_pos[id(g)][0], j)
+            if win is None or key < win[0]:
+                win = (key, base, i, j)
+        _key, base, i, j = win
+        return base["faces"][j], groups[i]
 
     #: How far from the cursor (px) a face crossing snaps, and how far
     #: either side of the crossing the search checks that each face shows.

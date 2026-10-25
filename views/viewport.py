@@ -652,6 +652,84 @@ def _ctx_changed(vp, before):
         cc(before)
 
 
+def _px_near(x, y, ok, px, py, thr):
+    """The projected points ``(x, y)`` in front (``ok``) within ``thr`` px of
+    ``(px, py)``: their indices in order and distances, as one ``np.hypot``
+    pass over all of them gives them. The native engine finds the
+    candidates (the 650 000 corners of the plant of #158 took 12 ms a
+    pointer move in NumPy) a hair wider than ``thr``, and those are measured
+    here the same way."""
+    import numpy as np
+    from core import _native
+    mod = _native.native
+    if mod is not None and hasattr(mod, "points_near_px") and len(x) > 4096:
+        k = mod.points_near_px(np.ascontiguousarray(x, dtype=np.float64),
+                               np.ascontiguousarray(y, dtype=np.float64),
+                               np.ascontiguousarray(ok, dtype=bool),
+                               float(px), float(py),
+                               float(thr) * (1.0 + 1e-6) + 1e-6)
+        d = np.hypot(x[k] - px, y[k] - py)
+        near = d < thr
+        return k[near], d[near]
+    d = np.where(ok, np.hypot(x - px, y - py), np.inf)
+    k = np.flatnonzero(d < thr)
+    return k, d[k]
+
+
+#: Whether QVector3D's length here is the three-argument hypot that
+#: _unit_rays reproduces (None: not checked yet).
+_QV_HYPOT3 = None
+
+
+def _hypot3_f32(a):
+    """libstdc++'s three-argument ``std::hypot`` in float, row by row of
+    ``a`` (N, 3) float32: the largest magnitude scaled out, as Qt's
+    ``QVector3D::length`` computes it."""
+    import numpy as np
+    a = np.abs(a)
+    m = a.max(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        q = a / m[:, None]
+        s = (q[:, 0] * q[:, 0] + q[:, 1] * q[:, 1]) + q[:, 2] * q[:, 2]
+        return np.where(m > 0, m * np.sqrt(s), np.float32(0)).astype(np.float32)
+
+
+def _qv_hypot3() -> bool:
+    """Checked once against QVector3D itself, on vectors from a millimetre
+    to tens of kilometres: another C++ library may round the last bit
+    differently, and then the rays are built point by point as before."""
+    global _QV_HYPOT3
+    if _QV_HYPOT3 is None:
+        import numpy as np
+        rng = np.random.default_rng(158)
+        a = (rng.normal(size=(512, 3))
+             * 10.0 ** rng.uniform(-3, 4.5, (512, 1))).astype(np.float32)
+        a[:8, rng.integers(0, 3, 8)] = 0.0
+        want = np.array([QVector3D(*r).length() for r in a.tolist()],
+                        dtype=np.float32)
+        _QV_HYPOT3 = bool((_hypot3_f32(a) == want).all())
+    return _QV_HYPOT3
+
+
+def _unit_rays(eye, pts):
+    """The rays ``_is_occluded`` casts from ``eye`` to each of ``pts`` (N, 3),
+    bit for bit as QVector3D builds them (float coordinates, its length,
+    its division) without making one per point — a pointer move over the
+    plant of #158 asks tens of thousands of hidden corners. Returns
+    ``(rows, D, dists)``: the points not on the eye, their unit directions
+    and distances (float64 of the float values), or None where this
+    library's length cannot be reproduced."""
+    import numpy as np
+    if not _qv_hypot3():
+        return None
+    w = np.asarray(pts, dtype=np.float32).reshape(-1, 3)
+    dl = w - np.array([eye.x(), eye.y(), eye.z()], dtype=np.float32)
+    L = _hypot3_f32(dl)
+    rows = np.flatnonzero(L.astype(np.float64) >= 1e-9)
+    D = (dl[rows] / L[rows, None]).astype(np.float64)
+    return rows, D, L[rows].astype(np.float64)
+
+
 def _occlusion_block(o, d, v0, e1, e2):
     """``Viewport._occluded_many``'s NumPy block: the nearest accepted hit
     of each ray ``d`` (r,3) from ``o`` on the triangles (inf: none)."""
@@ -14067,12 +14145,12 @@ class Viewport(QOpenGLWidget):
         seen = self._depth_limits(float(screen_x), float(screen_y), thr)
         ds, ps = [], []
         for x, y, ok, pts in parts:
-            d = np.where(ok, np.hypot(x - screen_x, y - screen_y), np.inf)
-            k = np.flatnonzero(d < thr)
+            k, d = _px_near(x, y, ok, screen_x, screen_y, thr)
             if len(k) and seen is not None:
-                k = k[~self._depth_hidden(seen, pts[k], x[k], y[k])]
+                keep = ~self._depth_hidden(seen, pts[k], x[k], y[k])
+                k, d = k[keep], d[keep]
             if len(k):
-                ds.append(d[k])
+                ds.append(d)
                 ps.append(pts[k])
         if len(snap):
             M = self._np_mvp()
@@ -14101,10 +14179,11 @@ class Viewport(QOpenGLWidget):
             pts = pts[at]
         k, size = 1, 8
         while k < len(pts):
-            batch = [QVector3D(*p) for p in pts[k:k + size].tolist()]
-            for v, h in zip(batch, self._occluded_many(batch)):
-                if not h:
-                    return v
+            batch = pts[k:k + size]
+            seen_at = np.flatnonzero(~np.array(self._occluded_many(batch),
+                                               dtype=bool))
+            if len(seen_at):
+                return QVector3D(*batch[seen_at[0]].tolist())
             k += size
             size = min(size * 2, 1024)
         return None
@@ -14372,14 +14451,24 @@ class Viewport(QOpenGLWidget):
         every span, then each span's triangles against the rays that reach
         it. Same rays (built with the same QVector3D arithmetic), same
         acceptance as ``_ray_hits``; with an active section cut — per-face
-        rules — it asks ``_is_occluded`` point by point."""
+        rules — it asks ``_is_occluded`` point by point.
+
+        ``worlds`` may also be an (N, 3) array of points, read as the
+        QVector3D of each would hold them."""
         import numpy as np
-        worlds = list(worlds)
-        if worlds and _active_cut(self.scene) is not None:
+        arr = None
+        if isinstance(worlds, np.ndarray):
+            arr = worlds.reshape(-1, 3)
+            worlds = arr
+        else:
+            worlds = list(worlds)
+        if len(worlds) and _active_cut(self.scene) is not None:
+            if arr is not None:
+                worlds = [QVector3D(*p) for p in arr.tolist()]
             return [self._is_occluded(w) for w in worlds]   # the cut first (#384)
         out = [False] * len(worlds)
-        if not worlds or self._effective_style().face_mode in ("xray",
-                                                               "wireframe"):
+        if not len(worlds) or self._effective_style().face_mode in (
+                "xray", "wireframe"):
             return out
         nat = (self._lazy_native() if hasattr(self, "_lazy_native")
                else None)
@@ -14394,23 +14483,28 @@ class Viewport(QOpenGLWidget):
                 nat = None
         if getattr(idx, "tri_v0", None) is None and not own and nat is None:
             return out
-        if _active_cut(self.scene) is not None:
-            return [self._is_occluded(w) for w in worlds]
         origin = self.camera.eye()
-        rows, dirs, dists = [], [], []
-        for i, w in enumerate(worlds):
-            delta = w - origin
-            dist = delta.length()
-            if dist < 1e-9:
-                continue
-            d = delta / dist
-            rows.append(i)
-            dirs.append((d.x(), d.y(), d.z()))
-            dists.append(dist)
-        if not rows:
+        rays = _unit_rays(origin, arr if arr is not None else
+                          [(w.x(), w.y(), w.z()) for w in worlds])
+        if rays is not None:
+            rows, D, dists = rays
+        else:
+            if arr is not None:
+                worlds = [QVector3D(*p) for p in arr.tolist()]
+            rows, dirs, dists = [], [], []
+            for i, w in enumerate(worlds):
+                delta = w - origin
+                dist = delta.length()
+                if dist < 1e-9:
+                    continue
+                d = delta / dist
+                rows.append(i)
+                dirs.append((d.x(), d.y(), d.z()))
+                dists.append(dist)
+            D = np.array(dirs, dtype=np.float64).reshape(-1, 3)
+        if not len(rows):
             return out
         o = np.array([origin.x(), origin.y(), origin.z()])
-        D = np.array(dirs, dtype=np.float64)
         best = np.full(len(rows), np.inf)
         settled = None
         stat = (self._static_occluders(idx) if nat is not None
@@ -14580,9 +14674,9 @@ class Viewport(QOpenGLWidget):
                     if _occlusion_block(o, D[r:r + 1], v0, e1, e2)[0] \
                             < limit[r]:
                         best[r] = -np.inf
-        for j, i in enumerate(rows):
-            out[i] = bool(best[j] < limit[j])
-        return out
+        res = np.zeros(len(worlds), dtype=bool)
+        res[np.asarray(rows, dtype=np.intp)] = best < limit
+        return res.tolist()
 
     def pick_face(self, screen_x: float, screen_y: float):
         """Return the face the cursor ray hits, or ``None``.

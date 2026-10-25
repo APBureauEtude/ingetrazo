@@ -663,7 +663,7 @@ impl Proto {
     pub fn corners_near(&self, m: &[f64; 16], mvp: &[f64; 16], w: f64, h: f64, px: f64,
                         py: f64, reach: f64, seen: Option<&DepthLimits>, out: &mut Vec<Corner>) {
         let r2 = reach * reach;
-        for i in self.edges_may_reach(m, mvp, w, h, px, py, reach) {
+        for i in self.edges_may_reach(m, mvp, w, h, px, py, reach, seen) {
             let e = &self.edges[i];
             let a = corner(m, e[0]);
             let b = corner(m, e[1]);
@@ -681,10 +681,14 @@ impl Proto {
 
     /// The hard edges whose boxes, placed by ``m``, may come within
     /// ``reach`` px of ``(px, py)`` — all of them for a small prototype —
-    /// in their own order, so what is found near a pixel keeps it.
+    /// in their own order, so what is found near a pixel keeps it. With
+    /// ``seen``, a box wholly behind what the frame shows wherever it may
+    /// fall on screen is left out too: zoomed out over the plant of #158
+    /// a million corners of a few copies lay under the cursor, nearly all
+    /// under a roof, and each was projected to be told so.
     #[allow(clippy::too_many_arguments)]
     fn edges_may_reach(&self, m: &[f64; 16], mvp: &[f64; 16], w: f64, h: f64, px: f64,
-                       py: f64, reach: f64) -> Vec<usize> {
+                       py: f64, reach: f64, seen: Option<&DepthLimits>) -> Vec<usize> {
         if self.enodes.is_empty() {
             return (0..self.edges.len()).collect();
         }
@@ -693,6 +697,9 @@ impl Proto {
         while let Some(ni) = stack.pop() {
             let n = &self.enodes[ni as usize];
             if !box_may_reach(m, mvp, w, h, n.lo, n.hi, px, py, reach) {
+                continue;
+            }
+            if seen.is_some_and(|g| g.hides_box(m, mvp, w, h, n.lo, n.hi)) {
                 continue;
             }
             if n.leaf {
@@ -772,6 +779,68 @@ impl DepthLimits {
         let l = self.lim[(iy * self.gw + ix) as usize];
         let (dx, dy, dz) = (p[0] - self.eye[0], p[1] - self.eye[1], p[2] - self.eye[2]);
         (dx * dx + dy * dy + dz * dz).sqrt() > l
+    }
+
+    /// Whether ``hides`` holds for every point of the local box ``lo``–``hi``
+    /// placed by ``m`` that falls inside the patch (those outside it lie
+    /// farther from the cursor than any corner asked for): the box nearer
+    /// to the eye than its nearest point by a margin past rounding — the
+    /// bake's float corners, the square root — than the largest limit
+    /// over the pixels its screen box covers. False whenever it cannot
+    /// tell (a corner of the box behind the eye, a pixel with no limit).
+    pub fn hides_box(&self, m: &[f64; 16], mvp: &[f64; 16], w: f64, h: f64,
+                     lo: [f64; 3], hi: [f64; 3]) -> bool {
+        if !lo.iter().chain(hi.iter()).all(|v| v.is_finite()) {
+            return false;
+        }
+        let (mut wlo, mut whi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        let (mut x0, mut x1, mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY,
+                                                f64::INFINITY, f64::NEG_INFINITY);
+        for i in 0..8 {
+            let q = tp(m, box_corner(lo, hi, i));
+            let cw = q[0] * mvp[3] + q[1] * mvp[7] + q[2] * mvp[11] + mvp[15];
+            if !(cw > 1e-9) {
+                return false;
+            }
+            let Some((sx, sy)) = project(mvp, q, w, h) else { return false };
+            if !(sx.is_finite() && sy.is_finite()) {
+                return false;
+            }
+            x0 = x0.min(sx);
+            x1 = x1.max(sx);
+            y0 = y0.min(sy);
+            y1 = y1.max(sy);
+            for k in 0..3 {
+                wlo[k] = wlo[k].min(q[k]);
+                whi[k] = whi[k].max(q[k]);
+            }
+        }
+        // The pixels the box may fall on, a pixel wider, within the patch.
+        let ix0 = (((x0 - 1.0) * self.dpr).floor() as i64 - self.x0).max(0);
+        let ix1 = (((x1 + 1.0) * self.dpr).floor() as i64 - self.x0).min(self.gw - 1);
+        let iy0 = (self.hdev - 1 - ((y1 + 1.0) * self.dpr).floor() as i64 - self.y0).max(0);
+        let iy1 = (self.hdev - 1 - ((y0 - 1.0) * self.dpr).floor() as i64 - self.y0).min(self.gh - 1);
+        if ix0 > ix1 || iy0 > iy1 {
+            return true;
+        }
+        let mut lmax = 0.0f64;
+        for iy in iy0..=iy1 {
+            for &l in &self.lim[(iy * self.gw + ix0) as usize..=(iy * self.gw + ix1) as usize] {
+                if !(l < f64::INFINITY) {
+                    return false;
+                }
+                lmax = lmax.max(l);
+            }
+        }
+        let mut d2 = 0.0f64;
+        let mut big = 0.0f64;
+        for k in 0..3 {
+            let e = self.eye[k];
+            let g = if e < wlo[k] { wlo[k] - e } else if e > whi[k] { e - whi[k] } else { 0.0 };
+            d2 += g * g;
+            big = big.max(wlo[k].abs()).max(whi[k].abs()).max(e.abs());
+        }
+        d2.sqrt() - (1e-6 * big + 1e-9) > lmax * (1.0 + 1e-9)
     }
 }
 

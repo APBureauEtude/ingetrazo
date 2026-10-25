@@ -280,3 +280,34 @@ def test_of_two_coplanar_faces_the_smaller_copy_is_picked():
         win._saved_version = vp.scene.version
         win.close()
     assert out[0] == out[1] and out[0][1] == "small"
+
+
+
+def test_the_points_near_the_cursor_are_numpys():
+    """``_px_near`` (the native candidates, measured by NumPy) finds the
+    same indices in the same order, with the same distances, as one
+    ``np.hypot`` pass — points behind the eye, not finite, on the radius."""
+    from views.viewport import _px_near
+    rng = np.random.default_rng(158)
+    for _ in range(40):
+        n = int(rng.integers(5000, 60000))
+        x = rng.uniform(-50, 950, n)
+        y = rng.uniform(-50, 700, n)
+        px, py = rng.uniform(0, 900), rng.uniform(0, 650)
+        thr = float(rng.choice([6.0, 12.0, 0.5]))
+        # Some on the radius, a hair inside and outside it.
+        a = rng.uniform(0, 2 * np.pi, 300)
+        rr = thr * (1.0 + rng.choice([-1e-15, 0.0, 1e-15], 300))
+        x[:300], y[:300] = px + rr * np.cos(a), py + rr * np.sin(a)
+        x[300:310] = np.nan
+        x[310:320] = np.inf
+        y[320:330] = -np.inf
+        ok = rng.random(n) > 0.1
+        m = int(rng.integers(4097, n))                   # a cached head
+        for xs, ys, oks in ((x, y, ok), (x[:m], y[:m], ok[:m])):
+            k, d = _px_near(xs, ys, oks, px, py, thr)
+            with np.errstate(invalid="ignore"):
+                full = np.where(oks, np.hypot(xs - px, ys - py), np.inf)
+            want = np.flatnonzero(full < thr)
+            assert np.array_equal(k, want)
+            assert np.array_equal(d, full[want])

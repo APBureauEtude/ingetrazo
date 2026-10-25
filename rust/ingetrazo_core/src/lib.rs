@@ -31,6 +31,7 @@ fn ingetrazo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(qt_vector_probe, m)?)?;
     m.add_function(wrap_pyfunction!(weld_points, m)?)?;
     m.add_function(wrap_pyfunction!(boxes_near_px, m)?)?;
+    m.add_function(wrap_pyfunction!(points_near_px, m)?)?;
     m.add_class::<GlReplay>()?;
     m.add_class::<InstanceProto>()?;
     m.add_class::<InstanceSet>()?;
@@ -255,6 +256,40 @@ fn boxes_near_px<'py>(py: Python<'py>, lo: PyReadonlyArray2<'py, f64>,
         }
         all_front && x0 - r <= x && x <= x1 + r && y0 - r <= y && y <= y1 + r
     }).map(|i| i as i64).collect());
+    Ok(PyArray1::from_vec(py, keep))
+}
+
+/// The indices, in order, of the projected points ``(x, y)`` in front
+/// (``ok``) whose squared distance to ``(px, py)`` is at most ``r``²: the
+/// candidates of views.viewport.Viewport._px_near, which measures them
+/// as NumPy does (650 000 corners a pointer move over the plant of #158).
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn points_near_px<'py>(py: Python<'py>, x: PyReadonlyArray1<'py, f64>,
+                       y: PyReadonlyArray1<'py, f64>, ok: PyReadonlyArray1<'py, bool>,
+                       px: f64, py_: f64, r: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
+    use rayon::prelude::*;
+    let (x, y, ok) = (x.as_array(), y.as_array(), ok.as_array());
+    if x.len() != y.len() || x.len() != ok.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err("lengths"));
+    }
+    // Read in place where contiguous (the cached projections and their
+    // heads are): copying them cost as much as the pass.
+    let cow = |a: numpy::ndarray::ArrayView1<'_, f64>| match a.to_slice() {
+        Some(_) => None,
+        None => Some(a.to_vec()),
+    };
+    let (xc, yc) = (cow(x), cow(y));
+    let okc: Vec<bool> = ok.to_vec();
+    let x: &[f64] = xc.as_deref().unwrap_or_else(|| x.to_slice().unwrap());
+    let y: &[f64] = yc.as_deref().unwrap_or_else(|| y.to_slice().unwrap());
+    let ok: &[bool] = &okc;
+    let r2 = r * r;
+    let keep: Vec<i64> = py.detach(|| (0..x.len()).into_par_iter().with_min_len(8192)
+        .filter(|&i| {
+            let (dx, dy) = (x[i] - px, y[i] - py_);
+            ok[i] && dx * dx + dy * dy <= r2
+        }).map(|i| i as i64).collect());
     Ok(PyArray1::from_vec(py, keep))
 }
 

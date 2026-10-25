@@ -96,8 +96,60 @@ def test_the_batch_hides_exactly_what_the_rays_hide(viewport, view):
     pts = _scene_points(vp.scene, random.Random(view), 400)
     one = [vp._is_occluded(p) for p in pts]
     assert any(one) and not all(one)          # the views do hide something
+    import numpy as np
+    xyz = np.array([(p.x(), p.y(), p.z()) for p in pts])
     for k in range(0, len(pts), 40):          # the batch size snaps ask
         assert vp._occluded_many(pts[k:k + 40]) == one[k:k + 40]
+        # The same points as an array (pick_vertex's corners, #158).
+        assert vp._occluded_many(xyz[k:k + 40]) == one[k:k + 40]
+
+
+def test_without_the_array_rays_the_batch_still_matches(viewport,
+                                                        monkeypatch):
+    # A C++ library whose QVector3D length rounds otherwise: the rays are
+    # built point by point, with the same answer.
+    import numpy as np
+    import views.viewport as V_
+    monkeypatch.setattr(V_, "_QV_HYPOT3", False)
+    vp = viewport
+    vp.camera.set_view("iso")
+    vp.camera.fit_to(V(-5, -3, 0), V(5, 3, 4))
+    pts = _scene_points(vp.scene, random.Random(7), 120)
+    one = [vp._is_occluded(p) for p in pts]
+    assert any(one) and not all(one)
+    xyz = np.array([(p.x(), p.y(), p.z()) for p in pts])
+    assert vp._occluded_many(pts) == one
+    assert vp._occluded_many(xyz) == one
+
+
+def test_the_rays_are_built_as_qvector3d_builds_them():
+    import numpy as np
+    import views.viewport as V_
+    rng = np.random.default_rng(3)
+    pts = np.concatenate([
+        rng.normal(size=(3000, 3)) * 10.0 ** rng.uniform(-3, 4, (3000, 1)),
+        np.array([[1.5, -2.0, 3.25], [1.5, -2.0, 3.25 + 1e-7],
+                  [0.0, 0.0, 9.0], [7.0, 0.0, 0.0]])])
+    eye = V(1.5, -2.0, 3.25)
+    rays = V_._unit_rays(eye, pts)
+    if not V_._qv_hypot3():
+        assert rays is None               # then built point by point
+        return
+    rows, D, dist = rays
+    want_rows, want_d, want_l = [], [], []
+    for i, p in enumerate(pts.tolist()):
+        delta = V(*p) - eye
+        L = delta.length()
+        if L < 1e-9:
+            continue
+        d = delta / L
+        want_rows.append(i)
+        want_d.append((d.x(), d.y(), d.z()))
+        want_l.append(L)
+    assert rows.tolist() == want_rows
+    assert len(rows) < len(pts)           # the eye itself is left out
+    assert (D == np.array(want_d)).all()
+    assert (dist == np.array(want_l)).all()
 
 
 def test_xray_hides_nothing_in_batch(viewport, monkeypatch):

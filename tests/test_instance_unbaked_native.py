@@ -254,6 +254,50 @@ def test_corners_the_frame_hides_are_left_out_as_python_leaves_them(seed):
     assert dropped > 10
 
 
+@pytest.mark.parametrize("seed,limits", [(s, k) for s in range(3)
+                                         for k in ("near", "split", "far")])
+def test_boxes_behind_the_frame_are_left_out_whole(seed, limits):
+    """Big prototypes (their edges in a BVH) under limits that hide whole
+    branches: what ``corners_near`` leaves out, box by box, is exactly what
+    ``_depth_hidden`` drops corner by corner — the same corners, in the
+    same order, coordinates and pixels."""
+    from views.viewport import Viewport
+    rng, bakes, iset = _scene(500 + seed, 40, big=True)
+    cand = np.arange(len(bakes), dtype=np.int64)
+    dropped = kept = 0
+    for _ in range(12):
+        mvp, eye = _camera(rng)
+        colmajor = list(mvp.data())
+        px, py = rng.uniform(150, W - 150), rng.uniform(150, H - 150)
+        reach = float(rng.choice([10.0, 40.0]))
+        dpr = float(rng.choice([1.0, 1.5, 2.0]))
+        x0 = int(np.floor((px - reach) * dpr)) - 1
+        y0 = int(H * dpr) - 1 - (int(np.floor((py + reach) * dpr)) + 1)
+        gw = gh = int(2 * reach * dpr) + 4
+        dist = np.linalg.norm(eye)
+        if limits == "near":              # a wall close in front: all hidden
+            lim = rng.uniform(dist * 0.2, dist * 0.4, (gh, gw))
+        elif limits == "split":           # a wall over half the patch
+            lim = np.full((gh, gw), dist * 3.0)
+            lim[:, : gw // 2] = dist * rng.uniform(0.3, 1.0)
+        else:                              # the scene's own depth, roughly
+            lim = np.full((gh, gw), dist * rng.uniform(0.8, 1.2))
+        seen = (list(map(float, eye)), np.ascontiguousarray(lim), x0, y0,
+                dpr, int(H * dpr))
+        full = iset.corners_near(cand, colmajor, float(W), float(H), px, py,
+                                 reach)
+        keep = ~Viewport._depth_hidden(seen, full[3], full[4], full[5])
+        got = iset.corners_near(cand, colmajor, float(W), float(H), px, py,
+                                reach, seen)
+        for a, b in zip(full, got):
+            assert np.array_equal(a[keep], b)
+        dropped += int((~keep).sum())
+        kept += int(keep.sum())
+    assert dropped > 100
+    if limits != "near":
+        assert kept > 20
+
+
 @pytest.mark.parametrize("seed,big", [(s, False) for s in range(6)]
                          + [(s, True) for s in range(400, 403)])
 def test_edges_near_are_the_baked_edges_at_their_distances(seed, big):

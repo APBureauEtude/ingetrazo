@@ -230,6 +230,7 @@ GL_CW = 0x0900
 GL_CCW = 0x0901
 GL_FRONT = 0x0404
 GL_BACK = 0x0405
+GL_LESS = 0x0201
 GL_LEQUAL = 0x0203
 GL_GREATER = 0x0204
 GL_FALSE = 0
@@ -496,6 +497,10 @@ _INSTANCE_FILTER = True
 #: The engine answers the corner and occlusion queries for the lazy
 #: placements without baking them (tests compare both ways).
 _LAZY_NATIVE = True
+#: A pointer move over a still view reuses the model as the last frame
+#: drew it (Viewport._frame_cache_key); INGETRAZO_FRAME_CACHE=0 turns it
+#: off, and every frame draws everything as before.
+_FRAME_CACHE = os.environ.get("INGETRAZO_FRAME_CACHE", "1") != "0"
 #: Span lists this long are culled with NumPy (_visible_spans_np).
 _SPAN_VECTOR_MIN = 64
 #: Recorded instanced passes replayed by the native engine when it is on.
@@ -2071,6 +2076,106 @@ class Viewport(QOpenGLWidget):
         self._program.setUniformValue(self._loc_shadow_overlay, 0)
         _fmark("shadowmap")
 
+        fc = self._frame_cache_key(mvp, w, h, style, mode)
+        if fc is None:
+            self._paint_static(mvp, w, h, style, mode, _fmark,
+                               self._hover_entity)
+        else:
+            # The model as the last frame left it, when nothing it shows
+            # changed (a pointer move): see _frame_cache_key.
+            if not self._frame_cache_restore(fc, w, h):
+                self._paint_static(mvp, w, h, style, mode, _fmark, None)
+                self._frame_cache_store(fc, w, h)
+            self._paint_hover(mvp, w, h)
+
+        # Rubber band preview. Loose drawing tools float it on top (depth test
+        # off, so it never z-fights with coincident axes). Push/Pull's solid
+        # preview keeps depth testing on, so the forming box's back edges are
+        # hidden behind its faces — classic hidden-line removal.
+        depth_wire = (
+            getattr(self.active_tool, "wireframe_depth_tested", False)
+            if self.active_tool is not None
+            else False
+        )
+        if not depth_wire:
+            self._gl.glDisable(GL_DEPTH_TEST)
+        self._draw_rubber_band()
+        if not depth_wire:
+            self._gl.glEnable(GL_DEPTH_TEST)
+
+        self._program.release()
+
+        if self._export_size is not None:
+            # Hi-res export: the scene stays in the FBO for render_image to
+            # read back; the widget blit and its QPainter overlay don't apply.
+            self._scene_fbo.release()
+            return
+
+        # The depth this frame just drew, read ONCE for the overlay's
+        # annotations (dimensions, leader texts), which ask «is this point
+        # hidden?» for every sample of every line — see _occluded_on_screen.
+        self._depth_snap = None
+        if self._annotations_need_depth():
+            self._capture_depth(w, h)
+        # What the scene FBO now holds: the depth under the cursor can be
+        # read from it while the camera stays here (``_depth_world_at``).
+        self._painted_view = (tuple(mvp.data()), w, h)
+
+        # Blit colour from our scene FBO to the widget's default framebuffer.
+        # We can't use QOpenGLFramebufferObject.blitFramebuffer(None, src) here
+        # because in QOpenGLWidget the "default" framebuffer the widget shows
+        # is its own internal FBO (returned by defaultFramebufferObject()),
+        # NOT the system framebuffer 0. So we bind the read/draw targets by id
+        # and call glBlitFramebuffer directly via the GL3+ extra functions.
+        extra = self.context().extraFunctions()
+        self._gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, self._scene_fbo.handle())
+        self._gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, default_fbo)
+        extra.glBlitFramebuffer(
+            0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST
+        )
+        self._gl.glBindFramebuffer(GL_FRAMEBUFFER, default_fbo)
+        if _PERF:
+            _plog("paintGL.gl+blit",
+                  (_time_mod.perf_counter() - _pt0) * 1000.0, floor=30.0)
+            _ov0 = _time_mod.perf_counter()
+
+        # 2D overlays on top of the OpenGL framebuffer.
+        self._draw_overlay()
+
+        if _PERF:
+            _plog("paintGL.overlay",
+                  (_time_mod.perf_counter() - _ov0) * 1000.0, floor=30.0)
+            _dt = (_time_mod.perf_counter() - _pt0) * 1000.0
+            _plog("paintGL", _dt)
+            # P0 breakdown: per-section CPU ms + cull counters + the
+            # input→paint latency of the gesture that triggered this frame.
+            if _dt >= 25.0:
+                cf, tf, ce = getattr(self, "_cull_stats", (0, 0, 0))
+                it = getattr(self, "_input_t", None)
+                lat = (f" lat={( _time_mod.monotonic() - it) * 1000.0:.0f}ms"
+                       if it is not None else "")
+                segs = " ".join(f"{k}={v:.0f}ms" for k, v in _fseg.items())
+                _plog("frame", _dt,
+                      extra=f"{segs} cull={cf//1000}k/{tf//1000}k"
+                            f" tris +{ce//1000}k edges{lat}", floor=0.0)
+            self._input_t = None
+            st = getattr(self, "_perf_stat", None) or \
+                [_time_mod.perf_counter(), 0, 0.0]
+            st[1] += 1
+            st[2] += _dt
+            now = _time_mod.perf_counter()
+            if now - st[0] >= 1.0:
+                _plog("frames/s", st[2] / max(st[1], 1),
+                      extra=f"{st[1]} paints en {now-st[0]:.1f}s (avg ms)",
+                      floor=0.0)
+                st = [now, 0, 0.0]
+            self._perf_stat = st
+
+    def _paint_static(self, mvp, w, h, style, mode, _fmark, hover) -> None:
+        """paintGL's passes of the model and what sits in it — faces,
+        edges, selection, axes, guides — up to the section cut's edges;
+        ``hover`` is the entity under the cursor they highlight (None:
+        none, for the frame cache, which draws it after)."""
         # Frustum culling (P1): the consolidated VBOs carry per-chunk draw
         # spans; only spans whose chunk AABB touches the frustum are
         # submitted. Conservative — a missing bbox always draws.
@@ -2433,7 +2538,7 @@ class Viewport(QOpenGLWidget):
         # top of the cream faces. Same polygon offset as the faces so they sit
         # at matching depth (LEQUAL lets this later draw win); depth-write OFF
         # so the overlay tints without blocking the edges drawn afterwards.
-        if (self._sel_faces_count > 0 or self._hover_entity is not None) \
+        if (self._sel_faces_count > 0 or hover is not None) \
                 and self._export_size is None:      # no selection cues in exports
             self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
             self._gl.glPolygonOffset(1.0, 1.0)
@@ -2452,7 +2557,7 @@ class Viewport(QOpenGLWidget):
                     self._gl.glDrawArrays(GL_TRIANGLES, start, count)
                 self._sel_faces_vao.release()
                 self._program.setUniformValue(self._loc_stipple, 0)
-            hovered = self._hover_entity
+            hovered = hover
             if isinstance(hovered, Face) and hovered not in self.scene.selection:
                 # The face under the cursor (Select, Push/Pull, Paint,
                 # Offset, Follow Me...) wears the same dots as a selected
@@ -2483,6 +2588,120 @@ class Viewport(QOpenGLWidget):
         self._draw_groups_preview(mvp)
         self._draw_hidden_ghosts(mvp)
 
+        self._draw_scaffold(mvp, w, h)
+
+        self._set_section_clip(True)
+        show_edges = style.edges or mode == "wireframe"
+        ec = style.edge_color
+        # Line weight for sheet renders: a GL line is one pixel whatever
+        # the DPI (core-profile Mesa clamps glLineWidth), and one pixel at
+        # 300 dpi is a 0.085 mm hairline that vanishes on paper and on the
+        # composer's scaled preview (Marco, 2026-09-14: «casi no se ven»).
+        # The frame asks for a pen in pixels and the pass is redrawn at
+        # sub-pixel offsets to reach it — exports only, never the screen.
+        _jit_e = self._line_jitter(self._export_edge_px, w, h)
+        _jit_p = self._line_jitter(self._export_profile_px, w, h)
+        # X-ray draws every edge, but the ones BEHIND a face come out washed
+        # toward the background: the faces' depth (never written by their
+        # translucent pass) is laid down here, the edges beyond it drawn
+        # first in the faded colour, then the ones in front at full strength.
+        # From above, an open box keeps every edge dark and a lidded one
+        # greys the edges under the lid — you see whether a face is there.
+        xray_edges = mode == "xray" and show_edges
+        if xray_edges:
+            self._xray_face_depth()
+            bg = style.background
+            k = XRAY_HIDDEN_EDGE_FADE
+            _edge_passes = ((tuple(ec[i] + (bg[i] - ec[i]) * k
+                                   for i in range(3)), True),
+                            (tuple(ec[:3]), False))
+        else:
+            _edge_passes = ((tuple(ec[:3]), False),)
+        for (_ecol, _hidden), (_dx, _dy) in (
+                (_p, _j) for _p in _edge_passes for _j in _jit_e):
+            if xray_edges:
+                self._gl.glDepthFunc(GL_GREATER if _hidden else GL_LEQUAL)
+                self._gl.glDepthMask(GL_FALSE if _hidden else GL_TRUE)
+            if len(_jit_e) > 1:
+                self._program.setUniformValue(self._loc_mvp,
+                                              _shifted_mvp(mvp, _dx, _dy))
+            if self._edges_count > 0 and show_edges:
+                self._set_color(*_ecol, 1.0)
+                self._edges_vao.bind()
+                _espans = getattr(self, "_frame_edge_spans",
+                                  ((0, self._edges_count),))
+                if split_e is None:
+                    for _vs, _vc in _espans:
+                        self._gl.glDrawArrays(GL_LINES, _vs, _vc)
+                else:
+                    # Same two-tier draw as the faces: washed-out
+                    # surroundings, then the edited group's own edges at
+                    # full strength.
+                    self._program.setUniformValue1f(self._loc_fade,
+                                                    EDIT_REST_FADE)
+                    for _vs, _vc in _espans:
+                        if _vs < split_e:
+                            self._gl.glDrawArrays(GL_LINES, _vs, _vc)
+                    self._program.setUniformValue1f(self._loc_fade, 0.0)
+                    for _vs, _vc in _espans:
+                        if _vs >= split_e:
+                            self._gl.glDrawArrays(GL_LINES, _vs, _vc)
+                self._edges_vao.release()
+            if show_edges:
+                self._set_color(*_ecol, 1.0)
+                self._draw_instanced_edges()
+        if xray_edges:
+            # Back to X-ray's depth: the faces never occlude, so selected
+            # and hovered edges behind them still show.
+            self._gl.glDepthFunc(GL_LEQUAL)
+            self._gl.glDepthMask(GL_TRUE)
+            self._gl.glClear(GL_DEPTH_BUFFER_BIT)
+        elif (show_edges and getattr(style, "back_edges", False)
+                and mode != "wireframe"):
+            self._draw_back_edges(tuple(ec[:3]), w, h)
+        if len(_jit_e) > 1:
+            self._program.setUniformValue(self._loc_mvp, mvp)
+
+        # Profile (silhouette) edges: soft seams of a curved surface are hidden,
+        # except where the surface turns away from the viewer — the cylinder's
+        # outline. View-dependent, so rebuilt every frame.
+        if show_edges and style.profiles:
+            sil_count = self._upload_silhouette_edges()
+            if sil_count > 0:
+                self._set_color(ec[0], ec[1], ec[2], 1.0)
+                self._silhouette_vao.bind()
+                for _dx, _dy in _jit_p:
+                    if _dx or _dy:
+                        self._program.setUniformValue(
+                            self._loc_mvp, _shifted_mvp(mvp, _dx, _dy))
+                    self._gl.glDrawArrays(GL_LINES, 0, sil_count)
+                self._silhouette_vao.release()
+                if len(_jit_p) > 1:
+                    self._program.setUniformValue(self._loc_mvp, mvp)
+        _fmark("edges")
+
+        # Selected edges (drawn on top, highlighted) — never in an export
+        if self._selected_count > 0 and self._export_size is None:
+            self._set_color(0.95, 0.45, 0.16, 1.0)
+            self._selected_vao.bind()
+            self._gl.glDrawArrays(GL_LINES, 0, self._selected_count)
+            self._selected_vao.release()
+
+        # Hovered edge — light blue, on top of everything else so it reads as
+        # the pick candidate even when it overlaps a selected (orange) edge.
+        # A curve segment highlights its whole contour (what a click selects).
+        if isinstance(hover, Edge):
+            hover_count = self._upload_hover_edge(hover)
+            self._set_color(0.30, 0.55, 0.95, 1.0)
+            self._hover_edges_vao.bind()
+            self._gl.glDrawArrays(GL_LINES, 0, hover_count)
+            self._hover_edges_vao.release()
+        self._set_section_clip(False)
+        self._draw_section_cut_edges()   # ON the plane — drawn unclipped
+
+    def _draw_scaffold(self, mvp, w, h) -> None:
+        """The axes, the guides and the dashed box of the group being
+        edited: drawn without writing depth, over the faces."""
         # Axes — long solid positive + evenly-dashed negative per axis.
         # Dash spacing scales with the camera distance so the on-screen density
         # stays stable across zoom. Depth-write OFF so the ground axes don't cull
@@ -2596,197 +2815,141 @@ class Viewport(QOpenGLWidget):
                 self._gl.glDepthMask(GL_TRUE)
                 self._guides_vao.release()
 
-        self._set_section_clip(True)
-        show_edges = style.edges or mode == "wireframe"
-        ec = style.edge_color
-        # Line weight for sheet renders: a GL line is one pixel whatever
-        # the DPI (core-profile Mesa clamps glLineWidth), and one pixel at
-        # 300 dpi is a 0.085 mm hairline that vanishes on paper and on the
-        # composer's scaled preview (Marco, 2026-09-14: «casi no se ven»).
-        # The frame asks for a pen in pixels and the pass is redrawn at
-        # sub-pixel offsets to reach it — exports only, never the screen.
-        _jit_e = self._line_jitter(self._export_edge_px, w, h)
-        _jit_p = self._line_jitter(self._export_profile_px, w, h)
-        # X-ray draws every edge, but the ones BEHIND a face come out washed
-        # toward the background: the faces' depth (never written by their
-        # translucent pass) is laid down here, the edges beyond it drawn
-        # first in the faded colour, then the ones in front at full strength.
-        # From above, an open box keeps every edge dark and a lidded one
-        # greys the edges under the lid — you see whether a face is there.
-        xray_edges = mode == "xray" and show_edges
-        if xray_edges:
-            self._xray_face_depth()
-            bg = style.background
-            k = XRAY_HIDDEN_EDGE_FADE
-            _edge_passes = ((tuple(ec[i] + (bg[i] - ec[i]) * k
-                                   for i in range(3)), True),
-                            (tuple(ec[:3]), False))
-        else:
-            _edge_passes = ((tuple(ec[:3]), False),)
-        for (_ecol, _hidden), (_dx, _dy) in (
-                (_p, _j) for _p in _edge_passes for _j in _jit_e):
-            if xray_edges:
-                self._gl.glDepthFunc(GL_GREATER if _hidden else GL_LEQUAL)
-                self._gl.glDepthMask(GL_FALSE if _hidden else GL_TRUE)
-            if len(_jit_e) > 1:
-                self._program.setUniformValue(self._loc_mvp,
-                                              _shifted_mvp(mvp, _dx, _dy))
-            if self._edges_count > 0 and show_edges:
-                self._set_color(*_ecol, 1.0)
-                self._edges_vao.bind()
-                _espans = getattr(self, "_frame_edge_spans",
-                                  ((0, self._edges_count),))
-                if split_e is None:
-                    for _vs, _vc in _espans:
-                        self._gl.glDrawArrays(GL_LINES, _vs, _vc)
-                else:
-                    # Same two-tier draw as the faces: washed-out
-                    # surroundings, then the edited group's own edges at
-                    # full strength.
-                    self._program.setUniformValue1f(self._loc_fade,
-                                                    EDIT_REST_FADE)
-                    for _vs, _vc in _espans:
-                        if _vs < split_e:
-                            self._gl.glDrawArrays(GL_LINES, _vs, _vc)
-                    self._program.setUniformValue1f(self._loc_fade, 0.0)
-                    for _vs, _vc in _espans:
-                        if _vs >= split_e:
-                            self._gl.glDrawArrays(GL_LINES, _vs, _vc)
-                self._edges_vao.release()
-            if show_edges:
-                self._set_color(*_ecol, 1.0)
-                self._draw_instanced_edges()
-        if xray_edges:
-            # Back to X-ray's depth: the faces never occlude, so selected
-            # and hovered edges behind them still show.
-            self._gl.glDepthFunc(GL_LEQUAL)
-            self._gl.glDepthMask(GL_TRUE)
-            self._gl.glClear(GL_DEPTH_BUFFER_BIT)
-        elif (show_edges and getattr(style, "back_edges", False)
-                and mode != "wireframe"):
-            self._draw_back_edges(tuple(ec[:3]), w, h)
-        if len(_jit_e) > 1:
-            self._program.setUniformValue(self._loc_mvp, mvp)
+    def _frame_cache_key(self, mvp, w, h, style, mode):
+        """What the model this frame draws depends on, when a pointer move
+        may reuse the last frame's (``_frame_cache_restore``) — or None:
+        the switch off, an export, or a frame whose passes the cursor's
+        cues cannot simply go over (X-ray and back edges draw edges through
+        the faces, a section cut its own edges, a tool's preview, the hidden
+        ghosts, the base map, terrain and survey layers). The model over
+        the plant of #158 took the GPU 40 ms a frame, every pointer move.
 
-        # Profile (silhouette) edges: soft seams of a curved surface are hidden,
-        # except where the surface turns away from the viewer — the cylinder's
-        # outline. View-dependent, so rebuilt every frame.
-        if show_edges and style.profiles:
-            sil_count = self._upload_silhouette_edges()
-            if sil_count > 0:
-                self._set_color(ec[0], ec[1], ec[2], 1.0)
-                self._silhouette_vao.bind()
-                for _dx, _dy in _jit_p:
-                    if _dx or _dy:
-                        self._program.setUniformValue(
-                            self._loc_mvp, _shifted_mvp(mvp, _dx, _dy))
-                    self._gl.glDrawArrays(GL_LINES, 0, sil_count)
-                self._silhouette_vao.release()
-                if len(_jit_p) > 1:
-                    self._program.setUniformValue(self._loc_mvp, mvp)
-        _fmark("edges")
+        Everything the static passes read is in it: the view, the scene's
+        versions (a selection bumps it), every buffer sent to the GPU since
+        (``_gpu_epoch``), the style, the open group, the guides, the
+        textures loaded, the shadow map."""
+        if not _FRAME_CACHE or self._export_size is not None:
+            return None
+        sc = self.scene
+        if (mode == "xray" or getattr(style, "back_edges", False)
+                or self.plano_style is not None
+                or getattr(self, "_clip_vec", None) is not None
+                or getattr(sc, "show_hidden_objects", False)
+                or getattr(sc, "show_hidden_geometry", False)
+                or getattr(self, "_preview_groups", None)
+                or self._base_map_showing() or self._terrain_showing()
+                or self._photo_showing()):
+            return None
+        tool = self.active_tool
+        provider = getattr(tool, "preview_faces", None) if tool else None
+        if callable(provider) and provider():
+            return None
+        v3 = lambda v: (None if v is None  # noqa: E731
+                        else (v.x(), v.y(), v.z()))
+        try:
+            look = repr(sorted(vars(style).items()))
+        except TypeError:
+            look = repr(style)
+        return (tuple(mvp.data()), w, h, getattr(self, "_msaa", 4), mode,
+                look, id(self.style_override), id(sc), sc.version,
+                _content_ver(self), _cache_ver(self),
+                getattr(self, "_gpu_epoch", 0),
+                id(sc.edit_group), self._edit_rest_mode,
+                getattr(sc, "show_axes", True),
+                tuple((id(g), v3(g.point), v3(getattr(g, "direction", None)),
+                       v3(getattr(g, "origin", None)), g in sc.selection)
+                      for g in (getattr(sc, "guides", None) or ())),
+                len(getattr(self, "_tex_cache", None) or ()),
+                id(getattr(self, "_frame_shadow", None)),
+                getattr(self, "_shadow_key", None),
+                self._faces_count, self._edges_count, self._sel_faces_count,
+                self._selected_count, self.camera.fov_deg,
+                self.camera.perspective)
 
-        # Selected edges (drawn on top, highlighted) — never in an export
-        if self._selected_count > 0 and self._export_size is None:
-            self._set_color(0.95, 0.45, 0.16, 1.0)
-            self._selected_vao.bind()
-            self._gl.glDrawArrays(GL_LINES, 0, self._selected_count)
-            self._selected_vao.release()
+    def _frame_cache_store(self, key, w, h) -> None:
+        """Keep the scene FBO's colour and depth as the static passes left
+        them, for the pointer moves after (``_frame_cache_restore``)."""
+        fbo = getattr(self, "_frame_cache_fbo", None)
+        if fbo is None or not fbo.isValid() \
+                or (fbo.width(), fbo.height()) != (w, h) \
+                or fbo.format().samples() != self._scene_fbo.format().samples():
+            fbo = self._frame_cache_fbo = QOpenGLFramebufferObject(
+                w, h, self._scene_fbo.format())
+        self._frame_cache_copy(self._scene_fbo, fbo, w, h)
+        self._frame_cache = key
 
-        # Hovered edge — light blue, on top of everything else so it reads as
-        # the pick candidate even when it overlaps a selected (orange) edge.
-        # A curve segment highlights its whole contour (what a click selects).
-        if isinstance(self._hover_entity, Edge):
-            hover_count = self._upload_hover_edge(self._hover_entity)
+    def _frame_cache_restore(self, key, w, h) -> bool:
+        """The kept model back into the scene FBO when ``key`` is still
+        what this frame would draw; then only the cursor's cues are drawn
+        (``_paint_hover``)."""
+        fbo = getattr(self, "_frame_cache_fbo", None)
+        # A context made again (the widget moved to another window) takes
+        # its FBOs with it; read from one, the blit took the window's own.
+        if (fbo is None or getattr(self, "_frame_cache", None) != key
+                or not fbo.isValid() or (fbo.width(), fbo.height()) != (w, h)):
+            return False
+        self._frame_cache_copy(fbo, self._scene_fbo, w, h)
+        return True
+
+    def _frame_cache_copy(self, src, dst, w, h) -> None:
+        extra = self.context().extraFunctions()
+        self._gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, src.handle())
+        self._gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst.handle())
+        extra.glBlitFramebuffer(0, 0, w, h, 0, 0, w, h,
+                                GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT,
+                                GL_NEAREST)
+        self._scene_fbo.bind()
+        self._gl.glViewport(0, 0, w, h)
+
+    def _paint_hover(self, mvp, w, h) -> None:
+        """The cursor's cues over the kept model: the dots of the face under
+        it, then — on those dots only — the axes, guides and group box the
+        full frame draws after them, so they read as before; the edge
+        under it on top. Where an edge lies at the same depth as an axis
+        the edge keeps it (``GL_LESS``), as when it was drawn later."""
+        hovered = self._hover_entity
+        if isinstance(hovered, Face) and hovered not in self.scene.selection:
+            hover_count = self._upload_hover_face(hovered,
+                                                  self._hover_placement)
+            if hover_count > 0:
+                self._set_section_clip(True)
+                self._gl.glClearStencil(0)
+                self._gl.glClear(GL_STENCIL_BUFFER_BIT)
+                self._gl.glEnable(GL_STENCIL_TEST)
+                self._gl.glStencilMask(0xFF)
+                self._gl.glStencilFunc(GL_ALWAYS, 1, 0xFF)
+                self._gl.glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
+                self._gl.glEnable(GL_POLYGON_OFFSET_FILL)
+                self._gl.glPolygonOffset(1.0, 1.0)
+                self._gl.glDepthMask(GL_FALSE)
+                front, back = self._selection_dot_colors(hovered)
+                self._set_color(*front, 1.0)
+                self._program.setUniformValue(
+                    self._loc_back_color, QVector4D(*back, 1.0))
+                self._program.setUniformValue(self._loc_stipple, 3)
+                self._hover_faces_vao.bind()
+                self._gl.glDrawArrays(GL_TRIANGLES, 0, hover_count)
+                self._hover_faces_vao.release()
+                self._program.setUniformValue(self._loc_stipple, 0)
+                self._gl.glDepthMask(GL_TRUE)
+                self._gl.glDisable(GL_POLYGON_OFFSET_FILL)
+                self._set_section_clip(False)
+                self._gl.glStencilFunc(GL_EQUAL, 1, 0xFF)
+                self._gl.glStencilMask(0x00)
+                self._gl.glDepthFunc(GL_LESS)
+                self._draw_scaffold(mvp, w, h)
+                self._program.setUniformValue(self._loc_mvp, mvp)
+                self._gl.glDepthFunc(GL_LEQUAL)
+                self._gl.glStencilMask(0xFF)
+                self._gl.glDisable(GL_STENCIL_TEST)
+        if isinstance(hovered, Edge):
+            self._set_section_clip(True)
+            hover_count = self._upload_hover_edge(hovered)
             self._set_color(0.30, 0.55, 0.95, 1.0)
             self._hover_edges_vao.bind()
             self._gl.glDrawArrays(GL_LINES, 0, hover_count)
             self._hover_edges_vao.release()
-        self._set_section_clip(False)
-        self._draw_section_cut_edges()   # ON the plane — drawn unclipped
-
-        # Rubber band preview. Loose drawing tools float it on top (depth test
-        # off, so it never z-fights with coincident axes). Push/Pull's solid
-        # preview keeps depth testing on, so the forming box's back edges are
-        # hidden behind its faces — classic hidden-line removal.
-        depth_wire = (
-            getattr(self.active_tool, "wireframe_depth_tested", False)
-            if self.active_tool is not None
-            else False
-        )
-        if not depth_wire:
-            self._gl.glDisable(GL_DEPTH_TEST)
-        self._draw_rubber_band()
-        if not depth_wire:
-            self._gl.glEnable(GL_DEPTH_TEST)
-
-        self._program.release()
-
-        if self._export_size is not None:
-            # Hi-res export: the scene stays in the FBO for render_image to
-            # read back; the widget blit and its QPainter overlay don't apply.
-            self._scene_fbo.release()
-            return
-
-        # The depth this frame just drew, read ONCE for the overlay's
-        # annotations (dimensions, leader texts), which ask «is this point
-        # hidden?» for every sample of every line — see _occluded_on_screen.
-        self._depth_snap = None
-        if self._annotations_need_depth():
-            self._capture_depth(w, h)
-        # What the scene FBO now holds: the depth under the cursor can be
-        # read from it while the camera stays here (``_depth_world_at``).
-        self._painted_view = (tuple(mvp.data()), w, h)
-
-        # Blit colour from our scene FBO to the widget's default framebuffer.
-        # We can't use QOpenGLFramebufferObject.blitFramebuffer(None, src) here
-        # because in QOpenGLWidget the "default" framebuffer the widget shows
-        # is its own internal FBO (returned by defaultFramebufferObject()),
-        # NOT the system framebuffer 0. So we bind the read/draw targets by id
-        # and call glBlitFramebuffer directly via the GL3+ extra functions.
-        extra = self.context().extraFunctions()
-        self._gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, self._scene_fbo.handle())
-        self._gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, default_fbo)
-        extra.glBlitFramebuffer(
-            0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST
-        )
-        self._gl.glBindFramebuffer(GL_FRAMEBUFFER, default_fbo)
-        if _PERF:
-            _plog("paintGL.gl+blit",
-                  (_time_mod.perf_counter() - _pt0) * 1000.0, floor=30.0)
-            _ov0 = _time_mod.perf_counter()
-
-        # 2D overlays on top of the OpenGL framebuffer.
-        self._draw_overlay()
-
-        if _PERF:
-            _plog("paintGL.overlay",
-                  (_time_mod.perf_counter() - _ov0) * 1000.0, floor=30.0)
-            _dt = (_time_mod.perf_counter() - _pt0) * 1000.0
-            _plog("paintGL", _dt)
-            # P0 breakdown: per-section CPU ms + cull counters + the
-            # input→paint latency of the gesture that triggered this frame.
-            if _dt >= 25.0:
-                cf, tf, ce = getattr(self, "_cull_stats", (0, 0, 0))
-                it = getattr(self, "_input_t", None)
-                lat = (f" lat={( _time_mod.monotonic() - it) * 1000.0:.0f}ms"
-                       if it is not None else "")
-                segs = " ".join(f"{k}={v:.0f}ms" for k, v in _fseg.items())
-                _plog("frame", _dt,
-                      extra=f"{segs} cull={cf//1000}k/{tf//1000}k"
-                            f" tris +{ce//1000}k edges{lat}", floor=0.0)
-            self._input_t = None
-            st = getattr(self, "_perf_stat", None) or \
-                [_time_mod.perf_counter(), 0, 0.0]
-            st[1] += 1
-            st[2] += _dt
-            now = _time_mod.perf_counter()
-            if now - st[0] >= 1.0:
-                _plog("frames/s", st[2] / max(st[1], 1),
-                      extra=f"{st[1]} paints en {now-st[0]:.1f}s (avg ms)",
-                      floor=0.0)
-                st = [now, 0, 0.0]
-            self._perf_stat = st
+            self._set_section_clip(False)
 
     # ---- Setup helpers ------------------------------------------------------
     def _compile_program(self) -> QOpenGLShaderProgram:
@@ -4931,7 +5094,8 @@ class Viewport(QOpenGLWidget):
                 "_pv_vcol_vbo", "_pv_tex_vao", "_pv_tex_vbo",
                 "_ghost_edges_vao", "_ghost_edges_vbo", "_ghost_vcol_vao",
                 "_ghost_vcol_vbo", "_ghost_tex_vao", "_ghost_tex_vbo",
-                "_depth_fbo", "_scene_fbo", "_shadow_fbo", "_depth_snap")
+                "_depth_fbo", "_scene_fbo", "_shadow_fbo", "_depth_snap",
+                "_frame_cache_fbo", "_frame_cache")
 
     def _forget_context_objects(self) -> None:
         """Forget every lazily made GL object (see ``_LAZY_GL``) and the
@@ -6191,6 +6355,7 @@ class Viewport(QOpenGLWidget):
                     if not (b is not None and (a is b or (len(b) == n
                                                           and a == b))):
                         vbo.write(off, a, n)
+                        self._gpu_epoch = getattr(self, "_gpu_epoch", 0) + 1
                 off += n
         else:
             if total > cap:
@@ -6198,6 +6363,7 @@ class Viewport(QOpenGLWidget):
                 vbo.allocate(cap)      # reserve; a realloc keeps no contents
             if total:
                 vbo.write(0, b"".join(parts), total)
+            self._gpu_epoch = getattr(self, "_gpu_epoch", 0) + 1
         vbo.release()
         self._vbo_parts[slot] = (list(parts), cap, sizes)
         return total

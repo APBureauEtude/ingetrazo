@@ -11538,7 +11538,7 @@ class Viewport(QOpenGLWidget):
                 np.ascontiguousarray(idx.tri_v0[keep], np.float64),
                 np.ascontiguousarray(idx.tri_e1[keep], np.float64),
                 np.ascontiguousarray(idx.tri_e2[keep], np.float64),
-                np.zeros((0, 6)))
+                np.zeros((0, 6))), keep
         memo = getattr(self, "_static_occl_memo", None)
         fkeep = vis[n - nf:]
         if (nf and memo is not None and memo[0] is fv0
@@ -11549,12 +11549,44 @@ class Viewport(QOpenGLWidget):
             self._static_occl_memo = (fv0, fkeep.copy(), fixed)
         else:
             fixed = None
-        protos = [proto(0, n - nf)] + ([fixed] if fixed is not None else [])
-        iset = mod.InstanceSet(protos, np.arange(len(protos), dtype=np.int64),
+        parts = [proto(0, n - nf)] + ([fixed] if fixed is not None else [])
+        iset = mod.InstanceSet([p for p, _k in parts],
+                               np.arange(len(parts), dtype=np.int64),
                                np.tile(np.eye(4).reshape(1, 16),
-                                       (len(protos), 1)))
-        idx._static_occl = (iset, np.arange(len(protos), dtype=np.int64))
+                                       (len(parts), 1)))
+        # Prototype p's triangle r is index row rows[start[p] + r].
+        rows = np.concatenate([k for _p, k in parts])
+        start = np.cumsum([0] + [len(k) for _p, k in parts[:-1]])
+        idx._static_occl = (iset, np.arange(len(parts), dtype=np.int64),
+                            rows, start)
         return idx._static_occl
+
+    def _static_ray_rows(self, idx, ent_mask, o3, d3):
+        """The index rows of the triangles the ray from ``o3`` along ``d3``
+        may meet, in order, from the engine's BVH over the visible ones
+        (_static_occluders) — or None where that cannot answer for
+        ``ent_mask``: no engine, or an entity it passes that is not visible
+        (its triangles are not in there). A superset of what the exact test
+        accepts, so the hits are the same as over every span the ray's box
+        test keeps (hundreds of thousands of triangles of a big fixed part,
+        30 ms a hover over the plant of #158)."""
+        import numpy as np
+        if not (hasattr(self, "_lazy_native")
+                and self._lazy_native() is not None):
+            return None
+        memo = idx.__dict__.setdefault("_mask_in_vis", {})
+        ok = memo.get(id(ent_mask))
+        if ok is None or ok[0] is not ent_mask:
+            ok = memo[id(ent_mask)] = (
+                ent_mask, not bool((ent_mask & ~idx.ent_vis).any()))
+        if not ok[1]:
+            return None
+        stat = self._static_occluders(idx)
+        if stat is None:
+            return None
+        iset, cand, rows, start = stat
+        pl, tr, _v0, _e1, _e2 = iset.ray_cands(cand, o3, d3, float("inf"))
+        return np.sort(rows[start[pl] + tr])
 
     def _lazy_native(self):
         """What the experimental engine answers for the context's lazy
@@ -12507,7 +12539,19 @@ class Viewport(QOpenGLWidget):
             return None
         o = np.array([origin.x(), origin.y(), origin.z()])
         d = np.array([direction.x(), direction.y(), direction.z()])
-        if idx.tri_v0 is None:
+        fast = (Viewport._static_ray_rows(
+                    self, idx, ent_mask,
+                    (float(o[0]), float(o[1]), float(o[2])),
+                    (float(d[0]), float(d[1]), float(d[2])))
+                if (reach is None and not own and idx.tri_v0 is not None
+                    and hasattr(self, "_static_occluders"))
+                else None)
+        if fast is not None:
+            # The engine's BVH in place of the span boxes below.
+            spans = ([(None, idx.tri_v0[fast], idx.tri_e1[fast],
+                       idx.tri_e2[fast], idx.tri_ent[fast], 0)]
+                     if len(fast) else [])
+        elif idx.tri_v0 is None:
             spans = []
         else:
             spans = (getattr(idx, "tri_spans", None)
@@ -12515,7 +12559,7 @@ class Viewport(QOpenGLWidget):
         # Lazy placements' own arrays (#158) ride the same loop: a span is
         # then (bbox, v0, e1, e2, local tri_ent, entity offset).
         spans = list(spans) + list(own)
-        if len(spans) > 64:
+        if len(spans) > 64 and fast is None:
             # Thousands of spans on a huge model: which boxes the ray meets
             # is one NumPy pass, not a Python test per span (900 000 of
             # them in one snap hover, #158).
@@ -12544,6 +12588,7 @@ class Viewport(QOpenGLWidget):
         lim = float("inf") if reach is None else float(reach)
         best = float("inf")
         face_t = None if reduce_global else np.full(len(idx.entities), np.inf)
+
         # The static spans the ray meets go through Möller–Trumbore in ONE
         # pass: with the span grid a ray meets dozens of small spans, and a
         # NumPy call per span (~30 µs) became the ray's whole cost.

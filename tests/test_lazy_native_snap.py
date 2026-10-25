@@ -311,3 +311,43 @@ def test_the_points_near_the_cursor_are_numpys():
             want = np.flatnonzero(full < thr)
             assert np.array_equal(k, want)
             assert np.array_equal(d, full[want])
+
+
+def test_a_face_the_static_engine_does_not_hold_is_still_hit(pair):
+    """The engine's BVH over the index's own triangles holds the visible
+    ones only (they are what hides): a ray asked for faces that are not
+    visible (selectable while hidden geometry shows) goes over the spans
+    as before, and meets them."""
+    from types import SimpleNamespace
+    from views.viewport import Viewport, _moller_trumbore
+    va, _vb = pair
+    _set_view(va, VIEWS[0])
+    idx0 = va._pick_index(near="skip")
+    skip = {"_static_occl", "_mask_in_vis", "_span_boxes"}
+    idx = SimpleNamespace(**{k: v for k, v in vars(idx0).items()
+                             if k not in skip})
+    rng = np.random.default_rng(11)
+    gone = rng.random(len(idx.entities)) < 0.5
+    idx.ent_vis = idx0.ent_vis & ~gone
+    every = np.ones(len(idx.entities), dtype=bool)
+    o3, d3 = (0.0, 0.0, 9.0), (0.0, 0.0, -1.0)
+    assert Viewport._static_ray_rows(va, idx, idx.ent_vis, o3, d3) is not None
+    assert Viewport._static_ray_rows(va, idx, every, o3, d3) is None
+    met_gone = 0
+    eye = va.camera.eye()
+    cen = idx.tri_v0 + (idx.tri_e1 + idx.tri_e2) / 3.0
+    for c in cen.tolist():                    # a ray at every triangle
+        o, d = eye, (V(*c) - eye).normalized()
+        for mask in (every, idx.ent_vis):
+            got = va._ray_hits(idx, o, d, mask, own=False)
+            on = np.array([o.x(), o.y(), o.z()])
+            dn = np.array([d.x(), d.y(), d.z()])
+            t, hit = _moller_trumbore(on, dn, idx.tri_v0, idx.tri_e1,
+                                      idx.tri_e2)
+            hit &= mask[idx.tri_ent]
+            want = np.full(len(idx.entities), np.inf)
+            np.minimum.at(want, idx.tri_ent[hit], t[hit])
+            assert np.array_equal(got, want)
+            if mask is every:
+                met_gone += int(np.isfinite(want[gone]).any())
+    assert met_gone > 10

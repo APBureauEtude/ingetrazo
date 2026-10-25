@@ -501,6 +501,66 @@ def test_edges_near_are_the_baked_edges_at_their_distances(seed, big):
     assert found > 50
 
 
+@pytest.mark.parametrize("seed", range(3))
+def test_edges_near_breaks_ties_like_the_walk_over_many_twins(seed):
+    """Placed many times over on the same spot, like the copies of a dense
+    corner of the plant of #158, the edges tie at the same distance, and
+    the parallel batches must keep the ones the walk nearest first kept:
+    the first by candidate, then by edge."""
+    from core.edge_grid import segment_distances
+    from views.viewport import Viewport
+    rng = np.random.default_rng(900 + seed)
+    protos = [_proto(rng, False) for _ in range(3)]
+    spots = [_matrix(rng) for _ in range(12)]
+    P = 600
+    of = rng.integers(0, len(protos), P)
+    which = rng.integers(0, len(spots), P)
+    of[:] = which % len(protos)             # a spot holds one proto
+    xfs = [spots[j] for j in which]
+    bakes = [_bake(protos[of[i]], xfs[i]) for i in range(P)]
+    lo = np.empty((P, 3))
+    hi = np.empty((P, 3))
+    for i, (v0, e1, e2, ends) in enumerate(bakes):
+        pts = np.concatenate([v0, v0 + e1, v0 + e2, ends.reshape(-1, 3)])
+        lo[i], hi[i] = pts.min(axis=0), pts.max(axis=0)
+    iset = mod.InstanceSet([mod.InstanceProto(*p) for p in protos],
+                           of.astype(np.int64),
+                           np.array([m.data() for m in xfs], np.float64),
+                           lo, hi)
+    tied = found = 0
+    for _ in range(10):
+        mvp, _eye = _camera(rng)
+        eye = _Eye(mvp)
+        colmajor = list(mvp.data())
+        for _k in range(6):
+            px, py = rng.uniform(0, W), rng.uniform(0, H)
+            radius = float(rng.choice([8.0, 48.0]))
+            cand = rng.permutation(P).astype(np.int64)
+            pos = {int(i): k for k, i in enumerate(cand)}
+            every = []
+            for i in range(P):
+                ends = bakes[i][3]
+                if not len(ends):
+                    continue
+                ax, ay, oka = Viewport._project_px(eye, ends[:, 0])
+                bx, by, okb = Viewport._project_px(eye, ends[:, 1])
+                d = segment_distances(ax, ay, bx, by, oka & okb, px, py)
+                for e in np.flatnonzero(d < radius):
+                    every.append((float(d[e]), pos[i], int(e), i))
+            every.sort()
+            for cap in (1, 5, 48, 400):
+                want = [(t[3], t[2], t[0]) for t in every[:cap]]
+                pl, ed, _a, _b, d = iset.edges_near(
+                    cand, colmajor, float(W), float(H), px, py, radius, cap)
+                got = [(int(p), int(e), float(dd))
+                       for p, e, dd in zip(pl, ed, d)]
+                assert got == want, cap
+                found += len(got)
+                tied += len(every) > cap and every[cap - 1][0] == every[cap][0]
+    assert found > 200
+    assert tied > 5                     # the cut fell between equals
+
+
 @pytest.mark.parametrize("seed", range(4))
 def test_boxes_near_px_is_the_numpy_footprint(seed):
     """``boxes_near_px`` keeps the boxes ``_placements_under_px`` keeps:

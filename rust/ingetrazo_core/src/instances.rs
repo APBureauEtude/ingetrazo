@@ -898,17 +898,39 @@ impl Ord for NearEdge {
 pub struct NearHeap {
     cap: usize,
     radius: f64,
+    /// Farther than this cannot enter (another heap's worst, when full).
+    bound: f64,
     items: std::collections::BinaryHeap<NearEdge>,
 }
 
 impl NearHeap {
     pub fn new(cap: usize, radius: f64) -> NearHeap {
-        NearHeap { cap, radius, items: std::collections::BinaryHeap::new() }
+        NearHeap { cap, radius, bound: f64::INFINITY,
+                   items: std::collections::BinaryHeap::new() }
+    }
+
+    /// A heap for one placement of a batch searched in parallel: what lies
+    /// farther than ``bound`` (the shared heap's worst) is left out — a
+    /// superset of what the shared heap takes, merged into it after.
+    pub fn bounded(cap: usize, radius: f64, bound: f64) -> NearHeap {
+        NearHeap { cap, radius, bound, items: std::collections::BinaryHeap::new() }
+    }
+
+    /// The distance past which nothing more enters, when full.
+    pub fn worst(&self) -> f64 {
+        if self.cap > 0 && self.items.len() >= self.cap {
+            self.items.peek().map_or(f64::INFINITY, |t| t.d)
+        } else {
+            f64::INFINITY
+        }
     }
 
     /// Whether something ``gap`` px away (at least) may still enter.
     #[inline]
     pub fn may_take(&self, gap: f64) -> bool {
+        if !(gap <= self.bound) {
+            return false;
+        }
         if self.cap > 0 && self.items.len() >= self.cap {
             self.items.peek().is_some_and(|t| gap <= t.d)
         } else {
@@ -916,8 +938,8 @@ impl NearHeap {
         }
     }
 
-    fn offer(&mut self, e: NearEdge) {
-        if !(e.d < self.radius) {
+    pub fn offer(&mut self, e: NearEdge) {
+        if !(e.d < self.radius) || e.d > self.bound {
             return;
         }
         if self.cap == 0 || self.items.len() < self.cap {

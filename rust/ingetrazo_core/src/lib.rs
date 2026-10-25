@@ -782,12 +782,34 @@ impl InstanceSet {
         gaps.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
         let all = py.detach(|| {
             let mut heap = instances::NearHeap::new(cap, radius);
-            for &(g, k, i) in &gaps {
-                if !heap.may_take(g) {
+            // In batches, nearest first, each placement of a batch on its
+            // own heap in parallel, bounded by the shared heap's worst: a
+            // dense corner of the plant of #158 kept ~4 000 placements
+            // within reach of the cursor, walked one after another. Merged
+            // in the batch's order, the shared heap ends as the walk left
+            // it: (distance, candidate, edge) orders the edges wholly.
+            let mut at = 0;
+            while at < gaps.len() {
+                if !heap.may_take(gaps[at].0) {
                     break;
                 }
-                let p = &self.places[i as usize];
-                self.protos[p.proto].edges_near(&p.m, &a, w, h, px, py_, k, i, &mut heap);
+                let size = if at == 0 { 8 } else { 64 };
+                let hi = (at + size).min(gaps.len());
+                let bound = heap.worst();
+                let found: Vec<Vec<instances::NearEdge>> = gaps[at..hi].par_iter()
+                    .map(|&(g, k, i)| {
+                        let mut own = instances::NearHeap::bounded(cap, radius, bound);
+                        if own.may_take(g) {
+                            let p = &self.places[i as usize];
+                            self.protos[p.proto].edges_near(&p.m, &a, w, h, px, py_, k, i,
+                                                            &mut own);
+                        }
+                        own.into_sorted()
+                    }).collect();
+                for e in found.into_iter().flatten() {
+                    heap.offer(e);
+                }
+                at = hi;
             }
             heap.into_sorted()
         });

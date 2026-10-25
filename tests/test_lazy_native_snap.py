@@ -351,3 +351,43 @@ def test_a_face_the_static_engine_does_not_hold_is_still_hit(pair):
             if mask is every:
                 met_gone += int(np.isfinite(want[gone]).any())
     assert met_gone > 10
+
+
+def test_rays_the_static_engine_leaves_open_are_settled_as_before(pair,
+                                                                   monkeypatch):
+    """The rays the engine cannot call over the index's own triangles (its
+    doubts) go through the spans alone, the others skip them; forced
+    doubts on a random part of the rays give the same answers, the same
+    as all of them through the spans."""
+    from views.viewport import Viewport
+    va, vb = pair
+    real = Viewport._static_occluders
+    share = {"p": 0.0}
+    rng = np.random.default_rng(5)
+
+    class Doubtful:
+        def __init__(self, iset):
+            self._iset = iset
+
+        def occluded(self, cand, o, D, lim):
+            hid, doubt = self._iset.occluded(cand, o, D, lim)
+            forced = rng.random(len(hid)) < share["p"]
+            return hid & ~forced, doubt | forced
+
+    def static(self, idx):
+        st = real(self, idx)
+        return None if st is None else (Doubtful(st[0]),) + tuple(st[1:])
+
+    monkeypatch.setattr(Viewport, "_static_occluders", static)
+    hidden = 0
+    for view in VIEWS:
+        _set_view(va, view)
+        _set_view(vb, view)
+        pts = [V(*rng.uniform((-1, -1, -1), (18, 14, 4)))
+               for _ in range(300)]
+        want = vb._occluded_many(pts)
+        for p in (0.0, 0.3, 1.0):
+            share["p"] = p
+            assert va._occluded_many(pts) == want, (view, p)
+        hidden += sum(want)
+    assert 0 < hidden < 4 * 300

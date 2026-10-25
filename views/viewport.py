@@ -14218,10 +14218,14 @@ class Viewport(QOpenGLWidget):
         if not self._is_occluded(first):
             return first
         if len(pts) > 1:
-            # Each point once, where it first comes (see pick_vertex).
-            _u, at = np.unique(pts, axis=0, return_index=True)
-            at.sort()
-            pts = pts[at]
+            # Each point once, where it first comes (see pick_vertex): a
+            # stable sort by x, y, z puts the copies of a point together,
+            # the first first (np.unique by rows took 6 ms on 11 000).
+            by = np.lexsort((pts[:, 2], pts[:, 1], pts[:, 0]))
+            srt = pts[by]
+            lead = np.ones(len(srt), dtype=bool)
+            lead[1:] = (srt[1:] != srt[:-1]).any(axis=1)
+            pts = pts[np.sort(by[lead])]
         k, size = 1, 8
         while k < len(pts):
             batch = pts[k:k + size]
@@ -14564,6 +14568,13 @@ class Viewport(QOpenGLWidget):
                 D, np.array(dists) - 1e-3)
             best[hid] = -np.inf
             settled = hid | ~doubt
+        whole = None
+        if settled is not None and settled.any() and not settled.all():
+            # The spans below for the rays the engine left open only: the
+            # box tests are rays × spans, and it settles nearly all of them.
+            whole = (np.flatnonzero(~settled), D, best, np.asarray(dists))
+            D, best = D[whole[0]], best[whole[0]]
+            dists, settled = whole[3][whole[0]], None
         spans = ([] if idx.tri_v0 is None
                  or (settled is not None and settled.all()) else
                  list(getattr(idx, "tri_spans", None)
@@ -14703,6 +14714,11 @@ class Viewport(QOpenGLWidget):
                        & (u + v <= 1.0) & (t > 1e-6))
                 tm = np.where(hit, t, np.inf).min(axis=1)
                 best[r] = np.minimum(best[r], tm)
+        if whole is not None:
+            u, D, best_all, dists = whole
+            best_all[u] = best
+            best = best_all
+            limit = dists - 1e-3
         if nat is not None:
             left = np.flatnonzero(best >= limit)
             if len(left):

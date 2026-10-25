@@ -13741,6 +13741,22 @@ class Viewport(QOpenGLWidget):
             mids.append(c + m.normalized() * r)
         return mids
 
+    def _billboard_placements(self) -> list:
+        """The face-me placements of ``_placements()``, kept while it is:
+        walking the 21 406 placements of #158 for the two of them was
+        ~2 ms of every pointer move."""
+        groups = self._placements()
+        epoch_of = getattr(self, "_placements_epoch", None)
+        if epoch_of is None:                         # stub viewports
+            return [g for g in groups if getattr(g, "billboard", False)]
+        key = (epoch_of(), id(groups), len(groups))
+        memo = getattr(self, "_billboard_memo", None)
+        if memo is None or memo[0] != key or memo[1] is not groups:
+            memo = self._billboard_memo = (
+                key, groups,
+                [g for g in groups if getattr(g, "billboard", False)])
+        return memo[2]
+
     def _billboard_snap_edges(self) -> list:
         """The one snap a face-me billboard offers: its FEET, the anchor
         point, as a degenerate pseudo-edge (a point, like a guide point) —
@@ -13753,8 +13769,8 @@ class Viewport(QOpenGLWidget):
         excluded (it would snap to itself)."""
         moving = getattr(self.active_tool, "_group", None)
         out: list = []
-        for g in self._placements():
-            if not getattr(g, "billboard", False) or g is moving:
+        for g in self._billboard_placements():
+            if g is moving:
                 continue
             if not self.scene.entity_selectable(g):
                 continue

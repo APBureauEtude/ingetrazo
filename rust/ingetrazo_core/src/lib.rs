@@ -33,6 +33,7 @@ fn ingetrazo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(boxes_near_px, m)?)?;
     m.add_function(wrap_pyfunction!(points_near_px, m)?)?;
     m.add_function(wrap_pyfunction!(segment_distances, m)?)?;
+    m.add_function(wrap_pyfunction!(nearest_within, m)?)?;
     m.add_class::<GlReplay>()?;
     m.add_class::<InstanceProto>()?;
     m.add_class::<InstanceSet>()?;
@@ -330,6 +331,50 @@ fn points_near_px<'py>(py: Python<'py>, x: PyReadonlyArray1<'py, f64>,
                 })
         }).map(|i| i as i64).collect());
     Ok(PyArray1::from_vec(py, keep))
+}
+
+/// The indices of the ``cap`` smallest of ``d[:n]`` under ``radius``, by
+/// distance and then index — what ``np.lexsort((cand, d[cand]))[:cap]``
+/// over ``np.flatnonzero(d < radius)`` gives (views.viewport's fixed group
+/// edges near the cursor). Zoomed out over the plant of #158 some 475 000
+/// fixed edges lay within the radius: ~4 ms of NumPy to pick 48, twice a
+/// pointer move.
+#[pyfunction]
+#[pyo3(signature = (d, radius, cap, n=None))]
+fn nearest_within<'py>(py: Python<'py>, d: PyReadonlyArray1<'py, f64>, radius: f64,
+                       cap: usize, n: Option<usize>) -> PyResult<Bound<'py, PyArray1<i64>>> {
+    use rayon::prelude::*;
+    let d = d.as_array();
+    let n = n.unwrap_or(d.len()).min(d.len());
+    let own;
+    let d: &[f64] = match d.to_slice() {
+        Some(s) => &s[..n],
+        None => {
+            own = d.iter().take(n).copied().collect::<Vec<f64>>();
+            &own
+        }
+    };
+    // Under the radius there is no NaN: the order is total.
+    let by = |a: &(f64, usize), b: &(f64, usize)| {
+        a.0.partial_cmp(&b.0).unwrap().then(a.1.cmp(&b.1))
+    };
+    let keep = |mut v: Vec<(f64, usize)>| {
+        if v.len() > cap {
+            v.select_nth_unstable_by(cap, by);
+            v.truncate(cap);
+        }
+        v
+    };
+    let mut all: Vec<(f64, usize)> = py.detach(|| {
+        let parts: Vec<Vec<(f64, usize)>> = d.par_chunks(1 << 16).enumerate()
+            .map(|(c, ch)| keep(ch.iter().enumerate()
+                .filter(|(_, &v)| v < radius)
+                .map(|(i, &v)| (v, (c << 16) + i)).collect()))
+            .collect();
+        keep(parts.into_iter().flatten().collect())
+    });
+    all.sort_unstable_by(by);
+    Ok(PyArray1::from_vec(py, all.into_iter().map(|t| t.1 as i64).collect()))
 }
 
 /// ``core.edge_grid.segment_distances``: the pixel distance from ``(px,

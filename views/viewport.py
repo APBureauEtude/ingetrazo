@@ -706,6 +706,36 @@ def _px_near(x, y, ok, px, py, thr, pts=None, seen=None):
     return k, d
 
 
+def _nearest_within(d, radius, cap):
+    """The indices of ``d`` under ``radius``: all of them in order, or past
+    ``cap`` the nearest ``cap`` by distance and then index. The native
+    engine picks those in one pass (475 000 fixed group edges lay within
+    the radius over the plant of #158: ~4 ms of NumPy, twice a move); the
+    same ones, by distance and index, whose order a stable sort by
+    distance keeps."""
+    import numpy as np
+    from core import _native
+    mod = _native.native
+    if (_NEAREST_NATIVE and cap > 0 and len(d) > 4096 and mod is not None
+            and hasattr(mod, "nearest_within")):
+        return np.asarray(mod.nearest_within(
+            np.ascontiguousarray(d, dtype=np.float64), float(radius),
+            int(cap)), dtype=np.int64)
+    cand = np.flatnonzero(d < radius)
+    if len(cand) > cap:
+        dc = d[cand]
+        if len(cand) > 4 * cap:
+            part = np.argpartition(dc, cap - 1)[:cap]
+            cand, dc = cand[part], dc[part]
+        cand = cand[np.lexsort((cand, dc))[:cap]]
+    return cand
+
+
+#: The nearest group edges picked in the native engine
+#: (INGETRAZO_NEAREST=0: in NumPy, as before).
+_NEAREST_NATIVE = os.environ.get("INGETRAZO_NEAREST", "1") != "0"
+
+
 #: The depth test of the corners near the cursor in the native engine
 #: (INGETRAZO_NEAR_SEEN=0: in NumPy, as before).
 _NEAR_SEEN_NATIVE = os.environ.get("INGETRAZO_NEAR_SEEN", "1") != "0"
@@ -13494,13 +13524,7 @@ class Viewport(QOpenGLWidget):
         out = []                           # (d, edge)
         if m and self._gedge_screen() is not None:
             d = self._gedge_dist(px, py)[:m]
-            cand = np.flatnonzero(d < radius)
-            if len(cand) > cap:
-                dc = d[cand]
-                if len(cand) > 4 * cap:
-                    part = np.argpartition(dc, cap - 1)[:cap]
-                    cand, dc = cand[part], dc[part]
-                cand = cand[np.lexsort((cand, dc))[:cap]]
+            cand = _nearest_within(d, radius, cap)
             out += [(float(d[i]), _group_pseudo_edge(idx, int(i)))
                     for i in cand]
         table = self._pick_lazy_table()

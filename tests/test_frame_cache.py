@@ -191,3 +191,70 @@ def test_off_the_frame_is_drawn_whole(win, monkeypatch):
     _app.processEvents()
     vp.grabFramebuffer()
     assert calls and all(c is vp.scene.mesh.faces[0] for c in calls)
+
+
+def _fresh_depth(vp):
+    """The depth the scene FBO holds now, read back afresh."""
+    keep = vp._depth_snap, getattr(vp, "_depth_snap_of", None)
+    vp.makeCurrent()
+    try:
+        vp._capture_depth(*vp._painted_view[1:])
+        buf = vp._depth_snap[0].copy()
+    finally:
+        vp.doneCurrent()
+        vp._depth_snap, vp._depth_snap_of = keep
+    return buf
+
+
+def test_the_depth_kept_over_pointer_moves_is_the_frames(win, monkeypatch):
+    """A pointer move over the kept model keeps the depth read back the
+    move before, when nothing drawn over the model writes depth: it must
+    be the depth a read now gives, value for value — over faces, edges
+    (whose highlight writes depth) and nothing."""
+    import numpy as np
+    w, vp = win
+    reads = []
+    real = type(vp)._capture_depth
+    monkeypatch.setattr(type(vp), "_capture_depth",
+                        lambda self, *a: (reads.append(1),
+                                          real(self, *a))[1])
+    vp.camera.set_view("iso")
+    vp.camera.fit_to(V(-7, -7, -1), V(7, 7, 4))
+    cx, cy = vp.width() / 2.0, vp.height() / 2.0
+    kept = 0
+    steps = [(None, None)] + _cues(vp)
+    for k, (ent, place) in enumerate(steps * 2):
+        if k == len(steps):             # a copy moves: the depth is new
+            g = _copies(vp.scene)[0]
+            xf = QMatrix4x4(g.xform)
+            xf.translate(0.0, 0.0, 1.5)
+            g.xform = xf
+            vp.scene.version += 1
+        vp._hover_entity, vp._hover_placement = ent, place
+        _frame(vp, True)
+        n = len(reads)
+        assert vp._depth_world_at(cx, cy) is not None
+        kept += len(reads) == n
+        assert np.array_equal(vp._depth_snap[0], _fresh_depth(vp)), \
+            type(ent).__name__
+    assert kept > 10
+
+
+def test_a_preview_that_writes_depth_reads_it_again(win, monkeypatch):
+    w, vp = win
+    reads = []
+    real = type(vp)._capture_depth
+    monkeypatch.setattr(type(vp), "_capture_depth",
+                        lambda self, *a: (reads.append(1),
+                                          real(self, *a))[1])
+    vp.camera.set_view("iso")
+    vp.camera.fit_to(V(-7, -7, -1), V(7, 7, 4))
+
+    w._activate_tool("pushpull")        # its solid preview is depth tested
+    assert vp.active_tool.wireframe_depth_tested
+    vp._hover_entity, vp._hover_placement = vp.scene.mesh.faces[0], None
+    for k in range(4):
+        _frame(vp, True)
+        n = len(reads)
+        vp._depth_world_at(vp.width() / 2.0, vp.height() / 2.0)
+        assert len(reads) == n + 1, k

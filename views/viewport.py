@@ -1920,6 +1920,7 @@ class Viewport(QOpenGLWidget):
 
     def paintGL(self) -> None:
         self._tick = getattr(self, "_tick", 0) + 1     # a new epoch memo
+        self._depth_clean = None          # see the read-back at the end
         self._sync_axes()
         self._sync_projection()
         if self._gl is None or self._program is None:
@@ -2118,9 +2119,22 @@ class Viewport(QOpenGLWidget):
         # The depth this frame just drew, read ONCE for the overlay's
         # annotations (dimensions, leader texts), which ask «is this point
         # hidden?» for every sample of every line — see _occluded_on_screen.
-        self._depth_snap = None
-        if self._annotations_need_depth():
-            self._capture_depth(w, h)
+        # A pointer move over the kept model (_frame_cache_key) leaves the
+        # depth as it was when nothing over it writes depth — the face's
+        # dots do not, the rubber band floats with no depth test, the axes
+        # redrawn over the dots fail GL_LESS where they are — and the
+        # read-back already made of it is kept: over the plant of #158 it
+        # was ~5 ms of every pointer move, reading the same depth again.
+        clean = (fc is not None and not depth_wire
+                 and not isinstance(getattr(self, "_hover_entity", None),
+                                    Edge))
+        kept = (clean and getattr(self, "_depth_snap", None) is not None
+                and getattr(self, "_depth_snap_of", None) == fc)
+        self._depth_clean = fc if clean else None
+        if not kept:
+            self._depth_snap = None
+            if self._annotations_need_depth():
+                self._capture_depth(w, h)
         # What the scene FBO now holds: the depth under the cursor can be
         # read from it while the camera stays here (``_depth_world_at``).
         self._painted_view = (tuple(mvp.data()), w, h)
@@ -14551,6 +14565,8 @@ class Viewport(QOpenGLWidget):
             return
         self._depth_snap = (buf, mvp, inv, w, h, self.camera.eye(),
                             self.camera.forward())
+        # The kept model it was read from, if nothing over it wrote depth.
+        self._depth_snap_of = getattr(self, "_depth_clean", None)
 
     def _occluded_on_screen(self, world: QVector3D) -> bool:
         """``_is_occluded`` for what the overlay draws this frame, read from

@@ -187,6 +187,16 @@ class _SnapEdge:
         self.group = group                         # the top-level owner, when known
 
 
+def _copy_snap_edge(e: _SnapEdge) -> _SnapEdge:
+    """A fresh ``_SnapEdge`` like ``e``: one search's edges handed to two
+    callers (see Viewport._nearby_edges_unbaked) are not shared."""
+    c = _SnapEdge.__new__(_SnapEdge)
+    for k in _SnapEdge.__slots__:
+        v = getattr(e, k)
+        setattr(c, k, QVector3D(v) if isinstance(v, QVector3D) else v)
+    return c
+
+
 def _group_pseudo_edge(idx, i: int) -> _SnapEdge:
     """The i-th group hard edge of the pick index as a world pseudo-edge
     that knows its owner and whether that is a group or a component."""
@@ -729,6 +739,11 @@ def _nearest_within(d, radius, cap):
             cand, dc = cand[part], dc[part]
         cand = cand[np.lexsort((cand, dc))[:cap]]
     return cand
+
+
+#: The cursor's edge and the snap's read off one search in an event
+#: (INGETRAZO_EDGES_SHARED=0: two searches, as before).
+_EDGES_SHARED = os.environ.get("INGETRAZO_EDGES_SHARED", "1") != "0"
 
 
 #: The nearest group edges picked in the native engine
@@ -13356,6 +13371,10 @@ class Viewport(QOpenGLWidget):
     GEDGE_NEAR_PX = 8.0
     GEDGE_REACH_PX = 64.0
     GEDGE_ENOUGH = 48
+    #: The radius of the snap's own search of group edges near the cursor
+    #: (``_nearby_group_edges``'s default), which narrower ones in the
+    #: same event are read off (see _nearby_edges_unbaked).
+    GEDGE_SHARED_PX = 48.0
     #: From this many group edges up, the distances come through a screen
     #: grid (core.edge_grid) instead of one pass over all of them.
     GEDGE_GRID_MIN = 20000
@@ -13515,7 +13534,38 @@ class Viewport(QOpenGLWidget):
         edges as the index holds them, those of the placements the snap's
         footprint takes in as their bakes would hold them — the nearest
         ``cap`` within ``radius`` px, nearest first (with their distances
-        as ``(d, edge)`` when ``with_d``)."""
+        as ``(d, edge)`` when ``with_d``).
+
+        Within one input event the cursor's own edge (``pick_edge_any``:
+        the nearest under the pick threshold) and the snap's (the nearest
+        48 within 48 px) are both read off one search of the wider: by
+        distance, then fixed before lazy, then index or (candidate, edge),
+        the order is total, so the nearest ``cap`` within ``radius`` are
+        those of the wider within it. Over the plant of #158 each search
+        was ~10 ms, twice a pointer move."""
+        wide, ncap = Viewport.GEDGE_SHARED_PX, Viewport.GEDGE_ENOUGH
+        serial = getattr(self, "_input_serial", None)
+        if (not _EDGES_SHARED or serial is None or not radius <= wide
+                or not 0 < cap <= ncap):
+            out = self._nearby_edges_found(px, py, radius, cap, nat)
+        else:
+            key = (serial, float(px), float(py), id(nat[0]), id(nat[1]),
+                   self._placements_epoch(),
+                   getattr(self.scene, "version", None),
+                   tuple(self._np_mvp().ravel()), self.width(),
+                   self.height(), id(self._pick_index(near="skip")),
+                   id(self._gedge_screen()),
+                   id(getattr(self, "_depth_snap", None)))
+            memo = getattr(self, "_edges_near_shared", None)
+            if memo is None or memo[0] != key:
+                memo = self._edges_near_shared = (key, self._nearby_edges_found(
+                    px, py, wide, ncap, nat))
+            out = [(d, _copy_snap_edge(e)) for d, e in memo[1]
+                   if d < radius][:cap]
+        return out if with_d else [e for _d, e in out]
+
+    def _nearby_edges_found(self, px, py, radius, cap, nat) -> list:
+        """_nearby_edges_unbaked's search: ``(d, edge)``, nearest first."""
         import numpy as np
         iset, snap, _vis = nat
         idx = self._pick_index(near="skip")
@@ -13547,7 +13597,7 @@ class Viewport(QOpenGLWidget):
                     context=("component" if comp is not None and comp()
                              else "group"), group=owner)))
         out.sort(key=lambda de: de[0])        # stable: the fixed ones first
-        return out[:cap] if with_d else [e for _d, e in out[:cap]]
+        return out[:cap]
 
     def _pick_group_edge_unbaked(self, px, py, nat):
         """pick_group's edge fallback with the lazy placements' edges from

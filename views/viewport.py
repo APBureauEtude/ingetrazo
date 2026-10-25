@@ -10226,9 +10226,18 @@ class Viewport(QOpenGLWidget):
         f_face, f_place = f[0], f[1]
         g_face, g_place = g[0], g[1]
         x, probes = found
-        sides = [self._front_face_at(*q) for q in probes]
-        ids = {(id(h[0]), id(h[1])) for h in sides if h is not None}
-        if ids != {(id(f_face), id(f_place)), (id(g_face), id(g_place))}:
+        want = {(id(f_face), id(f_place)), (id(g_face), id(g_place))}
+        ids = set()
+        for q in probes:
+            # Each side must show one of the two, the sides not the same
+            # one: a side that does not ends the search there (each probe
+            # is a ray through the model, ~2 ms over the plant of #158,
+            # and dense spots try five crossings a move that fail).
+            h = self._front_face_at(*q)
+            if h is None or (id(h[0]), id(h[1])) not in want:
+                return None
+            ids.add((id(h[0]), id(h[1])))
+        if ids != want:
             return None
         context = None
         for place in (f_place, g_place):

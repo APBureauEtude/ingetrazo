@@ -32,6 +32,7 @@ fn ingetrazo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(weld_points, m)?)?;
     m.add_function(wrap_pyfunction!(boxes_near_px, m)?)?;
     m.add_function(wrap_pyfunction!(points_near_px, m)?)?;
+    m.add_function(wrap_pyfunction!(segment_distances, m)?)?;
     m.add_class::<GlReplay>()?;
     m.add_class::<InstanceProto>()?;
     m.add_class::<InstanceSet>()?;
@@ -291,6 +292,57 @@ fn points_near_px<'py>(py: Python<'py>, x: PyReadonlyArray1<'py, f64>,
             ok[i] && dx * dx + dy * dy <= r2
         }).map(|i| i as i64).collect());
     Ok(PyArray1::from_vec(py, keep))
+}
+
+/// ``core.edge_grid.segment_distances``: the pixel distance from ``(px,
+/// py)`` to each segment ``(ax, ay)–(bx, by)`` (inf where ``ok`` is
+/// False), for all of them or only the indices ``which`` — the same
+/// operations in the same order, so the same bits (``hypot`` is the C
+/// library's; the caller checks it is NumPy's). Zoomed out over the plant
+/// of #158 some 475 000 edges lay within 8 px of the cursor: ~11 ms of
+/// NumPy a pointer move.
+#[pyfunction]
+#[pyo3(signature = (ax, ay, bx, by, ok, px, py_, which=None))]
+#[allow(clippy::too_many_arguments)]
+fn segment_distances<'py>(py: Python<'py>, ax: PyReadonlyArray1<'py, f64>,
+                          ay: PyReadonlyArray1<'py, f64>, bx: PyReadonlyArray1<'py, f64>,
+                          by: PyReadonlyArray1<'py, f64>, ok: PyReadonlyArray1<'py, bool>,
+                          px: f64, py_: f64, which: Option<PyReadonlyArray1<'py, i64>>)
+    -> PyResult<Bound<'py, PyArray1<f64>>> {
+    use rayon::prelude::*;
+    let (ax, ay, bx, by, ok) = (ax.as_array(), ay.as_array(), bx.as_array(), by.as_array(),
+                                ok.as_array());
+    let n = ax.len();
+    if ay.len() != n || bx.len() != n || by.len() != n || ok.len() != n {
+        return Err(pyo3::exceptions::PyValueError::new_err("lengths"));
+    }
+    let w: Option<Vec<usize>> = match &which {
+        Some(w) => {
+            let w = w.as_array();
+            if w.iter().any(|&i| i < 0 || i as usize >= n) {
+                return Err(pyo3::exceptions::PyValueError::new_err("which"));
+            }
+            Some(w.iter().map(|&i| i as usize).collect())
+        }
+        None => None,
+    };
+    let m = w.as_ref().map_or(n, |w| w.len());
+    let one = |i: usize| -> f64 {
+        if !ok[i] {
+            return f64::INFINITY;
+        }
+        let (dx, dy) = (bx[i] - ax[i], by[i] - ay[i]);
+        let l2 = dx * dx + dy * dy;
+        let safe = if l2 > 1e-12 { l2 } else { 1.0 };
+        let mut t = ((px - ax[i]) * dx + (py_ - ay[i]) * dy) / safe;
+        // np.clip: maximum then minimum, NaN through.
+        t = if t < 0.0 { 0.0 } else { t };
+        t = if t > 1.0 { 1.0 } else { t };
+        (ax[i] + t * dx - px).hypot(ay[i] + t * dy - py_)
+    };
+    let out: Vec<f64> = py.detach(|| (0..m).into_par_iter().with_min_len(4096)
+        .map(|k| one(w.as_ref().map_or(k, |w| w[k]))).collect());
+    Ok(PyArray1::from_vec(py, out))
 }
 
 /// QVector3D's own arithmetic on each row of ``v`` (N,3) float32, for the

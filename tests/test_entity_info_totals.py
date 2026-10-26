@@ -94,6 +94,16 @@ def test_two_faces_show_their_total_area(window):
     assert f"{tr('Area')}: {fmt_area(5.0)}" in text
 
 
+def test_faces_with_openings_use_their_net_area(window):
+    scene = window.viewport.scene
+    face = scene.mesh.add_face(
+        [V(0, 0), V(4, 0), V(4, 4), V(0, 4)],
+        [[V(1, 1), V(1, 2), V(2, 2), V(2, 1)]])
+    other = scene.mesh.add_face([V(6, 0), V(7, 0), V(7, 1), V(6, 1)])
+    scene.selection.update([face, other])
+    assert f"{tr('Area')}: {fmt_area(16.0)}" in _describe(window)
+
+
 def test_several_edges_show_their_total_length(window):
     scene = window.viewport.scene
     face = scene.mesh.add_face([V(0, 0), V(2, 0), V(2, 1), V(0, 1)])

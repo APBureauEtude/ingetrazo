@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Callable, Iterable
 
+from core.bim import face_net_area
 from core.dimension import Dimension
 from core.group import Group
 from core.mesh import Edge, Face
@@ -96,7 +97,7 @@ def selection_totals(selection: Iterable,
     for e in selection:
         if isinstance(e, Face):
             t.faces += 1
-            t.area += e.area()
+            t.area += face_net_area(e)
         elif isinstance(e, Edge):
             t.edges += 1
             t.length += (e.b - e.a).length()
@@ -114,4 +115,4 @@ def selected_area(selection: Iterable) -> float:
     """The area of the selected faces alone, in m² — whatever else is
     selected, and not the faces inside selected groups (Right-click ▸
     Area ▸ Selection)."""
-    return sum(e.area() for e in selection if isinstance(e, Face))
+    return sum(face_net_area(e) for e in selection if isinstance(e, Face))

@@ -536,12 +536,21 @@ def _cache_ver(vp):
 #: ``normal`` draws it as always, ``fade`` washes it out behind the group
 #: being edited (the default), ``hide`` leaves it out of the frame.
 EDIT_REST_MODES = ("normal", "fade", "hide")
-#: How far the context is mixed TOWARD the background (0 = untouched, 1 =
-#: gone). It is a wash, not an opacity: the context keeps writing depth, so it
-#: still occludes itself and never turns the model into glass. Enough to place
-#: the group in its surroundings, faint enough that what you are editing reads
-#: as the subject.
+#: Default for how far the context is mixed TOWARD grey (0 = untouched, 1 =
+#: fully washed). It is a wash, not transparency: the context keeps writing
+#: depth, so it still occludes itself and never turns the model into glass.
+#: The user-adjustable value lives on :class:`Viewport`; this constant remains
+#: the default and the fallback for the small viewport stubs used by tools and
+#: tests.
 EDIT_REST_FADE = 0.75
+
+#: The edit box must sit clear of the geometry. A tight box disappears on a
+#: cuboid because every dotted segment lands exactly on a model edge. Keep a
+#: small screen-space gutter, allowed to grow a little with a large object but
+#: capped so a long beam does not acquire a huge empty envelope.
+EDIT_BOX_PAD_MIN_PX = 8.0
+EDIT_BOX_PAD_MAX_PX = 32.0
+EDIT_BOX_PAD_RATIO = 0.05
 
 
 def edit_fade_color(background) -> tuple:
@@ -603,6 +612,17 @@ def _load_edit_rest_mode() -> str:
     from PySide6.QtCore import QSettings
     mode = str(QSettings().value("display/edit_rest_mode", "fade"))
     return mode if mode in EDIT_REST_MODES else "fade"
+
+
+def _load_edit_rest_fade() -> float:
+    """Saved strength of the grey edit context, safely clamped to 0..1."""
+    from PySide6.QtCore import QSettings
+    try:
+        value = float(QSettings().value("display/edit_rest_fade",
+                                        EDIT_REST_FADE))
+    except (TypeError, ValueError):
+        value = EDIT_REST_FADE
+    return max(0.0, min(1.0, value))
 
 
 def _load_hide_similar() -> bool:
@@ -704,6 +724,55 @@ def _box_edge_vertices(corners):
                 continue
             coords.extend([a.x(), a.y(), a.z(), b.x(), b.y(), b.z()])
     return coords
+
+
+def _point_in_screen_hull(x: float, y: float, points,
+                          tolerance_px: float = 1.5) -> bool:
+    """Whether a screen point lies in the convex hull of ``points``.
+
+    The projection of a 3D box is a convex polygon (usually a hexagon), not
+    its axis-aligned screen rectangle. Testing that hull makes the visible
+    dotted frame the honest boundary for leaving group edit: its empty corner
+    triangles do not silently count as inside. The small tolerance keeps a
+    click directly on a one-pixel dotted edge inside the context.
+    """
+    pts = sorted({(float(px), float(py)) for px, py in points
+                  if math.isfinite(px) and math.isfinite(py)})
+    if not pts:
+        return False
+
+    def cross(a, b, p):
+        return ((b[0] - a[0]) * (p[1] - a[1])
+                - (b[1] - a[1]) * (p[0] - a[0]))
+
+    def half(seq):
+        out = []
+        for p in seq:
+            while len(out) >= 2 and cross(out[-2], out[-1], p) <= 0.0:
+                out.pop()
+            out.append(p)
+        return out
+
+    if len(pts) == 1:
+        return math.hypot(x - pts[0][0], y - pts[0][1]) <= tolerance_px
+    lower, upper = half(pts), half(reversed(pts))
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) == 2:
+        a, b = hull
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        length2 = dx * dx + dy * dy
+        t = (0.0 if length2 <= 1e-12 else
+             max(0.0, min(1.0, ((x - a[0]) * dx + (y - a[1]) * dy)
+                              / length2)))
+        return math.hypot(x - (a[0] + t * dx),
+                          y - (a[1] + t * dy)) <= tolerance_px
+    point = (float(x), float(y))
+    for i, a in enumerate(hull):
+        b = hull[(i + 1) % len(hull)]
+        edge_len = math.hypot(b[0] - a[0], b[1] - a[1])
+        if cross(a, b, point) < -tolerance_px * max(edge_len, 1.0):
+            return False
+    return True
 
 
 def _guide_vertices(guides, spacing: float, selection=(), centre=None,
@@ -1229,6 +1298,7 @@ class Viewport(QOpenGLWidget):
         # entirely — on a heavy import that is also the fastest, since a
         # hidden group never reaches the VBOs. See `edit_rest_mode`.
         self._edit_rest_mode = _load_edit_rest_mode()
+        self._edit_rest_fade = _load_edit_rest_fade()
         self.scene.hide_similar_components = _load_hide_similar()
         self._invert_wheel = _load_invert_wheel()
         self._invert_orbit_y = _load_invert_orbit_y()
@@ -1843,7 +1913,7 @@ class Viewport(QOpenGLWidget):
                 # model reads as haze, not as glass); then the group itself
                 # at full strength.
                 self._program.setUniformValue1f(self._loc_fade,
-                                                EDIT_REST_FADE)
+                                                self.edit_rest_fade)
                 for _vs, _vc in face_spans:
                     if _vs < split_f:
                         self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
@@ -1896,7 +1966,8 @@ class Viewport(QOpenGLWidget):
                 r, g, b = self._texture_avg_color(path)
                 self._program.setUniformValue1f(self._loc_shade, float(shade))
                 self._set_color(r, g, b, 1.0)
-                for fade, spans in ((EDIT_REST_FADE, vis), (0.0, subj)) \
+                for fade, spans in ((self.edit_rest_fade, vis),
+                                    (0.0, subj)) \
                         if fading else ((0.0, vis),):
                     if not spans:
                         continue
@@ -1933,7 +2004,8 @@ class Viewport(QOpenGLWidget):
                     self._loc_hard_cutout,
                     1 if getattr(tex, "_cutout", False) else 0)
                 tex.bind(0)
-                for fade, spans in ((EDIT_REST_FADE, vis), (0.0, subj)) \
+                for fade, spans in ((self.edit_rest_fade, vis),
+                                    (0.0, subj)) \
                         if fading else ((0.0, vis),):
                     if not spans:
                         continue
@@ -1982,7 +2054,7 @@ class Viewport(QOpenGLWidget):
                     self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
             else:
                 self._program.setUniformValue1f(self._loc_fade,
-                                                EDIT_REST_FADE)
+                                                self.edit_rest_fade)
                 for _vs, _vc in db_draw:
                     if _vs < split_db:
                         self._gl.glDrawArrays(GL_TRIANGLES, _vs, _vc)
@@ -2335,7 +2407,7 @@ class Viewport(QOpenGLWidget):
                     # surroundings, then the edited group's own edges at
                     # full strength.
                     self._program.setUniformValue1f(self._loc_fade,
-                                                    EDIT_REST_FADE)
+                                                    self.edit_rest_fade)
                     for _vs, _vc in _espans:
                         if _vs < split_e:
                             self._gl.glDrawArrays(GL_LINES, _vs, _vc)
@@ -3321,7 +3393,8 @@ class Viewport(QOpenGLWidget):
             return [(dentro, 0.0)]
         if self._edit_rest_mode != "fade":
             return [(groups, 0.0)]
-        return [(fuera, EDIT_REST_FADE), (dentro, 0.0)]
+        fade = float(getattr(self, "_edit_rest_fade", EDIT_REST_FADE))
+        return [(fuera, fade), (dentro, 0.0)]
 
     def _draw_instanced_faces_lean(self, by_proto, mode, extra) -> None:
         """The instanced faces pass of the shaded and textured styles: the
@@ -3342,7 +3415,7 @@ class Viewport(QOpenGLWidget):
         back_rgb = effective_back_color(
             getattr(self.scene, "display_style", None), self.scene)
         key = (mode, tuple(back_rgb), id(getattr(self, "_tex_cache", None)),
-               id(self._program))
+               id(self._program), self.edit_rest_fade)
         rec = getattr(self, "_lean_faces_rec", None)
         if (rec is not None and rec[0] == key and rec[1] is by_proto
                 and all(e.get("mat_batch") is b for e, b in rec[2])):
@@ -3634,7 +3707,7 @@ class Viewport(QOpenGLWidget):
         changes, recorded and replayed while the batches stay (see
         :meth:`_draw_instanced_faces_lean`)."""
         prog = self._program
-        key = id(self._program)
+        key = (id(self._program), self.edit_rest_fade)
         rec = getattr(self, "_lean_edges_rec", None)
         if (rec is not None and rec[0] == key and rec[1] is by_proto
                 and all(e.get("mat_batch") is b for e, b in rec[2])):
@@ -7252,7 +7325,53 @@ class Viewport(QOpenGLWidget):
         # In the group's OWN axes, like the selection cue: on a rotated
         # object a world-aligned box reads as skewed and wraps mostly air.
         from core.group import oriented_box_corners
-        return oriented_box_corners(*self._group_obb(group))
+        frame, lo, hi = self._group_obb(group)
+        tight = oriented_box_corners(frame, lo, hi)
+
+        # Let a large object earn a little more breathing room, measured from
+        # its actual projection rather than from a long/thin world extent.
+        projected = [p for p in (self._world_to_pixel(c) for c in tight)
+                     if p is not None]
+        extent_px = 0.0
+        if projected:
+            xs, ys = zip(*projected)
+            extent_px = max(max(xs) - min(xs), max(ys) - min(ys))
+        pad_px = min(EDIT_BOX_PAD_MAX_PX,
+                     max(EDIT_BOX_PAD_MIN_PX,
+                         extent_px * EDIT_BOX_PAD_RATIO))
+
+        # Convert that logical-pixel gutter to world units at the box centre.
+        # Parallel projection has one scale everywhere; perspective uses the
+        # centre's depth along the viewing direction. A fixed world margin is
+        # either invisible from far away or enormous on a small part.
+        centre = sum(tight[1:], QVector3D(tight[0])) / len(tight)
+        span = float(self.camera.distance)
+        if self.camera.perspective:
+            depth = QVector3D.dotProduct(
+                centre - self.camera.eye(), self.camera.forward())
+            if math.isfinite(depth) and depth > 1e-9:
+                span = depth
+        world_per_px = (2.0 * max(span, 1e-9)
+                        * math.tan(math.radians(self.camera.fov_deg) / 2.0)
+                        / max(self.height(), 1))
+        pad = pad_px * world_per_px
+        padded_lo = tuple(float(v) - pad for v in lo)
+        padded_hi = tuple(float(v) + pad for v in hi)
+        return oriented_box_corners(frame, padded_lo, padded_hi)
+
+    def edit_group_box_contains_pixel(self, x: float, y: float) -> bool:
+        """Whether ``(x, y)`` lies inside the visible dotted edit box.
+
+        This is the click boundary for stepping out of a group/component.
+        Geometry need not fill its box: clicking the deliberate empty margin,
+        or a hole in an irregular object, keeps the current edit context.
+        """
+        corners = self._edit_group_box_corners()
+        if corners is None:
+            return False
+        projected = [p for p in (self._world_to_pixel(c) for c in corners)
+                     if p is not None]
+        return _point_in_screen_hull(x, y, projected)
 
     # ---- Section planes ------------------------------------------------------
     def _set_section_clip(self, on: bool) -> None:
@@ -13367,6 +13486,11 @@ class Viewport(QOpenGLWidget):
         being edited reads. See :data:`EDIT_REST_MODES`."""
         return self._edit_rest_mode
 
+    @property
+    def edit_rest_fade(self) -> float:
+        """0..1 strength of the grey wash applied to the edit context."""
+        return float(getattr(self, "_edit_rest_fade", EDIT_REST_FADE))
+
     def set_edit_rest_mode(self, mode: str) -> None:
         if mode not in EDIT_REST_MODES or mode == self._edit_rest_mode:
             return
@@ -13376,6 +13500,19 @@ class Viewport(QOpenGLWidget):
         # "hide" keeps the rest out of the VBOs entirely, so switching to or
         # from it changes what is uploaded, not just how it is drawn.
         self._edges_version = -1
+        self.update()
+
+    def set_edit_rest_fade(self, strength: float) -> None:
+        """Set and remember how pale the context becomes in ``fade`` mode."""
+        strength = max(0.0, min(1.0, float(strength)))
+        if abs(strength - self.edit_rest_fade) < 1e-9:
+            return
+        self._edit_rest_fade = strength
+        from PySide6.QtCore import QSettings
+        QSettings().setValue("display/edit_rest_fade", strength)
+        # Instanced draws record their uniforms for replay. Their cache keys
+        # include this value, while the consolidated buffers need no rebuild:
+        # the context/subject split is unchanged.
         self.update()
 
     def set_hide_similar_components(self, on: bool) -> None:

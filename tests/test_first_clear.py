@@ -26,7 +26,9 @@ from tests.test_lazy_native_snap import mod  # noqa: E402
 pytestmark = [pytestmark, pytest.mark.skipif(
     mod is None or not hasattr(getattr(mod, "InstanceSet", None),
                                "first_clear"),
-    reason="native module without first_clear")]
+    reason="native module without first_clear"), pytest.mark.skipif(
+    not viewport_mod._qv_hypot3(),
+    reason="no vectorised ray formula for this Qt's QVector3D length")]
 
 
 @pytest.fixture

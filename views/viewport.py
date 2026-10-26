@@ -761,17 +761,35 @@ _NEAREST_NATIVE = os.environ.get("INGETRAZO_NEAREST", "1") != "0"
 _NEAR_SEEN_NATIVE = os.environ.get("INGETRAZO_NEAR_SEEN", "1") != "0"
 
 
-#: Whether QVector3D's length here is the three-argument hypot that
-#: _unit_rays reproduces (None: not checked yet).
+#: Which three-argument hypot QVector3D's length here is, of those
+#: _unit_rays reproduces ("": none; None: not checked yet).
 _QV_HYPOT3 = None
+#: The C++ libraries whose ``std::hypot(x, y, z)`` _hypot3_f32 knows.
+_QV_HYPOTS = ("libstdc++", "msvc")
 
 
-def _hypot3_f32(a):
-    """libstdc++'s three-argument ``std::hypot`` in float, row by row of
-    ``a`` (N, 3) float32: the largest magnitude scaled out, as Qt's
-    ``QVector3D::length`` computes it."""
+def _hypot3_f32(a, kind="libstdc++"):
+    """The three-argument ``std::hypot`` in float of the C++ library
+    ``kind``, row by row of ``a`` (N, 3) float32, as Qt's
+    ``QVector3D::length`` computes it: libstdc++ scales the largest
+    magnitude out; MSVC's STL (Qt on Windows) swaps it to the front, keeps
+    it when the other two are below its epsilon and adds the other two
+    ratios' squares to 1 in the order the swaps left them."""
     import numpy as np
     a = np.abs(a)
+    if kind == "msvc":
+        x, y, z = a[:, 0], a[:, 1], a[:, 2]
+        s = y > x
+        x, y = np.where(s, y, x), np.where(s, x, y)
+        s = z > x
+        x, z = np.where(s, z, x), np.where(s, x, z)
+        e = x * np.float32(np.finfo(np.float32).eps)
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            p, q = y / x, z / x
+            r = x * np.sqrt((np.float32(1) + p * p) + q * q)
+        r = np.where((e >= y) & (e >= z), x, r)
+        return np.where(np.isinf(a).any(axis=1), np.float32(np.inf),
+                        r).astype(np.float32)
     m = a.max(axis=1)
     with np.errstate(divide="ignore", invalid="ignore"):
         q = a / m[:, None]
@@ -779,8 +797,9 @@ def _hypot3_f32(a):
         return np.where(m > 0, m * np.sqrt(s), np.float32(0)).astype(np.float32)
 
 
-def _qv_hypot3() -> bool:
-    """Checked once against QVector3D itself, on vectors from a millimetre
+def _qv_hypot3():
+    """The library of _QV_HYPOTS whose length is QVector3D's here, or None
+    — checked once against QVector3D itself, on vectors from a millimetre
     to tens of kilometres: another C++ library may round the last bit
     differently, and then the rays are built point by point as before."""
     global _QV_HYPOT3
@@ -792,8 +811,9 @@ def _qv_hypot3() -> bool:
         a[:8, rng.integers(0, 3, 8)] = 0.0
         want = np.array([QVector3D(*r).length() for r in a.tolist()],
                         dtype=np.float32)
-        _QV_HYPOT3 = bool((_hypot3_f32(a) == want).all())
-    return _QV_HYPOT3
+        _QV_HYPOT3 = next((k for k in _QV_HYPOTS
+                           if (_hypot3_f32(a, k) == want).all()), "")
+    return _QV_HYPOT3 or None
 
 
 def _unit_rays(eye, pts):
@@ -805,11 +825,12 @@ def _unit_rays(eye, pts):
     and distances (float64 of the float values), or None where this
     library's length cannot be reproduced."""
     import numpy as np
-    if not _qv_hypot3():
+    kind = _qv_hypot3()
+    if not kind:
         return None
     w = np.asarray(pts, dtype=np.float32).reshape(-1, 3)
     dl = w - np.array([eye.x(), eye.y(), eye.z()], dtype=np.float32)
-    L = _hypot3_f32(dl)
+    L = _hypot3_f32(dl, kind)
     rows = np.flatnonzero(L.astype(np.float64) >= 1e-9)
     D = (dl[rows] / L[rows, None]).astype(np.float64)
     return rows, D, L[rows].astype(np.float64)
@@ -14958,7 +14979,7 @@ class Viewport(QOpenGLWidget):
         first, doubts = iset.first_clear(
             np.ascontiguousarray(vis, np.int64), (e.x(), e.y(), e.z()), pts,
             stat[0] if stat is not None else None,
-            stat[1] if stat is not None else None)
+            stat[1] if stat is not None else None, _qv_hypot3())
         for j in doubts.tolist():
             if not self._occluded_many_now(pts[j:j + 1])[0]:
                 return j

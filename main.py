@@ -247,6 +247,11 @@ def _self_check() -> int:
           + (f" (Rust {mod.__version__} available)" if mod else ""))
     if mod is None and os.environ.get("INGETRAZO_REQUIRE_RUST") == "1":
         problems.append("native engine")
+    if mod is not None:
+        # Which C++ library's QVector3D length the kernels copy bit for bit
+        # (none: those kernels stay in Python, e.g. Qt built another way).
+        from core._native import qt_hypot
+        print(f"  vector length  : {qt_hypot() or 'Python (no formula matches)'}")
 
     # ``ingetrazo --mcp`` runs scripts/ingetrazo_mcp.py by path, and that
     # server reads its recipe book from core.ai_recipes. The Flatpak of

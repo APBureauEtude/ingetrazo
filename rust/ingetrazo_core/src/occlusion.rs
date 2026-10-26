@@ -15,6 +15,8 @@
 
 use rayon::prelude::*;
 
+use crate::facegeom::{hypot3, Hypot};
+
 const DET_MIN: f64 = 1e-6;
 const T_MIN: f64 = 1e-6;
 const EPS_M: f64 = f64::EPSILON;
@@ -158,11 +160,15 @@ pub fn tri_occludes(o: [f64; 3], d: [f64; 3], limit: f64,
     None
 }
 
-/// ``views.viewport._hypot3_f32`` for one vector: libstdc++'s
-/// three-argument ``std::hypot`` in float, the largest magnitude scaled
-/// out, as Qt's ``QVector3D::length`` computes it.
+/// ``views.viewport._hypot3_f32`` for one vector: the three-argument
+/// ``std::hypot`` in float of the C++ library ``h``, as Qt's
+/// ``QVector3D::length`` computes it. libstdc++'s is kept here as it was
+/// (the largest magnitude scaled out), NaN included.
 #[inline]
-pub fn hypot3_f32(v: [f32; 3]) -> f32 {
+pub fn hypot3_f32(v: [f32; 3], h: Hypot) -> f32 {
+    if h != Hypot::LibStdCxx {
+        return hypot3(v, h);
+    }
     let a = [v[0].abs(), v[1].abs(), v[2].abs()];
     let m = a[0].max(a[1]).max(a[2]);
     if !(m > 0.0) {
@@ -177,9 +183,9 @@ pub fn hypot3_f32(v: [f32; 3]) -> f32 {
 /// ``eye`` (float) to ``p`` and the distance, both as float64 of the float
 /// values QVector3D holds — or None for a point on the eye.
 #[inline]
-pub fn unit_ray(eye: [f32; 3], p: [f64; 3]) -> Option<([f64; 3], f64)> {
+pub fn unit_ray(eye: [f32; 3], p: [f64; 3], h: Hypot) -> Option<([f64; 3], f64)> {
     let dl = [p[0] as f32 - eye[0], p[1] as f32 - eye[1], p[2] as f32 - eye[2]];
-    let l = hypot3_f32(dl);
+    let l = hypot3_f32(dl, h);
     if !((l as f64) >= 1e-9) {
         return None;
     }

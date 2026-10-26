@@ -272,7 +272,7 @@ def test_first_clear_is_occluded_asked_in_turn(seed):
             if state[i] == 2:
                 want_doubts.append(i)
         first, doubts = iset.first_clear(cand, e3, np.ascontiguousarray(pts),
-                                         other, ocand)
+                                         other, ocand, _qv_hypot3())
         assert first == want_first
         assert doubts.tolist() == want_doubts
 

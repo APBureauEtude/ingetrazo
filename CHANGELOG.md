@@ -4,6 +4,20 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
+## [Sin publicar] — 0.6
+
+### Arreglado
+
+- **Un grupo o componente pintado entero con una textura ya no la pierde al
+  guardar dos veces** (#877, análisis de @alanmirandaj): el primer guardado
+  de la sesión borraba sin querer la ruta de la imagen en el modelo abierto,
+  y el siguiente (un autoguardado basta) escribía el archivo sin ella. Al
+  reabrirlo, el grupo salía sin textura. Venía desde la 0.5.0.
+- **Windows: los diálogos de Abrir, Guardar, Importar y Exportar vuelven a
+  abrirse** cuando la última carpeta usada estaba en una unidad de red que
+  ya no responde (#948): ahora empiezan en la carpeta del documento o en
+  Documentos.
+
 ## [0.5.10] — 2026-10-26
 
 **Motor Rust encendido por defecto y modelos enormes sin tirones.** El motor

@@ -4,7 +4,7 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
-## [0.5.10] — sin publicar
+## [0.5.10] — 2026-10-26
 
 **Motor Rust encendido por defecto y modelos enormes sin tirones.** El motor
 nativo de la 0.5.9 deja de ser experimental: viene activado (el motor de
@@ -39,6 +39,14 @@ visión, y unos sesenta arreglos.
   motor de Python. Los textos dejan de decir «experimental» en los diez
   idiomas.
 - **El Flatpak lleva el motor Rust** (#767).
+- **Windows: el motor Rust acelera también ahí el cursor sobre modelos
+  enormes.** Los rayos de oclusión y los cálculos de caras en Rust solo se
+  usan si reproducen bit a bit la longitud de vector de Qt, y solo conocían
+  la fórmula de Linux (libstdc++); el Qt de Windows está compilado con MSVC,
+  que redondea distinto, y todo iba por el camino lento (los saltos de
+  hasta 1,2 s con Línea sobre el SPR en la ronda de Windows). Ahora también
+  conocen la de MSVC, comprobada contra su código fuente en 3,3 millones de
+  vectores; `--check` dice cuál se usa.
 - **Modelos enormes (#158)**, con el motor Rust:
   - pasar el cursor con las herramientas de dibujo sobre la planta de 14 M
     caras: de segundos por movimiento a ~40 ms. Las copias ligeras ya no se
@@ -141,8 +149,8 @@ visión, y unos sesenta arreglos.
 - **Seguridad**: un archivo comprimido de fuera (.igz, KMZ, portapapeles,
   biblioteca) no puede desempaquetarse hasta llenar la memoria («bomba
   zip»), y un documento real de más de 4 GB sigue abriendo (Victor Crespo).
-- **Plataformas**: Windows: el registro de errores ya no anota los errores
-  COM manejados (#763), y reacomodar las barras no deja pequeña una ventana
+- **Plataformas**: Windows: el registro de errores descarta al arrancar los
+  errores COM manejados de la sesión anterior (#763), y reacomodar las barras no deja pequeña una ventana
   maximizada (#800); algunos controladores gráficos de Windows con
   respuestas falsas ya no hacen saltar el repintado grabado; AppImage: las
   carpetas y enlaces se abren con el entorno del sistema (#456); motor

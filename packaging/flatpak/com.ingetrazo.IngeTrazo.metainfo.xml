@@ -75,7 +75,7 @@
   <url type="vcs-browser">https://github.com/ingelibre/ingetrazo</url>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.5.10" date="2026-11-06">
+    <release version="0.5.10" date="2026-10-26">
       <description>
         <p>The Rust engine is now on by default, in this Flatpak too, with
         the Python engine as a fallback; huge models no longer lag while

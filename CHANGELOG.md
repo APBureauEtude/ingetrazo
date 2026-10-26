@@ -162,6 +162,10 @@ visión, y unos sesenta arreglos.
   (@pacaeiro), Francis Rebouças, @pkoska, @tony1233200, @hamzah1985,
   Victor Crespo y Alexis. Reportes y modelos: @xcd-droid, @GitHuhl,
   @buildsmart888 y todos los que abrieron issues.
+- Difusión: gracias a los canales de YouTube que mostraron IngeTrazo —
+  Blender 3D Architect, IngeTrazo Tutorials, JRobredo3D, Rafael 3D, Allan
+  Brito, Savoirpourtous, BuildSmart Learning y todos los que le dedicaron un
+  vídeo.
 
 ### Para desarrolladores
 - **Una prueba falla si `INGETRAZO_RUST=1` corre sin el módulo o con uno

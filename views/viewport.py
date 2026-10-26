@@ -8684,8 +8684,9 @@ class Viewport(QOpenGLWidget):
         frame, lo, hi = self._group_obb(group)
         tight = oriented_box_corners(frame, lo, hi)
 
-        # Let a large object earn a little more breathing room, measured from
-        # its actual projection rather than from a long/thin world extent.
+        # Size the gutter in screen pixels. This keeps the dotted cue clearly
+        # separate from a cuboid's solid edges at every useful zoom level,
+        # without making the box of a long object needlessly large.
         projected = [p for p in (self._world_to_pixel(c) for c in tight)
                      if p is not None]
         extent_px = 0.0

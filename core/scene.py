@@ -272,6 +272,29 @@ class Scene:
             return False
         return self._layer_state(entity)[0]
 
+    def edge_snappable(self, edge) -> bool:
+        """Whether the inference may land on ``edge`` — the visibility rule
+        the render, ``bounds()`` and the pick already follow.
+
+        An EDGE can be hidden on its own (Hide with the eraser, the seams of
+        a smoothed surface) without hiding what it bounds, and the draw
+        passes skip it: no line, no profile. The snap engine did not ask, so
+        the point offered to the cursor existed nowhere on screen — and a
+        line drawn to it landed on a spot the user could not see, cutting
+        the face it lay on (the "phantom vertex" segmentations). Hidden
+        EDGES come back for inference only with Camera ▸ Hidden Geometry
+        on, the same switch that draws them as a ghost and makes them
+        selectable.
+
+        A visible, plain edge is unaffected: nothing here filters curves
+        (``soft``), locked geometry, guides or group edges, which have their
+        own rules.
+        """
+        if not self.entity_visible(edge):
+            return False
+        return (not getattr(edge, "hidden", False)
+                or bool(getattr(self, "show_hidden_geometry", False)))
+
     def edit_definition(self):
         """The shared prototype mesh of the component instance open at the
         innermost level, or ``None`` (at the root, or inside a classic

@@ -537,14 +537,38 @@ class Mesh:
         out was deleted and the leftovers were all the document had, so
         zoom-to-extents had nothing to find and could not bring him back.
 
+        The full sweep — this one plus the registry entries that point at
+        vertices the mesh no longer owns — is :meth:`purge_debris`.
+        """
+        return self.purge_debris()[0]
+
+    def purge_debris(self) -> tuple[int, int]:
+        """Deep clean: drop the vertices nothing holds and the position
+        entries that would hand one back. Returns
+        ``(vertices dropped, ghost entries dropped)``.
+
+        ``remove_face`` and ``remove_edge`` are deliberately additive — an
+        edge may border another face, a corner may be left standing as a
+        line — so whoever removes geometry that nothing else wants has to
+        say so. Erasing does (``prune_orphan_vertices``); grouping did not:
+        it carves faces and edges out of the loose mesh into a new container
+        and the corners only they used stayed behind, invisible and
+        unreferenced — eight of them for a whole box turned into a
+        component. Nothing draws them, ``bounds()`` ignores them and the
+        file format only stores what a face or an edge holds, so they die on
+        save; but for the rest of the session they stay in the position
+        registry, and the next thing drawn there welds to a ``Vertex`` the
+        mesh no longer lists.
+
+        That is the "ghost point" of the report: nothing draws it, nothing
+        picks it, and yet a new face drawn at the spot ends up cut through
+        it. The registry is therefore swept by IDENTITY, never by position
+        key: an entry whose vertex is not in ``self.vertices`` goes, and so
+        does a moved vertex still waiting in ``_displaced``.
+
         A face holds real ``Vertex`` objects in its loops, so "has no edges"
         is not enough on its own: the corners of a face with no free edges
         would go with it. Both are checked.
-
-        The position registry is cleaned by IDENTITY, in one pass. A vertex
-        that has been moved no longer hashes to the key it was filed under,
-        and a stale entry is worse than a stray vertex — the next point drawn
-        there would weld to an object that is no longer in the mesh.
         """
         used = set()
         for f in self.faces:
@@ -553,15 +577,26 @@ class Mesh:
             for hole in f.hole_loops:
                 for v in hole:
                     used.add(id(v))
-        doomed = {id(v) for v in self.vertices if not v.edges and id(v) not in used}
-        if not doomed:
-            return 0
-        self.vertices[:] = [v for v in self.vertices if id(v) not in doomed]
-        for k in [k for k, v in self._registry.items() if id(v) in doomed]:
+        doomed = {id(v) for v in self.vertices
+                  if not v.edges and id(v) not in used}
+        live = {id(v) for v in self.vertices if id(v) not in doomed}
+        ghosts = [k for k, v in self._registry.items() if id(v) not in live]
+        for k in list(self._displaced):
+            waiting = [v for v in self._displaced[k] if id(v) in live]
+            if waiting:
+                self._displaced[k] = waiting
+            else:
+                del self._displaced[k]
+        if not doomed and not ghosts:
+            return 0, 0
+        if doomed:
+            self.vertices[:] = [v for v in self.vertices
+                                if id(v) not in doomed]
+        for k in ghosts:
             del self._registry[k]
         self._chunk_dirty = True
         self._mut_serial += 1
-        return len(doomed)
+        return len(doomed), len(ghosts)
 
     def relink_vertices(self, vertices) -> None:
         """Re-attach vertices a previous :meth:`drop_orphan_vertices` took

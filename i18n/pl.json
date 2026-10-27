@@ -3024,5 +3024,8 @@
  "Distance:": "Odległość:",
  "How far a surface still darkens its neighbour": "Do jakiej odległości powierzchnia przyciemnia sąsiednią",
  "Intensity:": "Intensywność:",
- "Your graphics driver cannot draw ambient occlusion ({reason}).": "Twój sterownik grafiki nie potrafi narysować okluzji otoczenia ({reason})."
+ "Your graphics driver cannot draw ambient occlusion ({reason}).": "Twój sterownik grafiki nie potrafi narysować okluzji otoczenia ({reason}).",
+ "Vietnamese translation of the interface.": "Wietnamskie tłumaczenie interfejsu.",
+ "Lao translation of the interface.": "Laotańskie tłumaczenie interfejsu.",
+ "Thai translation of the interface.": "Tajskie tłumaczenie interfejsu."
 }

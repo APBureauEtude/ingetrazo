@@ -3005,5 +3005,8 @@
  "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "ຮູບແບບການສະແດງລາຍການສ່ວນເສີມໃນເມນູຄລິກຂວາ (ມີຜົນທັນທີ) ແລະ ໃນເມນູສ່ວນເສີມ (ມີຜົນເມື່ອເປີດໂປຣແກຣມຄັ້ງຕໍ່ໄປ).",
  "Axes": "ແກນພິກັດ",
  "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "ສະແດງແກນແຕ້ມສີແດງ, ສີຂຽວ ແລະ ສີຟ້າຂອງໂມເດວ. ການອ້າງອີງຈຸດຕາມແນວແກນຍັງຄົງເຮັດວຽກໄດ້ເຖິງແມ່ນວ່າຈະຖືກເຊື່ອງຢູ່ກໍຕາມ.",
- "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "ສ່ວນເສີມ «{name}» ເຮັດວຽກຜິດພາດໃນເມນູຄລິກຂວາ ແລະ ຈະຖືກຕັດອອກຈົນກວ່າຈະເປີດ IngeTrazo ໃໝ່. ກະລຸນາອັບເດດ ຫຼື ປິດມັນໄວ້ໃນຕົວຈັດການສ່ວນເສີມ."
+ "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "ສ່ວນເສີມ «{name}» ເຮັດວຽກຜິດພາດໃນເມນູຄລິກຂວາ ແລະ ຈະຖືກຕັດອອກຈົນກວ່າຈະເປີດ IngeTrazo ໃໝ່. ກະລຸນາອັບເດດ ຫຼື ປິດມັນໄວ້ໃນຕົວຈັດການສ່ວນເສີມ.",
+"Vietnamese translation of the interface.": "ການແປສ່ວນຕິດຕໍ່ຜູ້ໃຊ້ເປັນພາສາຫວຽດນາມ.",
+"Lao translation of the interface.": "ການແປສ່ວນຕິດຕໍ່ຜູ້ໃຊ້ເປັນພາສາລາວ.",
+"Thai translation of the interface.": "ການແປສ່ວນຕິດຕໍ່ຜູ້ໃຊ້ເປັນພາສາໄທ."
 }

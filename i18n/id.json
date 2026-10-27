@@ -3019,5 +3019,8 @@
  "Distance:": "Jarak:",
  "How far a surface still darkens its neighbour": "Sejauh mana sebuah permukaan masih menggelapkan permukaan di sebelahnya",
  "Intensity:": "Intensitas:",
- "Your graphics driver cannot draw ambient occlusion ({reason}).": "Driver grafis Anda tidak dapat menggambar oklusi ambien ({reason})."
+ "Your graphics driver cannot draw ambient occlusion ({reason}).": "Driver grafis Anda tidak dapat menggambar oklusi ambien ({reason}).",
+ "Vietnamese translation of the interface.": "Terjemahan antarmuka ke bahasa Vietnam.",
+ "Lao translation of the interface.": "Terjemahan antarmuka ke bahasa Laos.",
+ "Thai translation of the interface.": "Terjemahan antarmuka ke bahasa Thai."
 }

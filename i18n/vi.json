@@ -3034,5 +3034,8 @@
   "Round the edges of a solid to the radius you set.": "Bo tròn các cạnh của khối rắn theo bán kính bạn thiết lập.",
   "Drag the texture or a pin: red moves, green scales/rotates, blue shears. Enter finishes, Esc restores.": "Kéo họa tiết hoặc ghim: đỏ để di chuyển, xanh lá để chỉnh tỷ lệ/xoay, xanh dương để xiên góc. Nhấn Enter để hoàn tất, Esc để khôi phục.",
   "Move to set the radius, or type it and Enter; click to round. 'Ns' = segments.": "Di chuyển để đặt bán kính, hoặc gõ giá trị và nhấn Enter; nhấp để bo tròn. 'Ns' = số phân đoạn cong.",
-  "Click an edge to round it; type the radius and Enter.": "Nhấp vào một cạnh để bo tròn; nhập bán kính và nhấn Enter."
+  "Click an edge to round it; type the radius and Enter.": "Nhấp vào một cạnh để bo tròn; nhập bán kính và nhấn Enter.",
+  "Vietnamese translation of the interface.": "Bản dịch giao diện tiếng Việt.",
+  "Lao translation of the interface.": "Bản dịch giao diện tiếng Lào.",
+  "Thai translation of the interface.": "Bản dịch giao diện tiếng Thái."
 }

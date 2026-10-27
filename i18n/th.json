@@ -3000,5 +3000,8 @@
  "Group them when there are many": "จัดกลุ่มเมื่อมีจำนวนมาก",
  "Always in submenus": "อยู่ในเมนูลูกเสมอ",
  "Each entry on its own": "แต่ละรายการแยกกัน",
- "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "วิธีการแสดงรายการส่วนขยายในเมนูคลิกขวา (มีผลทันที) และในเมนูส่วนขยาย (เมื่อเริ่มโปรแกรมครั้งถัดไป)"
+ "How the extensions' entries show in the right-click menu (at once) and in the Extensions menu (at the next start).": "วิธีการแสดงรายการส่วนขยายในเมนูคลิกขวา (มีผลทันที) และในเมนูส่วนขยาย (เมื่อเริ่มโปรแกรมครั้งถัดไป)",
+ "Vietnamese translation of the interface.": "คำแปลส่วนต่อประสานภาษาเวียดนาม",
+ "Lao translation of the interface.": "คำแปลส่วนต่อประสานภาษาลาว",
+ "Thai translation of the interface.": "คำแปลส่วนต่อประสานภาษาไทย"
 }

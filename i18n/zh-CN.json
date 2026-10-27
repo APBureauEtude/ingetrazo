@@ -3017,5 +3017,8 @@
  "Distance:": "距离：",
  "How far a surface still darkens its neighbour": "一个表面在多远的距离内仍会使相邻表面变暗",
  "Intensity:": "强度：",
- "Your graphics driver cannot draw ambient occlusion ({reason}).": "您的显卡驱动无法绘制环境光遮蔽（{reason}）。"
+ "Your graphics driver cannot draw ambient occlusion ({reason}).": "您的显卡驱动无法绘制环境光遮蔽（{reason}）。",
+ "Vietnamese translation of the interface.": "界面的越南语翻译。",
+ "Lao translation of the interface.": "界面的老挝语翻译。",
+ "Thai translation of the interface.": "界面的泰语翻译。"
 }

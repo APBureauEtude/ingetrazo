@@ -3016,5 +3016,8 @@
  "Distance:": "Расстояние:",
  "How far a surface still darkens its neighbour": "На каком расстоянии поверхность ещё затемняет соседнюю",
  "Intensity:": "Интенсивность:",
- "Your graphics driver cannot draw ambient occlusion ({reason}).": "Ваш графический драйвер не может отрисовать фоновое затенение ({reason})."
+ "Your graphics driver cannot draw ambient occlusion ({reason}).": "Ваш графический драйвер не может отрисовать фоновое затенение ({reason}).",
+ "Vietnamese translation of the interface.": "Вьетнамский перевод интерфейса.",
+ "Lao translation of the interface.": "Лаосский перевод интерфейса.",
+ "Thai translation of the interface.": "Тайский перевод интерфейса."
 }

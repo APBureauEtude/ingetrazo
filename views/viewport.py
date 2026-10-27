@@ -1976,6 +1976,9 @@ class Viewport(QOpenGLWidget):
         self._shadow_fbo = None
         self._shadow_key = None
         self._shadow_vp = None
+        self._fine_shadow_fbo = None
+        self._fine_shadow_key = None
+        self._shadow_fit = None
 
         # Axes rebuilt per frame (dash spacing scales with zoom), so dynamic.
         self._axes_vao, self._axes_vbo = self._create_dynamic()
@@ -2289,7 +2292,7 @@ class Viewport(QOpenGLWidget):
         # camera-independent: orbit and zoom reuse it). The pass borrows the
         # FBO/program bindings; this block restores them and binds the map
         # on texture unit 1 for the geometry passes to sample.
-        self._frame_shadow = (self._ensure_shadow_map()
+        self._frame_shadow = (self._ensure_shadow_map(mvp)
                               if mode in ("textures", "shaded",
                                           "hidden_line", "monochrome")
                               else None)
@@ -2341,6 +2344,10 @@ class Viewport(QOpenGLWidget):
                 if settled:
                     self._frame_cache_store(fc, w, h)
             self._paint_hover(mvp, w, h)
+        # The view at rest: measure what it shows for the fitted sun map
+        # (#958) — read from the depth the model just left, before the
+        # rubber band and the overlay draw over it.
+        self._settle_shadow_fit(mvp, w, h)
 
         # Rubber band preview. Loose drawing tools float it on top (depth test
         # off, so it never z-fights with coincident axes). Push/Pull's solid
@@ -5434,6 +5441,7 @@ class Viewport(QOpenGLWidget):
                 "_ghost_edges_vao", "_ghost_edges_vbo", "_ghost_vcol_vao",
                 "_ghost_vcol_vbo", "_ghost_tex_vao", "_ghost_tex_vbo",
                 "_depth_fbo", "_scene_fbo", "_shadow_fbo", "_depth_snap",
+                "_fine_shadow_fbo",
                 "_frame_cache_fbo", "_frame_cache")
 
     def _forget_context_objects(self) -> None:
@@ -5941,10 +5949,30 @@ class Viewport(QOpenGLWidget):
         return (x, y, d[2])
 
     @staticmethod
-    def _light_vp(d, lo, hi):
+    def _light_vp(d, lo, hi, fit=None):
         """The sun's orthographic view-projection fitted around the model —
         and around the z=0 ground patch that receives. Ortho keeps the
-        packed depth linear."""
+        packed depth linear.
+
+        ``fit`` = ``(cx, cy, half)`` in the sun's view plane narrows the map
+        to that square (#958: what the settled view shows, see
+        ``_settle_shadow_fit``); along the sun it still spans the whole
+        model, so a caster off screen still throws its shadow in."""
+        view, r = Viewport._light_view(d, lo, hi)
+        proj = QMatrix4x4()
+        # Eye sits 2r from center; everything lives within r of it.
+        if fit is None:
+            proj.ortho(-r, r, -r, r, r * 0.5, r * 3.5)
+        else:
+            cx, cy, half = fit
+            proj.ortho(cx - half, cx + half, cy - half, cy + half,
+                       r * 0.5, r * 3.5)
+        return proj * view
+
+    @staticmethod
+    def _light_view(d, lo, hi):
+        """The sun's view matrix round the model, and the radius ``r`` of
+        the sphere the model and its ground patch fit in."""
         cx = (lo.x() + hi.x()) / 2.0
         cy = (lo.y() + hi.y()) / 2.0
         loz = min(lo.z(), 0.0)
@@ -5959,15 +5987,18 @@ class Viewport(QOpenGLWidget):
               else QVector3D(0.0, 1.0, 0.0))
         view = QMatrix4x4()
         view.lookAt(eye, center, up)
-        proj = QMatrix4x4()
-        # Eye sits 2r from center; everything lives within r of it.
-        proj.ortho(-r, r, -r, r, r * 0.5, r * 3.5)
-        return proj * view
+        return view, r
 
-    def _ensure_shadow_map(self):
+    def _ensure_shadow_map(self, mvp=None):
         """Build or reuse the packed-depth shadow map. Camera-independent:
         keyed by geometry version + sun + cut + bounds, so orbit and zoom
-        REUSE it — only an edit, the clock or the section rebuilds."""
+        REUSE it — only an edit, the clock or the section rebuilds.
+
+        Once the view has settled (``mvp`` the same as when
+        ``_settle_shadow_fit`` measured what it shows), a second map of the
+        same size spread over only that returns instead (#958): a plaza of
+        100 m seen from a bench goes from 5 cm to millimetres per texel.
+        The moment the camera moves the whole-model map is back."""
         d = self._sun_dir_now()
         self._frame_sun = d
         if d is None:
@@ -5998,6 +6029,9 @@ class Viewport(QOpenGLWidget):
         # died with «setUniformValue(15, None)». Marco, 2026-09-17,
         # exporting the sheets of Plaza Yanque to PDF.
         vp = self._light_vp(d, lo, hi)
+        fine = self._fine_shadow_map(d, lo, hi, key, mvp)
+        if fine is not None:
+            return fine
         if self._shadow_fbo is not None and self._shadow_key == key:
             self._shadow_vp = vp
             return self._shadow_fbo
@@ -6014,14 +6048,118 @@ class Viewport(QOpenGLWidget):
         self._shadow_vp = vp
         return self._shadow_fbo
 
-    def _render_shadow_map(self, light_vp) -> None:
+    #: How long the view must stay put before the fitted map is drawn (#958).
+    SHADOW_SETTLE_MS = 200
+
+    def _fine_shadow_map(self, d, lo, hi, key, mvp):
+        """The fitted map for this frame (#958), built on first use; None
+        while the view moves, in an export, or with nothing measured yet."""
+        fit = getattr(self, "_shadow_fit", None)
+        if (fit is None or mvp is None or self._export_size is not None
+                or fit[0] != (tuple(mvp.data()), key)):
+            return None
+        fkey = (key, fit[1])
+        vp = self._light_vp(d, lo, hi, fit[1])
+        fbo = getattr(self, "_fine_shadow_fbo", None)
+        if fbo is not None and getattr(self, "_fine_shadow_key", None) == fkey:
+            self._shadow_vp = vp
+            return fbo
+        if fbo is None:
+            fmt = QOpenGLFramebufferObjectFormat()
+            fmt.setAttachment(QOpenGLFramebufferObject.CombinedDepthStencil)
+            fbo = self._fine_shadow_fbo = QOpenGLFramebufferObject(
+                self._SHADOW_MAP_SIZE, self._SHADOW_MAP_SIZE, fmt)
+            if not fbo.isValid():
+                self._fine_shadow_fbo = None
+                return None
+        self._render_shadow_map(vp, fbo)
+        self._fine_shadow_key = fkey
+        self._shadow_vp = vp
+        return fbo
+
+    def _settle_shadow_fit(self, mvp, w, h) -> None:
+        """After a frame drawn with the whole-model map: once the view has
+        stayed put ``SHADOW_SETTLE_MS`` (no button held), read which
+        surfaces it shows from its depth and remember the square they span
+        in the sun's view plane; the next frame draws the fitted map over
+        it (#958). Any camera move, edit or clock change starts over."""
+        if self._export_size is not None or self._frame_shadow is None:
+            return
+        d = getattr(self, "_frame_sun", None)
+        lo, hi = self.scene.bounds()
+        if d is None or lo is None:
+            return
+        state = (tuple(mvp.data()), self._shadow_key)
+        fit = getattr(self, "_shadow_fit", None)
+        if fit is not None and fit[0] == state:
+            return                                  # already fitted
+        if getattr(self, "_shadow_settle_state", None) != state:
+            self._shadow_settle_state = state
+            self._shadow_settle_due = False
+            timer = getattr(self, "_shadow_settle_timer", None)
+            if timer is None:
+                timer = self._shadow_settle_timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(self._shadow_settled)
+            timer.start(self.SHADOW_SETTLE_MS)
+            return
+        from PySide6.QtWidgets import QApplication
+        if (not getattr(self, "_shadow_settle_due", False)
+                or QApplication.mouseButtons() != Qt.NoButton):
+            return
+        self._shadow_settle_due = False
+        rect = self._visible_light_square(mvp, w, h, d, lo, hi)
+        self._scene_fbo.bind()
+        self._gl.glViewport(0, 0, w, h)
+        if rect is not None:
+            self._shadow_fit = (state, rect)
+            self.update()
+
+    def _shadow_settled(self) -> None:
+        self._shadow_settle_due = True
+        self.update()
+
+    def _visible_light_square(self, mvp, w, h, d, lo, hi):
+        """The square, in the sun's view plane, that the surfaces this frame
+        shows span — from its depth, every 8th pixel — with a margin; None
+        when the sky fills the view or it would not be smaller than the
+        whole-model map."""
+        import numpy as np
+        depth = self._read_scene_depth(w, h)
+        if depth is None:
+            return None
+        step = 8
+        z = depth[::step, ::step]
+        iy, ix = np.nonzero(z < 1.0)
+        if ix.size == 0:
+            return None
+        zz = z[iy, ix].astype(np.float64)
+        nx = (ix * step + 0.5) / w * 2.0 - 1.0
+        ny = (iy * step + 0.5) / h * 2.0 - 1.0
+        inv, ok = mvp.inverted()
+        if not ok:
+            return None
+        view, r = self._light_view(d, lo, hi)
+        m = np.array((view * inv).data(), dtype=np.float64).reshape(4, 4).T
+        clip = np.stack([nx, ny, zz * 2.0 - 1.0, np.ones_like(nx)])
+        p = m @ clip
+        px, py = p[0] / p[3], p[1] / p[3]
+        x0, x1, y0, y1 = px.min(), px.max(), py.min(), py.max()
+        # Margin: the gaps between sampled pixels, and the PCF kernel.
+        half = max(x1 - x0, y1 - y0) * 0.5 * 1.08 + 0.05
+        if half >= r * 0.9:
+            return None                 # the whole model: nothing to gain
+        return (round(float(x0 + x1) * 0.5, 4), round(float(y0 + y1) * 0.5, 4),
+                round(float(half), 4))
+
+    def _render_shadow_map(self, light_vp, fbo=None) -> None:
         """Depth-from-the-sun pass: every caster — the consolidated face
         VBOs plus ALL instanced components (no camera culling here: an
         off-screen tree still throws its shadow into the frame) — drawn
         with the depth program into the packed-depth FBO. The active
         section cut applies, so severed geometry does not cast. The caller
         restores the scene FBO/program bindings this pass borrows."""
-        fbo = self._shadow_fbo
+        fbo = self._shadow_fbo if fbo is None else fbo
         size = fbo.width()
         fbo.bind()
         self._gl.glViewport(0, 0, size, size)
@@ -15142,13 +15280,11 @@ class Viewport(QOpenGLWidget):
         return bool(getattr(sc, "dimensions", None)
                     or getattr(sc, "text_labels", None))
 
-    def _capture_depth(self, w: int, h: int) -> None:
-        """Copy the frame's depth out of the (multisampled) scene FBO into a
-        single-sample one and read it back once. The overlay then answers
-        «is this point hidden?» with a lookup instead of a ray cast against
-        the whole model: a house from a 2018 .skp with 25 dimensions spent
-        2.8 s of every frame casting 1350 rays against 284 000 triangles
-        (Juan José Noriega's files, 26-09-2026); the read-back is ~8 ms."""
+    def _read_scene_depth(self, w: int, h: int):
+        """The frame's depth, copied out of the (multisampled) scene FBO
+        into a single-sample one and read back: an ``(h, w)`` float array,
+        or None when the driver refuses. Leaves the read framebuffer bound
+        to that copy; the caller rebinds what it draws into."""
         try:
             import numpy as np
             from PySide6.QtOpenGL import (QOpenGLFramebufferObject,
@@ -15168,7 +15304,19 @@ class Viewport(QOpenGLWidget):
             self._gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, dfbo.handle())
             buf = np.empty((h, w), dtype=np.float32)
             self._gl.glReadPixels(0, 0, w, h, 0x1902, GL_FLOAT, buf)  # DEPTH
-        except Exception:  # noqa: BLE001 — fall back to rays, never break paint
+        except Exception:  # noqa: BLE001
+            return None
+        return buf
+
+    def _capture_depth(self, w: int, h: int) -> None:
+        """Copy the frame's depth out of the (multisampled) scene FBO into a
+        single-sample one and read it back once. The overlay then answers
+        «is this point hidden?» with a lookup instead of a ray cast against
+        the whole model: a house from a 2018 .skp with 25 dimensions spent
+        2.8 s of every frame casting 1350 rays against 284 000 triangles
+        (Juan José Noriega's files, 26-09-2026); the read-back is ~8 ms."""
+        buf = self._read_scene_depth(w, h)
+        if buf is None:             # fall back to rays, never break paint
             self._depth_snap = None
             return
         mvp = self.camera.projection_matrix() * self.camera.view_matrix()

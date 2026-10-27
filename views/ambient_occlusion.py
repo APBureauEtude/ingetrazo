@@ -263,6 +263,10 @@ class AmbientOcclusion:
         p.bind()
         gl.glBindTexture(GL_TEXTURE_2D, self._blur_fbo.texture())
         p.setUniformValue1i(p.uniformLocation("u_ao"), _UNIT_AO)
+        p.setUniformValue1i(p.uniformLocation("u_depth"), _UNIT_DEPTH)
+        p.setUniformValue(p.uniformLocation("u_inv_proj"), inv)
+        p.setUniformValue(p.uniformLocation("u_ao_size"), QVector2D(hw, hh))
+        p.setUniformValue1f(p.uniformLocation("u_radius"), r)
         p.setUniformValue1f(p.uniformLocation("u_intensity"),
                             float(settings["intensity"]))
         gl.glDrawArrays(GL_TRIANGLES, 0, 3)

@@ -27,8 +27,13 @@ vec3 view_at(vec2 uv) {
     return view_pos(uv, texture(u_depth, uv).r);
 }
 
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+// A 4x4 ordered set of rotations, one per pixel of each 4x4 tile. The blur
+// averages exactly 4x4 texels, so every window holds all sixteen and the
+// pattern cancels to a flat tone; white noise left "clouds" on large faces.
+float tile_rotation(vec2 frag) {
+    ivec2 c = ivec2(frag) & 3;
+    int bayer[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+    return (float(bayer[c.y * 4 + c.x]) + 0.5) / 16.0;
 }
 
 void main() {
@@ -59,7 +64,8 @@ void main() {
     if (dot(n, to_eye) < 0.0) n = -n;     // face the camera
 
     // A per-pixel rotation of the sample set (the blur removes the noise).
-    float a = hash(gl_FragCoord.xy) * 6.2831853;
+    float jitter = tile_rotation(gl_FragCoord.xy);
+    float a = jitter * 6.2831853;
     vec3 rnd = vec3(cos(a), sin(a), 0.0);
     vec3 tg = normalize(rnd - n * dot(rnd, n));
     if (any(isnan(tg))) tg = normalize(cross(n, vec3(0.0, 1.0, 0.0)));
@@ -68,7 +74,7 @@ void main() {
     float occ = 0.0;
     float golden = 2.39996323;
     for (int i = 0; i < u_samples; ++i) {
-        float fi = float(i) + 0.5;
+        float fi = float(i) + jitter;
         float k = fi / float(u_samples);
         // Spiral over the hemisphere, denser near the point.
         float cz = sqrt(1.0 - k);
@@ -83,12 +89,13 @@ void main() {
         if (sd >= 1.0) continue;
         vec3 q = view_pos(suv, sd);
         float sz = q.z;
-        // Occluded when the surface seen there is in front of the sample;
-        // a surface farther in front than the radius (a separate object
-        // between us and this point) is no corner at all: its weight is gone
-        // by twice the radius, or the far face behind a roof's silhouette
-        // gets a dark halo along it.
-        float range = 1.0 - smoothstep(u_radius, 2.0 * u_radius, abs(p.z - sz));
+        // Occluded when the surface seen there is in front of the sample —
+        // and only if that surface lies inside the sampled sphere itself.
+        // A slat seen in front of the ground half a metre behind it is in
+        // front of every sample but nowhere near the ground point: counting
+        // it by depth alone printed a dark, toothed halo round every
+        // silhouette with something close behind it.
+        float range = 1.0 - smoothstep(u_radius, 1.5 * u_radius, length(q - p));
         // ...and only a surface standing out of this one's plane occludes:
         // the plane itself, however noisy its depth, never does.
         float above = dot(n, q - p);

@@ -116,3 +116,57 @@ def test_wireframe_has_none(box_on_floor, monkeypatch):
     vp.plano_style = "lineas"                   # the wireframe face mode
     assert np.array_equal(_render(vp, monkeypatch, "0"),
                           _render(vp, monkeypatch, "1"))
+
+
+# ---- The style's switch (Styles panel) -------------------------------------
+
+def test_the_style_carries_it_and_every_preset_has_it_off():
+    from core.style import BUILTIN_STYLES, Style
+    assert all(not p.ambient_occlusion for p in BUILTIN_STYLES)
+    s = Style(ambient_occlusion=True, ao_distance=1.25, ao_intensity=1.5)
+    back = Style.from_dict(s.to_dict())
+    assert (back.ambient_occlusion, back.ao_distance, back.ao_intensity) \
+        == (True, 1.25, 1.5)
+
+
+def test_a_file_from_before_reads_it_off_and_bad_values_are_kept_in_range():
+    from core.style import AO_DISTANCE_RANGE, Style
+    old = Style().to_dict()
+    for k in ("ambient_occlusion", "ao_distance", "ao_intensity"):
+        old.pop(k)
+    assert not Style.from_dict(old).ambient_occlusion
+    odd = Style.from_dict({"ambient_occlusion": True, "ao_distance": 1e9,
+                           "ao_intensity": "mucho"})
+    assert odd.ao_distance == AO_DISTANCE_RANGE[1] and odd.ao_intensity == 1.0
+
+
+def test_the_frame_follows_the_style_unless_the_environment_forces_it(
+        monkeypatch):
+    from core.style import Style
+    monkeypatch.delenv("INGETRAZO_AO", raising=False)
+    assert ao.settings_for(Style()) is None
+    got = ao.settings_for(Style(ambient_occlusion=True, ao_distance=2.0,
+                                ao_intensity=0.5))
+    assert got["radius"] == 2.0 and got["intensity"] == 0.5
+    monkeypatch.setenv("INGETRAZO_AO", "0")
+    assert ao.settings_for(Style(ambient_occlusion=True)) is None
+
+
+def test_the_panel_switch_edits_the_active_style():
+    from views.main_window import MainWindow
+    win = MainWindow()
+    try:
+        panel = win.styles_panel
+        style = win.viewport.scene.display_style
+        panel.refresh()
+        assert not panel._ao.isChecked() and not panel._ao_dist.isEnabled()
+        panel._ao.setChecked(True)
+        assert style.ambient_occlusion and panel._ao_dist.isEnabled()
+        panel._ao_int.setValue(15)
+        panel._ao_dist.setValue(2.0)
+        assert style.ao_intensity == 1.5 and style.ao_distance == 2.0
+        panel._ao.setChecked(False)
+        assert not style.ambient_occlusion and not panel._ao_int.isEnabled()
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()

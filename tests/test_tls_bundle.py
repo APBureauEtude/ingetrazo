@@ -6,6 +6,7 @@ CERTIFICATE_VERIFY_FAILED. core.tls points OpenSSL at a bundle that exists,
 and leaves a working setup — and verification — alone."""
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from core import tls
@@ -174,3 +175,14 @@ def test_every_python_https_call_uses_the_context():
         text = (root / name).read_text(encoding="utf-8")
         calls = re.findall(r"request\.urlopen\((?:[^()]|\([^()]*\))*\)", text)
         assert calls and all("context=" in c for c in calls), name
+
+
+def test_the_windows_build_ships_truststore():
+    """The Windows build installs its packages by hand, not from
+    requirements.txt: without truststore there, the frozen app falls back
+    to Python's own store and #783 comes back without a word."""
+    root = Path(__file__).resolve().parent.parent
+    workflow = (root / ".github/workflows/build-windows.yml").read_text()
+    spec = (root / "ingetrazo.spec").read_text()
+    assert "truststore" in workflow
+    assert "'truststore'" in spec

@@ -3044,5 +3044,14 @@
  "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "Tylko dla krzywej płaskiej: ta ogranicza też ściany poza swoją płaszczyzną, jak bok wyciągniętego walca",
  "This curve cannot be rebuilt": "Tej krzywej nie można odbudować",
  "Diameter": "Średnica",
- "Side": "Bok"
+ "Side": "Bok",
+ "Material name": "Nazwa materiału",
+ "Rename the active material — on every face that wears it. The library keeps its own name.": "Zmień nazwę aktywnego materiału — na wszystkich ścianach, które go mają. Biblioteka zachowuje swoją nazwę.",
+ "Change the active colour — on every face that wears it": "Zmień aktywny kolor — na wszystkich ścianach, które go mają",
+ "(modified)": "(zmieniony)",
+ "There is already a material called '{name}'": "Istnieje już materiał o nazwie „{name}”",
+ "Material '{old}' is now '{name}' on every face that wears it": "Materiał „{old}” nazywa się teraz „{name}” na wszystkich ścianach, które go mają",
+ "Rename material": "Zmień nazwę materiału",
+ "New name:": "Nowa nazwa:",
+ "Active material named '{name}' — click faces to paint it": "Aktywny materiał o nazwie „{name}” — kliknij ściany, aby go nałożyć"
 }

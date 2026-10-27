@@ -3043,5 +3043,14 @@
  "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "Só para uma curva plana: esta também limita faces fora do seu plano, como a lateral de um cilindro extrudado",
  "This curve cannot be rebuilt": "Esta curva não pode ser refeita",
  "Diameter": "Diâmetro",
- "Side": "Lado"
+ "Side": "Lado",
+ "Material name": "Nome do material",
+ "Rename the active material — on every face that wears it. The library keeps its own name.": "Renomear o material ativo — em todas as faces que o usam. A biblioteca mantém o seu nome.",
+ "Change the active colour — on every face that wears it": "Mudar a cor ativa — em todas as faces que a usam",
+ "(modified)": "(modificado)",
+ "There is already a material called '{name}'": "Já existe um material chamado “{name}”",
+ "Material '{old}' is now '{name}' on every face that wears it": "O material “{old}” agora é “{name}” em todas as faces que o usam",
+ "Rename material": "Renomear material",
+ "New name:": "Novo nome:",
+ "Active material named '{name}' — click faces to paint it": "Material ativo chamado “{name}” — clique em faces para pintá-lo"
 }

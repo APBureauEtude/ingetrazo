@@ -3039,5 +3039,14 @@
  "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "Hanya untuk kurva datar: kurva ini juga membatasi muka di luar bidangnya, seperti sisi silinder yang diekstrusi",
  "This curve cannot be rebuilt": "Kurva ini tidak dapat dibangun ulang",
  "Diameter": "Diameter",
- "Side": "Sisi"
+ "Side": "Sisi",
+ "Material name": "Nama material",
+ "Rename the active material — on every face that wears it. The library keeps its own name.": "Ganti nama material aktif — di semua muka yang memakainya. Pustaka tetap memakai namanya sendiri.",
+ "Change the active colour — on every face that wears it": "Ubah warna aktif — di semua muka yang memakainya",
+ "(modified)": "(diubah)",
+ "There is already a material called '{name}'": "Sudah ada material bernama '{name}'",
+ "Material '{old}' is now '{name}' on every face that wears it": "Material '{old}' sekarang '{name}' di semua muka yang memakainya",
+ "Rename material": "Ganti nama material",
+ "New name:": "Nama baru:",
+ "Active material named '{name}' — click faces to paint it": "Material aktif bernama '{name}' — klik muka untuk mengecatnya"
 }

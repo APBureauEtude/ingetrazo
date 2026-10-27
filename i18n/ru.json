@@ -3036,5 +3036,14 @@
  "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "Только для плоской кривой: эта также ограничивает грани вне своей плоскости, например боковину выдавленного цилиндра",
  "This curve cannot be rebuilt": "Эту кривую нельзя перестроить",
  "Diameter": "Диаметр",
- "Side": "Сторона"
+ "Side": "Сторона",
+ "Material name": "Название материала",
+ "Rename the active material — on every face that wears it. The library keeps its own name.": "Переименовать активный материал — на всех гранях, где он есть. Библиотека сохраняет своё название.",
+ "Change the active colour — on every face that wears it": "Изменить активный цвет — на всех гранях, где он есть",
+ "(modified)": "(изменён)",
+ "There is already a material called '{name}'": "Материал «{name}» уже существует",
+ "Material '{old}' is now '{name}' on every face that wears it": "Материал «{old}» теперь называется «{name}» на всех гранях, где он есть",
+ "Rename material": "Переименовать материал",
+ "New name:": "Новое название:",
+ "Active material named '{name}' — click faces to paint it": "Активный материал «{name}» — щёлкните по граням, чтобы покрасить"
 }

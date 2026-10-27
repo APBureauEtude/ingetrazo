@@ -3037,5 +3037,14 @@
   "Click an edge to round it; type the radius and Enter.": "Nhấp vào một cạnh để bo tròn; nhập bán kính và nhấn Enter.",
   "Vietnamese translation of the interface.": "Bản dịch giao diện tiếng Việt.",
   "Lao translation of the interface.": "Bản dịch giao diện tiếng Lào.",
-  "Thai translation of the interface.": "Bản dịch giao diện tiếng Thái."
+  "Thai translation of the interface.": "Bản dịch giao diện tiếng Thái.",
+  "Ambient occlusion (experimental)": "Che khuất môi trường (thử nghiệm)",
+  "Computes the heavy parts (opening big files, hidden lines of the sheets, intersections, snapping) with the native engine, much faster on big models, with the same results. On by default: turn it off only if something looks different, and report it with the label rust-engine. Takes effect at the next start.": "Tính các phần nặng (mở tệp lớn, đường khuất của các bản vẽ, giao cắt, bắt điểm) bằng engine gốc, nhanh hơn nhiều với mô hình lớn mà kết quả vẫn như nhau. Bật theo mặc định: chỉ tắt nếu thấy có gì khác, và báo lại với nhãn rust-engine. Có hiệu lực từ lần khởi động sau.",
+  "Distance:": "Khoảng cách:",
+  "How far a surface still darkens its neighbour": "Khoảng cách mà một bề mặt còn làm tối bề mặt bên cạnh",
+  "IngeTrazo did not open the last time with the Rust engine on, so it is back on the Python engine. You can turn it on again in Preferences ▸ General.": "Lần trước IngeTrazo không mở được khi bật engine Rust, nên đã quay lại engine Python. Bạn có thể bật lại trong Tùy chọn ▸ Chung.",
+  "Intensity:": "Cường độ:",
+  "Rust engine": "Engine Rust",
+  "Softly darkens where surfaces meet — corners, the foot of a wall, under a bench. Experimental: if it looks wrong on your graphics card, turn it off and tell us.": "Làm tối nhẹ chỗ các bề mặt gặp nhau — góc nhà, chân tường, dưới ghế. Thử nghiệm: nếu trông không đúng trên card đồ họa của bạn, hãy tắt đi và báo cho chúng tôi.",
+  "Your graphics driver cannot draw ambient occlusion ({reason}).": "Trình điều khiển đồ họa của bạn không vẽ được che khuất môi trường ({reason})."
 }

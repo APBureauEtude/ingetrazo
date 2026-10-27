@@ -3008,5 +3008,19 @@
  "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "ສ່ວນເສີມ «{name}» ເຮັດວຽກຜິດພາດໃນເມນູຄລິກຂວາ ແລະ ຈະຖືກຕັດອອກຈົນກວ່າຈະເປີດ IngeTrazo ໃໝ່. ກະລຸນາອັບເດດ ຫຼື ປິດມັນໄວ້ໃນຕົວຈັດການສ່ວນເສີມ.",
 "Vietnamese translation of the interface.": "ການແປສ່ວນຕິດຕໍ່ຜູ້ໃຊ້ເປັນພາສາຫວຽດນາມ.",
 "Lao translation of the interface.": "ການແປສ່ວນຕິດຕໍ່ຜູ້ໃຊ້ເປັນພາສາລາວ.",
-"Thai translation of the interface.": "ການແປສ່ວນຕິດຕໍ່ຜູ້ໃຊ້ເປັນພາສາໄທ."
+"Thai translation of the interface.": "ການແປສ່ວນຕິດຕໍ່ຜູ້ໃຊ້ເປັນພາສາໄທ.",
+"Ambient occlusion (experimental)": "ການບັງແສງລ້ອມຮອບ (ທົດລອງ)",
+"Change the camera's angle of view, like a lens: wider takes more in, narrower keeps the lines calm.": "ປ່ຽນມຸມມອງຂອງກ້ອງ ຄືກັບເລນ: ກວ້າງຂຶ້ນເຫັນຫຼາຍຂຶ້ນ, ແຄບລົງເສັ້ນຈະຊື່ສະຫງົບກວ່າ.",
+"Computes the heavy parts (opening big files, hidden lines of the sheets, intersections, snapping) with the native engine, much faster on big models, with the same results. On by default: turn it off only if something looks different, and report it with the label rust-engine. Takes effect at the next start.": "ຄິດໄລ່ສ່ວນທີ່ໜັກ (ເປີດໄຟລ໌ໃຫຍ່, ເສັ້ນທີ່ເຊື່ອງຢູ່ຂອງແຜ່ນແບບ, ຈຸດຕັດກັນ, ການດູດຈຸດ) ດ້ວຍເຄື່ອງຈັກແບບເນທີຟ, ໄວກວ່າຫຼາຍກັບແບບຈຳລອງໃຫຍ່ ແລະ ໄດ້ຜົນຄືເກົ່າ. ເປີດໄວ້ເປັນຄ່າເລີ່ມຕົ້ນ: ປິດສະເພາະເມື່ອເຫັນວ່າມີບາງຢ່າງຕ່າງໄປ, ແລະ ລາຍງານດ້ວຍປ້າຍ rust-engine. ມີຜົນໃນການເປີດຄັ້ງຕໍ່ໄປ.",
+"Distance:": "ໄລຍະຫ່າງ:",
+"Field of View…": "ມຸມມອງ…",
+"Field of view applies to perspective; switch to Perspective first.": "ມຸມມອງໃຊ້ກັບແບບ Perspective; ກະລຸນາປ່ຽນເປັນ Perspective ກ່ອນ.",
+"Field of view in degrees (10–120):": "ມຸມມອງເປັນອົງສາ (10–120):",
+"How far a surface still darkens its neighbour": "ໄລຍະທີ່ພື້ນຜິວໜຶ່ງຍັງເຮັດໃຫ້ພື້ນຜິວຂ້າງຄຽງມືດລົງ",
+"IngeTrazo did not open the last time with the Rust engine on, so it is back on the Python engine. You can turn it on again in Preferences ▸ General.": "ຄັ້ງກ່ອນ IngeTrazo ເປີດບໍ່ໄດ້ເມື່ອເປີດເຄື່ອງຈັກ Rust, ຈຶ່ງກັບມາໃຊ້ເຄື່ອງຈັກ Python. ທ່ານສາມາດເປີດຄືນໄດ້ໃນ ການຕັ້ງຄ່າ ▸ ທົ່ວໄປ.",
+"Intensity:": "ຄວາມເຂັ້ມ:",
+"Rust engine": "ເຄື່ອງຈັກ Rust",
+"Softly darkens where surfaces meet — corners, the foot of a wall, under a bench. Experimental: if it looks wrong on your graphics card, turn it off and tell us.": "ເຮັດໃຫ້ມືດລົງເລັກນ້ອຍບ່ອນທີ່ພື້ນຜິວມາພົບກັນ — ມູມຫ້ອງ, ຕີນກຳແພງ, ກ້ອງມ້ານັ່ງ. ທົດລອງ: ຖ້າເບິ່ງບໍ່ຖືກຕ້ອງໃນກາດຈໍຂອງທ່ານ, ໃຫ້ປິດ ແລະ ແຈ້ງພວກເຮົາ.",
+"Your graphics driver cannot draw ambient occlusion ({reason}).": "ໄດຣເວີກາຟິກຂອງທ່ານບໍ່ສາມາດແຕ້ມການບັງແສງລ້ອມຮອບໄດ້ ({reason}).",
+"{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: ທຸກໜ້າມີວັດສະດຸຂອງຕົນເອງ, ຈຶ່ງບໍ່ມີຫຍັງປ່ຽນ — ເປີດມັນ ແລ້ວທາສີໃສ່ໜ້າ"
 }

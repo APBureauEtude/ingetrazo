@@ -1296,16 +1296,39 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
             group.component = False
         return group
 
+    # Every name the document itself stores, children included: the groups
+    # it carries WITHOUT one are numbered continuing these, not the
+    # session's counter — the same file must load to the same names
+    # whatever was opened before it (issue #943).
+    stored_names: list = []
+
+    def _collect_name(raw, depth=0):
+        if not isinstance(raw, dict):
+            return
+        if raw.get("name"):
+            stored_names.append(raw["name"])
+        if depth < 32:              # the same limit as _group_from
+            for c in raw.get("children", []) or []:
+                _collect_name(c, depth + 1)
+
+    for raw in payload.get("groups", []) or []:
+        _collect_name(raw)
+    for raw in payload.get("kept_components", []) or []:
+        _collect_name(raw)
+
+    from core.group import document_name_scope
     raw_groups = payload.get("groups", []) or []
-    for i, raw in enumerate(raw_groups):
-        if i % 50 == 0:
-            tick(0.6 + 0.35 * i / max(1, len(raw_groups)), "Placing groups…")
-        scene.groups.append(_group_from(raw))
-    scene.kept_components = [
-        t for t in (_group_from(raw) for raw in
-                    payload.get("kept_components", []) or []
-                    if isinstance(raw, dict))
-        if t.is_component()]
+    with document_name_scope(stored_names):
+        for i, raw in enumerate(raw_groups):
+            if i % 50 == 0:
+                tick(0.6 + 0.35 * i / max(1, len(raw_groups)),
+                     "Placing groups…")
+            scene.groups.append(_group_from(raw))
+        scene.kept_components = [
+            t for t in (_group_from(raw) for raw in
+                        payload.get("kept_components", []) or []
+                        if isinstance(raw, dict))
+            if t.is_component()]
     tick(0.96, "Finishing…")
     if names:
         from core.group import reserve_group_names

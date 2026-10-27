@@ -3055,5 +3055,7 @@
  "Each line to bridge must be one chain of edges, without branches": "Каждая линия моста должна быть одной цепочкой ребер, без ответвлений",
  "A face with holes can only be bridged to another face with as many holes": "Грань с отверстиями можно соединить только с гранью с тем же числом отверстий",
  "Both lie on one plane: nothing to bridge": "Обе лежат в одной плоскости: соединять нечего",
- "The two to bridge must not touch": "Соединяемые части не должны касаться друг друга"
+ "The two to bridge must not touch": "Соединяемые части не должны касаться друг друга",
+ "Show unit": "Показывать единицу",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "Выкл.: только число (1.30 вместо 1.30 м), для листов, где единица указана один раз. Футы и дюймы вместе сохраняют свои знаки."
 }

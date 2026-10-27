@@ -3058,5 +3058,7 @@
  "New name:": "Nama baru:",
  "Active material named '{name}' — click faces to paint it": "Material aktif bernama '{name}' — klik muka untuk mengecatnya",
  "Add panels…": "Tambah panel…",
- "Choose which panels the sidebar shows.": "Pilih panel yang ditampilkan bilah samping."
+ "Choose which panels the sidebar shows.": "Pilih panel yang ditampilkan bilah samping.",
+ "Show unit": "Tampilkan satuan",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "Mati: hanya angka (1.30, bukan 1.30 m), untuk lembar yang menyebut satuan sekali saja. Kaki dan inci bersama tetap memakai tandanya."
 }

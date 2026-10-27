@@ -3055,5 +3055,7 @@
  "New name:": "Nouveau nom :",
  "Active material named '{name}' — click faces to paint it": "Matériau actif nommé « {name} » — cliquez sur des faces pour le peindre",
  "Add panels…": "Ajouter des panneaux…",
- "Choose which panels the sidebar shows.": "Choisir les panneaux affichés dans la barre latérale."
+ "Choose which panels the sidebar shows.": "Choisir les panneaux affichés dans la barre latérale.",
+ "Show unit": "Afficher l'unité",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "Désactivé : seulement le nombre (1.30 au lieu de 1.30 m), pour les planches qui indiquent l'unité une seule fois. Pieds et pouces combinés gardent leurs symboles."
 }

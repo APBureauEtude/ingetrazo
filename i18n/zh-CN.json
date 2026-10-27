@@ -3056,5 +3056,7 @@
  "New name:": "新名称：",
  "Active material named '{name}' — click faces to paint it": "当前材质名为“{name}”——点击面进行涂色",
  "Add panels…": "添加面板…",
- "Choose which panels the sidebar shows.": "选择侧边栏显示哪些面板。"
+ "Choose which panels the sidebar shows.": "选择侧边栏显示哪些面板。",
+ "Show unit": "显示单位",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "关闭：只显示数字（1.30 而不是 1.30 m），用于只注明一次单位的图纸。英尺和英寸组合仍保留其符号。"
 }

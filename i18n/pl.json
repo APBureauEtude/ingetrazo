@@ -3063,5 +3063,7 @@
  "New name:": "Nowa nazwa:",
  "Active material named '{name}' — click faces to paint it": "Aktywny materiał o nazwie „{name}” — kliknij ściany, aby go nałożyć",
  "Add panels…": "Dodaj panele…",
- "Choose which panels the sidebar shows.": "Wybierz, które panele pokazuje pasek boczny."
+ "Choose which panels the sidebar shows.": "Wybierz, które panele pokazuje pasek boczny.",
+ "Show unit": "Pokaż jednostkę",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "Wyłączone: tylko liczba (1.30 zamiast 1.30 m), dla arkuszy podających jednostkę raz. Stopy i cale razem zachowują swoje znaki."
 }

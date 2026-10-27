@@ -1250,11 +1250,8 @@ class LayersPanel(QWidget):
     def update_counts(self) -> None:
         """How many entities carry each layer — faces, edges, objects and
         annotations, inside groups too."""
-        from core.purge import layer_carriers
-        counts: dict[str, int] = {}
-        for e in layer_carriers(self._scene()):
-            name = L.layer_of(e)
-            counts[name] = counts.get(name, 0) + 1
+        from core.purge import layer_counts
+        counts = layer_counts(self._scene())
         self._counts = counts
         self._updating = True
         for it in self._all_items():
@@ -1950,7 +1947,7 @@ class LayersPanel(QWidget):
         first, saying how much goes to the default layer. A folder goes
         on its own; its layers stay."""
         from core.history import DeleteLayerCommand
-        from core.purge import layer_carriers
+        from core.purge import layer_counts
         scene = self._scene()
         item = self.tree.currentItem()
         if item is None:
@@ -1962,7 +1959,7 @@ class LayersPanel(QWidget):
             return
         if name == L.DEFAULT_LAYER or scene.layer(name) is None:
             return                                  # the default is permanent
-        n = sum(1 for e in layer_carriers(scene) if L.layer_of(e) == name)
+        n = layer_counts(scene).get(name, 0)
         if n and QMessageBox.question(
                 self, tr("Layers"),
                 tr("Delete the layer '{layer}'? Its {n} entities go to "

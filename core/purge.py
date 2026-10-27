@@ -89,6 +89,50 @@ def layer_carriers(scene):
         yield photo
 
 
+def layer_counts(scene) -> dict[str, int]:
+    """How many of :func:`layer_carriers` carry each layer name — without
+    building a lazy mesh. Reading ``mesh.faces`` of a group the loader left
+    unbuilt builds it: the Layers panel counting on every open built all
+    888 of plaza's group meshes (95 MB more, release_check 0.5.11). A lazy
+    mesh is counted from what it was read from: each edge's layer from its
+    plan, each face's from the attribute table of its source."""
+    from core import lazy_mesh
+
+    counts: dict[str, int] = {}
+
+    def add(name, n=1):
+        name = name or DEFAULT_LAYER
+        counts[name] = counts.get(name, 0) + n
+
+    for mesh in iter_meshes(scene):
+        plan = lazy_mesh.plan_of(mesh)
+        if plan is None:
+            for f in mesh.faces:
+                add(layer_of(f))
+            for e in mesh.edges:
+                add(layer_of(e))
+            continue
+        for name in plan.layer:
+            add(name)
+        src = mesh.__dict__["_deferred_source"]
+        table = src["meta"].get("face_attrs") or []
+        names = [(raw or {}).get("layer") for raw in table]
+        face_attr = src.get("face_attr")
+        if face_attr is None:
+            add(None, plan.nfaces)
+            continue
+        for k in face_attr.tolist():
+            add(names[k] if k >= 0 else None)
+    for ent in iter_groups(_document_groups(scene)):
+        add(layer_of(ent))
+    for ent in _annotations(scene):
+        add(layer_of(ent))
+    photo = getattr(scene, "photo_mesh", None)
+    if photo is not None:
+        add(layer_of(photo))
+    return counts
+
+
 def used_layers(scene) -> set[str]:
     """Every layer name something in the document carries."""
     used = {DEFAULT_LAYER}

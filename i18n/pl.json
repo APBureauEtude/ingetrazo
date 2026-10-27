@@ -2997,6 +2997,7 @@
  "French translation of the interface.": "Francuskie tłumaczenie interfejsu.",
  "Polish translation of the interface.": "Polskie tłumaczenie interfejsu.",
  "Russian translation of the interface.": "Rosyjskie tłumaczenie interfejsu.",
+ "Korean translation of the interface.": "Koreańskie tłumaczenie interfejsu.",
  "Sheet dimensions and level marks in the document's units, and sheets made from the AI bridge undone in one step.": "Wymiary i rzędne arkusza w jednostkach dokumentu oraz arkusze utworzone przez most AI cofane jednym krokiem.",
  "Fixes for the location map, Move's rotation grips and typed values.": "Poprawki mapy lokalizacji, uchwytów obrotu w Przesuwaniu i wpisywanych wartości.",
  "A fix for the AI Assistant crash in the Flatpak.": "Poprawka awarii Asystenta AI w pakiecie Flatpak.",
@@ -3035,5 +3036,6 @@
  "Your graphics driver cannot draw ambient occlusion ({reason}).": "Twój sterownik grafiki nie potrafi narysować okluzji otoczenia ({reason}).",
  "Vietnamese translation of the interface.": "Wietnamskie tłumaczenie interfejsu.",
  "Lao translation of the interface.": "Laotańskie tłumaczenie interfejsu.",
- "Thai translation of the interface.": "Tajskie tłumaczenie interfejsu."
+ "Thai translation of the interface.": "Tajskie tłumaczenie interfejsu.",
+ "Japanese translation of the interface.": "Japońskie tłumaczenie interfejsu."
 }

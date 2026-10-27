@@ -3024,6 +3024,8 @@
  "Your graphics driver cannot draw ambient occlusion ({reason}).": "ไดรเวอร์กราฟิกของคุณวาดการบดบังแสงโดยรอบไม่ได้ ({reason})",
  "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: ทุกหน้ามีวัสดุของตัวเอง จึงไม่มีอะไรเปลี่ยน — เปิดเข้าไปแล้วทาสีที่หน้า",
  "Pool Water": "น้ำสระว่ายน้ำ",
+ "Japanese translation of the interface.": "คำแปลส่วนต่อประสานภาษาญี่ปุ่น",
+ "Korean translation of the interface.": "คำแปลส่วนต่อประสานภาษาเกาหลี",
  "OpenGL 3.3 not available": "ไม่มี OpenGL 3.3",
  "IngeTrazo needs OpenGL 3.3, but this computer only offers OpenGL {version} ({renderer}). The viewport stays empty.\n\nUpdate the graphics driver from the NVIDIA, AMD or Intel website. On a laptop with two graphics chips, assign IngeTrazo to the high-performance GPU (Windows: Settings ▸ System ▸ Display ▸ Graphics) and start it again.": "IngeTrazo ต้องใช้ OpenGL 3.3 แต่คอมพิวเตอร์เครื่องนี้มีเพียง OpenGL {version} ({renderer}) มุมมองจะว่างเปล่า\n\nอัปเดตไดรเวอร์กราฟิกจากเว็บไซต์ของ NVIDIA, AMD หรือ Intel บนแล็ปท็อปที่มีชิปกราฟิกสองตัว ให้กำหนดให้ IngeTrazo ใช้ GPU ประสิทธิภาพสูง (Windows: การตั้งค่า ▸ ระบบ ▸ จอแสดงผล ▸ กราฟิก) แล้วเปิดโปรแกรมอีกครั้ง",
  "Intersect with Edge": "ตัดกับขอบ",

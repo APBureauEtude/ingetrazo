@@ -3049,5 +3049,7 @@
   "Your graphics driver cannot draw ambient occlusion ({reason}).": "Trình điều khiển đồ họa của bạn không vẽ được che khuất môi trường ({reason}).",
   "Pool Water": "Nước hồ bơi",
   "OpenGL 3.3 not available": "Không có OpenGL 3.3",
-  "IngeTrazo needs OpenGL 3.3, but this computer only offers OpenGL {version} ({renderer}). The viewport stays empty.\n\nUpdate the graphics driver from the NVIDIA, AMD or Intel website. On a laptop with two graphics chips, assign IngeTrazo to the high-performance GPU (Windows: Settings ▸ System ▸ Display ▸ Graphics) and start it again.": "IngeTrazo cần OpenGL 3.3, nhưng máy tính này chỉ có OpenGL {version} ({renderer}). Khung nhìn sẽ trống.\n\nHãy cập nhật trình điều khiển đồ họa từ trang web của NVIDIA, AMD hoặc Intel. Trên máy tính xách tay có hai chip đồ họa, hãy gán IngeTrazo cho GPU hiệu năng cao (Windows: Cài đặt ▸ Hệ thống ▸ Màn hình ▸ Đồ họa) rồi mở lại."
+  "IngeTrazo needs OpenGL 3.3, but this computer only offers OpenGL {version} ({renderer}). The viewport stays empty.\n\nUpdate the graphics driver from the NVIDIA, AMD or Intel website. On a laptop with two graphics chips, assign IngeTrazo to the high-performance GPU (Windows: Settings ▸ System ▸ Display ▸ Graphics) and start it again.": "IngeTrazo cần OpenGL 3.3, nhưng máy tính này chỉ có OpenGL {version} ({renderer}). Khung nhìn sẽ trống.\n\nHãy cập nhật trình điều khiển đồ họa từ trang web của NVIDIA, AMD hoặc Intel. Trên máy tính xách tay có hai chip đồ họa, hãy gán IngeTrazo cho GPU hiệu năng cao (Windows: Cài đặt ▸ Hệ thống ▸ Màn hình ▸ Đồ họa) rồi mở lại.",
+  "Intersect with Edge": "Giao với cạnh",
+  "Intersect with Face": "Giao với mặt"
 }

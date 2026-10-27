@@ -3022,5 +3022,6 @@
  "Softly darkens where surfaces meet — corners, the foot of a wall, under a bench. Experimental: if it looks wrong on your graphics card, turn it off and tell us.": "ทำให้มืดลงเล็กน้อยตรงที่พื้นผิวมาบรรจบกัน — มุมห้อง ตีนผนัง ใต้ม้านั่ง ทดลอง: ถ้าดูไม่ถูกต้องบนการ์ดจอของคุณ ให้ปิดและแจ้งเรา",
  "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "ส่วนขยาย «{name}» ทำงานผิดพลาดในเมนูคลิกขวา และจะถูกนำออกจากเมนูจนกว่า IngeTrazo จะเริ่มใหม่ อัปเดตหรือปิดได้ในตัวจัดการส่วนขยาย",
  "Your graphics driver cannot draw ambient occlusion ({reason}).": "ไดรเวอร์กราฟิกของคุณวาดการบดบังแสงโดยรอบไม่ได้ ({reason})",
- "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: ทุกหน้ามีวัสดุของตัวเอง จึงไม่มีอะไรเปลี่ยน — เปิดเข้าไปแล้วทาสีที่หน้า"
+ "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: ทุกหน้ามีวัสดุของตัวเอง จึงไม่มีอะไรเปลี่ยน — เปิดเข้าไปแล้วทาสีที่หน้า",
+ "Pool Water": "น้ำสระว่ายน้ำ"
 }

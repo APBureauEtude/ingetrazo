@@ -140,6 +140,12 @@ CONTRIBUTORS = [
     ("Prida Takon",
      "Thai translation of the interface.",
      "https://github.com/PRIDA-TAKON"),
+    ("ChangWoo Lee",
+     "Korean translation of the interface.",
+     "https://github.com/ultracat"),
+    ("nonasige-ui",
+     "Japanese translation of the interface.",
+     "https://github.com/nonasige-ui"),
     ("Francis Rebouças",
      "Sheet dimensions and level marks in the document's units, "
      "dimensions that follow their object, and Push/Pull fixes.",

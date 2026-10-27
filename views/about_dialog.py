@@ -131,6 +131,9 @@ CONTRIBUTORS = [
     ("RomanErshow",
      "Russian translation of the interface.",
      "https://github.com/RomanErshow"),
+    ("vandang890615",
+     "Vietnamese translation of the interface.",
+     "https://github.com/vandang890615"),
     ("Francis Rebouças",
      "Sheet dimensions and level marks in the document's units, "
      "dimensions that follow their object, and Push/Pull fixes.",

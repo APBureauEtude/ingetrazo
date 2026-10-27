@@ -45,6 +45,16 @@ ROLE_LINETYPE = Qt.UserRole + 3
 ROLE_ORDER = Qt.UserRole + 4
 
 
+
+def _submenu(menu, title):
+    """A submenu parented to ``menu``. ``menu.addMenu(title)`` makes one
+    Python holds no reference to, and inside a helper it can be deleted
+    with the helper's locals before it ever opens."""
+    from PySide6.QtWidgets import QMenu
+    sub = QMenu(title, menu)
+    menu.addMenu(sub)
+    return sub
+
 def natural_key(text: str) -> tuple:
     """Sort key that reads the numbers in a name as numbers: «Capa 2»
     before «Capa 10», «Planta 9» before «Planta 12»."""
@@ -2188,7 +2198,7 @@ class LayersPanel(QWidget):
             self._add_look_menus(menu, names, ly)
             movable = [n for n in names if n != L.DEFAULT_LAYER]
             if movable:
-                sub = menu.addMenu(tr("Move to folder"))
+                sub = _submenu(menu, tr("Move to folder"))
                 for folder in L.folders_of(scene):
                     sub.addAction(folder, lambda f=folder:
                                   self.move_to_folder(movable, f))
@@ -2200,7 +2210,7 @@ class LayersPanel(QWidget):
                 out.setEnabled(any(scene.layer(n) and scene.layer(n).folder
                                    for n in movable))
             if name != L.DEFAULT_LAYER:
-                merge = menu.addMenu(tr("Merge into"))
+                merge = _submenu(menu, tr("Merge into"))
                 for other in scene.layers:
                     if other.name != name:
                         merge.addAction(other.name, lambda o=other.name:
@@ -2211,7 +2221,7 @@ class LayersPanel(QWidget):
             menu.addAction(tr("New folder in this folder"),
                            lambda: self.add_folder(name))
             inside = set(L.subfolders(scene, name, deep=True)) | {name}
-            sub = menu.addMenu(tr("Move to folder"))
+            sub = _submenu(menu, tr("Move to folder"))
             for folder in L.folders_of(scene):
                 if folder not in inside:
                     sub.addAction(folder, lambda f=folder:
@@ -2245,9 +2255,9 @@ class LayersPanel(QWidget):
     def _add_look_menus(self, menu, names, ly) -> None:
         """Line type, line weight and opacity of the layers ``names``, the
         current one ticked; and their visibility in every saved scene."""
-        self._fill_linetypes(menu.addMenu(tr("Line type")), names, ly)
-        self._fill_weights(menu.addMenu(tr("Line weight")), names, ly)
-        self._fill_opacities(menu.addMenu(tr("Transparency")), names, ly)
+        self._fill_linetypes(_submenu(menu, tr("Line type")), names, ly)
+        self._fill_weights(_submenu(menu, tr("Line weight")), names, ly)
+        self._fill_opacities(_submenu(menu, tr("Transparency")), names, ly)
         if getattr(self._scene(), "saved_views", None):
             menu.addAction(tr("Hide in every scene"),
                            lambda: self.hide_in_scenes(names, True))

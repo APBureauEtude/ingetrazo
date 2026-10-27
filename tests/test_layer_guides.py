@@ -364,7 +364,7 @@ def test_the_automatic_layers_take_the_interface_language():
         history.execute(AddTextLabelCommand(TextLabel(V(0, 0, 0),
                                                       V(0, 0, 1), "Sala")))
         assert layer_of(scene.guides[-1]) == "Guías"
-        assert layer_of(scene.dimensions[-1]) == "Cotas"
+        assert layer_of(scene.dimensions[-1]) == "Dimensiones"
         assert layer_of(scene.text_labels[-1]) == "Textos"
     finally:
         set_language(before)

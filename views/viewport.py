@@ -5084,7 +5084,11 @@ class Viewport(QOpenGLWidget):
 
     def _draw_image_outlines(self, painter: QPainter) -> None:
         """Border of each reference image: faint normally, selection orange
-        when picked, so an image lying flat on the ground is still findable."""
+        when picked, so an image lying flat on the ground is still findable.
+        A LOCKED image shows it only while selected: it is a backdrop that
+        refuses clicks, and a scan's rectangle runs past the photo over its
+        transparent corners, so the faint dashes cut across the sky (Marco,
+        2026-10-27, the orthomosaic of playa Yanque)."""
         images = getattr(self.scene, "image_planes", None)
         if not images:
             return
@@ -5094,7 +5098,10 @@ class Viewport(QOpenGLWidget):
         for im in images:
             if not self.scene.entity_visible(im):
                 continue
-            painter.setPen(sel_pen if im in selection else pen)
+            picked = im in selection
+            if getattr(im, "locked", False) and not picked:
+                continue
+            painter.setPen(sel_pen if picked else pen)
             for a, b in im.border_edges():
                 seg = self._clip_segment_front(a, b)
                 if seg is None:

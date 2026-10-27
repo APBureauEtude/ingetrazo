@@ -3048,5 +3048,7 @@
  "Material '{old}' is now '{name}' on every face that wears it": "Material '{old}' sekarang '{name}' di semua muka yang memakainya",
  "Rename material": "Ganti nama material",
  "New name:": "Nama baru:",
- "Active material named '{name}' — click faces to paint it": "Material aktif bernama '{name}' — klik muka untuk mengecatnya"
+ "Active material named '{name}' — click faces to paint it": "Material aktif bernama '{name}' — klik muka untuk mengecatnya",
+ "Add panels…": "Tambah panel…",
+ "Choose which panels the sidebar shows.": "Pilih panel yang ditampilkan bilah samping."
 }

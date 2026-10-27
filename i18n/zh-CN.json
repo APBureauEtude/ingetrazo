@@ -3046,5 +3046,7 @@
  "Material '{old}' is now '{name}' on every face that wears it": "材质“{old}”在所有使用它的面上已改名为“{name}”",
  "Rename material": "重命名材质",
  "New name:": "新名称：",
- "Active material named '{name}' — click faces to paint it": "当前材质名为“{name}”——点击面进行涂色"
+ "Active material named '{name}' — click faces to paint it": "当前材质名为“{name}”——点击面进行涂色",
+ "Add panels…": "添加面板…",
+ "Choose which panels the sidebar shows.": "选择侧边栏显示哪些面板。"
 }

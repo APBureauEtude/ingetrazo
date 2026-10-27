@@ -3045,5 +3045,7 @@
  "Material '{old}' is now '{name}' on every face that wears it": "El material «{old}» ahora es «{name}» en todas las caras que lo llevan",
  "Rename material": "Renombrar material",
  "New name:": "Nombre nuevo:",
- "Active material named '{name}' — click faces to paint it": "Material activo llamado «{name}» — haz clic en caras para pintarlo"
+ "Active material named '{name}' — click faces to paint it": "Material activo llamado «{name}» — haz clic en caras para pintarlo",
+ "Add panels…": "Añadir paneles…",
+ "Choose which panels the sidebar shows.": "Elegir qué paneles muestra la barra lateral."
 }

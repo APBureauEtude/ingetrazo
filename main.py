@@ -188,6 +188,20 @@ def _open_document_in(window, doc: "Path") -> None:
         window.load_extensions()
     ext = doc.suffix.lower()
     if ext == ".igz" or ext in getattr(window, "file_openers", {}):
+        # A document REPLACES the drawing this window holds. File ▸ Open
+        # and Open Recent ask about unsaved changes before they call
+        # open_path; a path arriving from outside — a double-click handed
+        # over by the single instance, a macOS FileOpen event — had nobody
+        # asking, so the running drawing went away silently (issue #956).
+        # Ask here, at the seam every outside route shares. A cold launch
+        # holds nothing to lose, so the question is a no-op there, and an
+        # import (the .skp branch below) only ADDS to the drawing and is
+        # not asked, like File ▸ Import.
+        from core.i18n import tr
+        confirm = getattr(window, "_confirm_discard", None)
+        if confirm is not None and not confirm(
+                tr("Discard current drawing and open another?")):
+            return
         window.open_path(doc)       # an extension's own type goes to its opener
     elif ext == ".skp":
         from PySide6.QtCore import QTimer

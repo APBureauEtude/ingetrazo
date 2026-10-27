@@ -3029,5 +3029,15 @@
  "Vietnamese translation of the interface.": "Vietnamesische Übersetzung der Oberfläche.",
  "Lao translation of the interface.": "Laotische Übersetzung der Oberfläche.",
  "Thai translation of the interface.": "Thailändische Übersetzung der Oberfläche.",
- "Japanese translation of the interface.": "Japanische Übersetzung der Oberfläche."
+ "Japanese translation of the interface.": "Japanische Übersetzung der Oberfläche.",
+ "Rust engine (experimental)": "Rust-Rechenkern (experimentell)",
+ "Computes the heavy parts (hidden lines of the sheets and more) with the new native engine, much faster on big models. It is a test: keep a copy of your files and report anything odd with the label rust-engine. Takes effect at the next start.": "Berechnet die aufwendigen Teile (verdeckte Linien der Blätter und mehr) mit dem neuen nativen Rechenkern, bei großen Modellen viel schneller. Es ist ein Test: Bewahre eine Kopie deiner Dateien auf und melde Auffälliges mit dem Label rust-engine. Wirkt beim nächsten Start.",
+ "IngeTrazo did not open the last time with the experimental Rust engine on, so it is back on the normal engine. You can turn it on again in Preferences ▸ General.": "IngeTrazo hat sich beim letzten Mal mit der experimentellen Rust-Engine nicht geöffnet und ist daher zur normalen Engine zurückgekehrt. Sie können sie unter Einstellungen ▸ Allgemein wieder einschalten.",
+ "Sides:": "Seiten:",
+ "Segments:": "Segmente:",
+ "How many straight pieces the curve is made of — it is rebuilt in place": "Aus wie vielen geraden Stücken die Kurve besteht — sie wird an Ort und Stelle neu aufgebaut",
+ "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "Nur für eine ebene Kurve: Diese begrenzt auch Flächen außerhalb ihrer Ebene, etwa die Seite eines extrudierten Zylinders",
+ "This curve cannot be rebuilt": "Diese Kurve kann nicht neu aufgebaut werden",
+ "Diameter": "Durchmesser",
+ "Side": "Seite"
 }

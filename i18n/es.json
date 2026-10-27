@@ -3029,5 +3029,15 @@
  "Vietnamese translation of the interface.": "Traducción de la interfaz al vietnamita.",
  "Lao translation of the interface.": "Traducción de la interfaz al lao.",
  "Thai translation of the interface.": "Traducción de la interfaz al tailandés.",
- "Japanese translation of the interface.": "Traducción de la interfaz al japonés."
+ "Japanese translation of the interface.": "Traducción de la interfaz al japonés.",
+ "Rust engine (experimental)": "Motor Rust (experimental)",
+ "Computes the heavy parts (hidden lines of the sheets and more) with the new native engine, much faster on big models. It is a test: keep a copy of your files and report anything odd with the label rust-engine. Takes effect at the next start.": "Calcula las partes pesadas (líneas ocultas de las láminas y más) con el motor nativo nuevo, mucho más rápido en modelos grandes. Es una prueba: guarda una copia de tus archivos y reporta cualquier cosa rara con la etiqueta rust-engine. Se aplica al volver a abrir el programa.",
+ "IngeTrazo did not open the last time with the experimental Rust engine on, so it is back on the normal engine. You can turn it on again in Preferences ▸ General.": "IngeTrazo no llegó a abrirse la última vez con el motor Rust experimental activado, así que ha vuelto al motor normal. Puedes activarlo de nuevo en Preferencias ▸ General.",
+ "Sides:": "Lados:",
+ "Segments:": "Segmentos:",
+ "How many straight pieces the curve is made of — it is rebuilt in place": "Cuántos tramos rectos forman la curva — se rehace en su sitio",
+ "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "Solo para una curva plana: esta también limita caras fuera de su plano, como el lateral de un cilindro extruido",
+ "This curve cannot be rebuilt": "Esta curva no se puede rehacer",
+ "Diameter": "Diámetro",
+ "Side": "Lado"
 }

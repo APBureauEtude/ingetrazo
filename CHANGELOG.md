@@ -4,6 +4,173 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
+## [0.5.11] — 2026-10-30
+
+**Capas 2.0, la oclusión ambiental deja de ser experimental, sombras
+nítidas al exportar y en la vista quieta, cinco idiomas nuevos, el gestor
+de extensiones que vuelve a conectar en Windows y más de treinta aportes
+de la comunidad.**
+
+**Si viene de la 0.5.10, esta versión trae también lo de la 0.5.10.1:** el
+arreglo de la textura que se perdía al guardar dos veces (#877), las
+sombras del sol sin escalones y los diálogos de archivos que ya no se
+traban con una carpeta de red en Windows (#948). El detalle está en la
+sección 0.5.10.1, más abajo.
+
+### Añadido
+
+- **La oclusión ambiental deja de ser experimental** (#954): la casilla de
+  Estilos se llama ahora «Oclusión ambiental» y sigue apagada en todos los
+  estilos. Se afinaron los tres defectos de la ronda Windows: el halo
+  oscuro y dentado junto al borde de pilares y tablas (el cielo junto a un
+  objeto ya no se oscurece nunca), la figura recortada en bloques detrás de
+  un poste y el moteado en «nubes» de las caras grandes y lisas. Además, un
+  error gráfico pasajero al abrir un archivo grande ya no la apaga para
+  toda la sesión. Apagada, la imagen es idéntica a la de antes; encendida
+  cuesta lo mismo que en la 0.5.10.1.
+- **Sombras nítidas en las imágenes exportadas y en las láminas**: la vista
+  reparte el mapa de sombras sobre todo el modelo, así que en una plaza de
+  100 m cada punto cubre 5 cm y la sombra sale suave. Al exportar imagen
+  (PNG/JPG) o al dibujar una lámina, el mapa se calcula solo para esa imagen
+  cuatro veces más fino (1,2 cm en la plaza): la sombra de las tablas de una
+  pérgola sale rayada como es.
+- **Sombras nítidas también en pantalla con la vista quieta** (#958): en un
+  modelo grande la sombra se veía pixelada de cerca. Cuando la cámara se
+  queda quieta un quinto de segundo, el mapa de sombras se rehace solo para
+  lo que se ve (en la plaza, unos 33 m en lugar de todo el modelo): las
+  tablas de una banca proyectan su sombra una por una. Al orbitar, mover o
+  editar vuelve al mapa de siempre, así que la órbita no se hace más lenta;
+  al quedarse quieta hay un solo cuadro de unos 40 ms en el modelo SPR.
+- **Capas 2.0** (#652, @canalsecuario-blip en #728): las capas tienen
+  pestaña propia junto al Navegador, con ojo, candado, aislar, capa activa,
+  color, tipo y grosor de línea, transparencia e impresión por capa,
+  carpetas, filtros y menú contextual completo. Una **barra Capas** cambia
+  la capa activa o mueve la selección a otra. Lo nuevo (grupos, cotas,
+  textos, guías) va a la capa activa; sin capa activa, las guías, cotas y
+  textos van a sus capas automáticas «Guías», «Dimensiones» y «Textos».
+  «Color por capa» en el estilo. En las láminas, cada capa con su tipo y
+  grosor de línea, «No imprimir» y leyenda; el DXF lleva una capa DXF por
+  capa del modelo, con su color y tipo de línea. Los .igz guardados abren
+  igual en la 0.5.10.
+- **Cinco idiomas nuevos:** japonés (@nonasige-ui, #597), coreano
+  (@ultracat, #785), vietnamita (@vandang890615, #936), lao
+  (@bounkirdni-2025, #850) y tailandés (@PRIDA-TAKON, #824). IngeTrazo
+  arranca en ese idioma la primera vez si el sistema lo usa; se cambia en
+  Preferencias ▸ Idioma.
+- **Línea bloqueada que encuentra aristas y caras** (#245, @pacaeiro en #876): con
+  una dirección bloqueada (flechas, Mayús o la referencia), el cursor sobre
+  una arista ofrece el punto donde la línea bloqueada corta la recta de esa
+  arista («Intersección con arista», con su prolongación punteada), y sobre
+  una cara, donde atraviesa su plano («Intersección con cara»). Sirve en
+  Línea, Medir, Escalar y Rectángulo girado.
+- **Medir empieza desde la línea bajo el cursor** (#846, @hamzah1985): si al
+  tomar la herramienta el cursor está sobre una arista, una guía o un eje,
+  la guía paralela sale de inmediato; basta un clic o escribir la distancia.
+  El punto medio de una arista vuelve a servir como origen de una guía.
+- **Equidistancia muestra su referencia** (#843 y #844, @hamzah1985): la
+  arista desde la que se mide se resalta en azul, un cuadrito rojo marca el
+  punto de partida y una guía discontinua lo une a la vista previa. El
+  cursor es ahora una flecha con el icono al lado, y el clic cae en la
+  punta.
+- **Puente** (#614, @canalsecuario-blip en #683): con dos caras, una cara
+  y una línea, o dos líneas seleccionadas, construye las caras laterales
+  entre ellas. Está en la barra Modificar y en el menú Herramientas.
+- **Escala… para grupos y componentes** (@pacaeiro, #771): clic derecho
+  sobre un grupo o componente ▸ Escala… abre un cuadro con X, Y y Z, sobre
+  los ejes propios del objeto, con «Restablecer escala» y deshacer.
+- **Cambiar los lados de un círculo o polígono, o los segmentos de un arco,
+  ya dibujado** (@canalsecuario-blip, #813): en Propiedades ▸ Info de
+  entidad, el campo «Lados:» o «Segmentos:» rehace la figura en su sitio.
+- **Cotas sin unidad** (#374, #637, @canalsecuario-blip en #741): la casilla
+  «Mostrar unidad» del Estilo de cota deja solo el número (1.30 en lugar de
+  1.30 m), para láminas que indican la unidad una sola vez. Por defecto la
+  unidad sigue visible.
+- **Materiales: renombrar y cambiar el color del material activo**
+  (@canalsecuario-blip, #806); un color RAL editado pasa a ser un material
+  nuevo y el original queda intacto.
+- **Un «+» tras las pestañas de la barra lateral** para añadir o quitar
+  paneles (@canalsecuario-blip, #797), la misma lista de Ventana ▸ Paneles.
+- **Campos de lámina en inglés y alemán** (@pkoska, #899): `{project}`,
+  `{projekt}`… además de los nombres en español de siempre.
+- **Elegir el cursor de las herramientas** (@Booshdag-io, #858): en Preferencias,
+  «Cursor de herramienta» ofrece el icono de la herramienta (como siempre,
+  por defecto), la cruz clásica o la flecha.
+- **Agua de piscina**, un segundo material de agua en la biblioteca (#941,
+  @hamzah1985).
+
+### Arreglado
+
+- **Windows: el gestor de extensiones y la biblioteca vuelven a descargar**
+  (#783, @pkoska en #903): en una instalación nueva de Windows faltaba el
+  certificado raíz y la descarga fallaba con un error de certificado; ahora
+  se verifica con el propio Windows, que lo obtiene como lo hace el
+  navegador. La verificación sigue siempre encendida.
+- **Windows: actualizar ya no deja archivos de versiones viejas**: el
+  instalador copiaba la versión nueva encima de la anterior sin quitar lo
+  que ya no venía, y en una instalación actualizada desde la 0.5.8 quedaban
+  83 archivos viejos, entre ellos las bibliotecas OpenSSL que la 0.5.9 dejó
+  de usar (#564), causa probable también de #783. Ahora la carpeta del
+  programa se renueva entera; los ajustes, extensiones y autoguardados no se
+  tocan, porque viven en la carpeta del usuario.
+- **Un rectángulo largo y delgado ya no se convierte en una línea** (#389,
+  @pkoska en #909): la segunda esquina caía sobre la fila de la primera
+  (la perpendicular al muro, «desde el punto») y el rectángulo no se
+  dibujaba. Igual para el Rectángulo girado y las imágenes.
+- **Abrir un archivo desde fuera pregunta por los cambios sin guardar**
+  (#956, @tony1233200 en #977): el doble clic en un `.igz` con un dibujo
+  modificado abierto lo reemplazaba sin preguntar.
+- **Los grupos sin nombre se numeran igual cada vez que se abre el
+  archivo** (#943, @tony1233200 en #971): antes dependía de lo abierto
+  antes en la misma sesión.
+- **Las unidades elegidas ya no vuelven al valor anterior al reiniciar**
+  (@hamzah1985, #883).
+- **Un .skp importado queda encuadrado** (@hamzah1985, #867): la vista se
+  quedaba donde estaba y el modelo parecía no haber cargado.
+- **.skp: componentes escalados por la matriz ya no llegan 100 veces más
+  grandes** (#865, @tony1233200 en #970).
+- **Las circunferencias siguen enteras** tras copiar, explotar, las
+  herramientas de sólidos y Sígueme (@canalsecuario-blip, #812): un clic en
+  el borde de un cilindro vuelve a seleccionar todo el círculo.
+- **Al editar un grupo, las figuras que miran a la cámara y las imágenes de
+  referencia también se atenúan** (@canalsecuario-blip, #805).
+- **Mover: los asideros de giro no desaparecen** mientras el cursor está
+  dentro de la caja del grupo (#871, @tony1233200 en #978), útil en tubos y
+  perfiles largos.
+- **Rendimiento del visor** (@tony1233200): las cotas cuestan mucho menos
+  por cuadro (#439, en #976), la vista quieta se guarda una vez y no en cada
+  cuadro de la órbita (#944, en #973), y una caja sin límites conocidos ya no
+  se descarta por error (#952, en #972).
+- **Una ventana dibujada contra la esquina de una caja corta solo su muro**
+  (#895, @konevenkatesh).
+- **Una línea suelta que va en parte sobre otra arista conserva el resto de
+  su largo** (#896, @konevenkatesh).
+- **Sígueme: un barrido que falla ya no deshace el paso anterior** (#897,
+  @konevenkatesh).
+- **Dividir una arista llega a todas las caras que la usan** (#898,
+  @konevenkatesh): en modelos reales quedaban tramos sin partir (220 en
+  nuestra batería de 48 modelos).
+- **Una importación por script que falla devuelve lo que había borrado**
+  (#893, @clinta).
+- **DXF: las mallas POLYFACE, las polilíneas de malla y las entidades MESH
+  se importan como caras** (#878, @nicolasmarc en #879).
+- **DAE: la importación conserva los grupos del archivo**, anidados como en
+  el archivo (#919, @BastelBaus).
+- **OpenGL anterior a 3.3: un aviso claro** en lugar de una vista en blanco
+  (#751, @pkoska en #910).
+- **Windows: las miniaturas de los .skp se conservan** al hacer de
+  IngeTrazo el programa predeterminado (#804, @pkoska en #905).
+- **.skp que no abre: el registro dice por qué** (#497, @pkoska en #907).
+- **Agrupar o borrar un grupo ya no deja geometría fantasma** (#987,
+  @canalsecuario-blip en #988): los vértices y aristas sin uso que quedaban
+  partían la cara que se dibujaba encima y ofrecían esquinas invisibles a la
+  inferencia. Y una arista oculta, o en una capa oculta, ya no atrae al
+  cursor.
+- **El borde de una imagen bloqueada ya no cruza la vista**: un ortomosaico
+  bloqueado dibujaba su rectángulo a trazos sobre el cielo, porque la foto
+  no llena sus esquinas transparentes. Ahora el borde aparece solo cuando la
+  imagen está seleccionada; las imágenes sin bloquear lo siguen mostrando,
+  para encontrarlas en el suelo.
+
 ## [0.5.10.1] — 2026-10-27
 
 **Arreglo de una pérdida de datos y, como función experimental, la oclusión

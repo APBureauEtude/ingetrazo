@@ -3047,5 +3047,13 @@
  "New name:": "Новое название:",
  "Active material named '{name}' — click faces to paint it": "Активный материал «{name}» — щёлкните по граням, чтобы покрасить",
  "Add panels…": "Добавить панели…",
- "Choose which panels the sidebar shows.": "Выбрать, какие панели показывает боковая панель."
+ "Choose which panels the sidebar shows.": "Выбрать, какие панели показывает боковая панель.",
+ "Bridge": "Мост",
+ "Join two faces, a face and a line, or two lines with the faces between them.": "Соединяет две грани, грань и линию или две линии гранями между ними.",
+ "Bridge: {n} faces added": "Мост: добавлено граней — {n}",
+ "Select two faces, a face and a line, or two lines to bridge": "Выберите две грани, грань и линию или две линии, чтобы соединить их мостом",
+ "Each line to bridge must be one chain of edges, without branches": "Каждая линия моста должна быть одной цепочкой ребер, без ответвлений",
+ "A face with holes can only be bridged to another face with as many holes": "Грань с отверстиями можно соединить только с гранью с тем же числом отверстий",
+ "Both lie on one plane: nothing to bridge": "Обе лежат в одной плоскости: соединять нечего",
+ "The two to bridge must not touch": "Соединяемые части не должны касаться друг друга"
 }

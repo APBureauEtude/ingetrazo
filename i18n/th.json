@@ -3058,5 +3058,7 @@
  "Each line to bridge must be one chain of edges, without branches": "เส้นที่จะเชื่อมแต่ละเส้นต้องเป็นขอบต่อเนื่องสายเดียว ไม่มีแยกกิ่ง",
  "A face with holes can only be bridged to another face with as many holes": "หน้าที่มีรูเชื่อมได้กับหน้าอื่นที่มีจำนวนรูเท่ากันเท่านั้น",
  "Both lie on one plane: nothing to bridge": "ทั้งสองอยู่บนระนาบเดียวกัน: ไม่มีอะไรให้เชื่อม",
- "The two to bridge must not touch": "สองสิ่งที่จะเชื่อมต้องไม่สัมผัสกัน"
+ "The two to bridge must not touch": "สองสิ่งที่จะเชื่อมต้องไม่สัมผัสกัน",
+ "Show unit": "แสดงหน่วย",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "ปิด: แสดงเฉพาะตัวเลข (1.30 แทน 1.30 m) สำหรับแผ่นงานที่ระบุหน่วยไว้ครั้งเดียว ฟุตและนิ้วที่ใช้ร่วมกันยังคงมีเครื่องหมาย"
 }

@@ -3058,5 +3058,7 @@
 "Each line to bridge must be one chain of edges, without branches": "ແຕ່ລະເສັ້ນທີ່ຈະເຊື່ອມຕ້ອງເປັນຂອບຕໍ່ກັນເປັນສາຍດຽວ ບໍ່ມີງ່າ",
 "A face with holes can only be bridged to another face with as many holes": "ໜ້າທີ່ມີຮູ ເຊື່ອມໄດ້ກັບໜ້າອື່ນທີ່ມີຈຳນວນຮູເທົ່າກັນເທົ່ານັ້ນ",
 "Both lie on one plane: nothing to bridge": "ທັງສອງຢູ່ໃນລະນາບດຽວກັນ: ບໍ່ມີຫຍັງໃຫ້ເຊື່ອມ",
-"The two to bridge must not touch": "ສອງສິ່ງທີ່ຈະເຊື່ອມຕ້ອງບໍ່ແຕະກັນ"
+"The two to bridge must not touch": "ສອງສິ່ງທີ່ຈະເຊື່ອມຕ້ອງບໍ່ແຕະກັນ",
+"Show unit": "ສະແດງຫົວໜ່ວຍ",
+"Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "ປິດ: ສະແດງແຕ່ຕົວເລກ (1.30 ແທນ 1.30 m), ສຳລັບແຜ່ນແບບທີ່ບອກຫົວໜ່ວຍຄັ້ງດຽວ. ຟຸດ ແລະ ນິ້ວ ທີ່ໃຊ້ຮ່ວມກັນຍັງຮັກສາເຄື່ອງໝາຍໄວ້."
 }

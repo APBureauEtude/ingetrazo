@@ -3055,5 +3055,7 @@
  "Each line to bridge must be one chain of edges, without branches": "브리지할 선은 갈래 없는 하나의 모서리 사슬이어야 합니다",
  "A face with holes can only be bridged to another face with as many holes": "구멍이 있는 면은 구멍 수가 같은 다른 면과만 브리지할 수 있습니다",
  "Both lie on one plane: nothing to bridge": "둘 다 한 평면 위에 있습니다: 브리지할 것이 없습니다",
- "The two to bridge must not touch": "브리지할 두 대상은 서로 닿으면 안 됩니다"
+ "The two to bridge must not touch": "브리지할 두 대상은 서로 닿으면 안 됩니다",
+ "Show unit": "단위 표시",
+ "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "끄기: 숫자만 표시합니다(1.30 m 대신 1.30). 단위를 한 번만 적는 시트용입니다. 피트와 인치를 함께 쓰면 기호는 남습니다."
 }

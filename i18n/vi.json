@@ -3082,5 +3082,7 @@
   "Each line to bridge must be one chain of edges, without branches": "Mỗi đường để bắc cầu phải là một chuỗi cạnh liền, không phân nhánh",
   "A face with holes can only be bridged to another face with as many holes": "Một mặt có lỗ chỉ có thể bắc cầu tới một mặt khác có cùng số lỗ",
   "Both lie on one plane: nothing to bridge": "Cả hai nằm trên cùng một mặt phẳng: không có gì để bắc cầu",
-  "The two to bridge must not touch": "Hai đối tượng bắc cầu không được chạm nhau"
+  "The two to bridge must not touch": "Hai đối tượng bắc cầu không được chạm nhau",
+  "Show unit": "Hiện đơn vị",
+  "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "Tắt: chỉ hiện con số (1.30 thay vì 1.30 m), cho các bản vẽ ghi đơn vị một lần. Feet và inch dùng chung vẫn giữ ký hiệu."
 }

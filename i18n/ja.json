@@ -3055,5 +3055,7 @@
   "Each line to bridge must be one chain of edges, without branches": "ブリッジする線は、枝分かれのない一続きのエッジでなければなりません",
   "A face with holes can only be bridged to another face with as many holes": "穴のある面は、同じ数の穴を持つ面とだけブリッジできます",
   "Both lie on one plane: nothing to bridge": "両方が同じ平面上にあります: ブリッジするものがありません",
-  "The two to bridge must not touch": "ブリッジする 2 つは互いに接していてはいけません"
+  "The two to bridge must not touch": "ブリッジする 2 つは互いに接していてはいけません",
+  "Show unit": "単位を表示",
+  "Off: only the number (1.30 instead of 1.30 m), for sheets that state the unit once. Feet and inches together keep their marks.": "オフ: 数値のみ（1.30 m ではなく 1.30）。単位を一度だけ記すシート向けです。フィートとインチを併用する場合は記号を残します。"
 }

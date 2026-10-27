@@ -3023,5 +3023,7 @@
 "Softly darkens where surfaces meet — corners, the foot of a wall, under a bench. Experimental: if it looks wrong on your graphics card, turn it off and tell us.": "ເຮັດໃຫ້ມືດລົງເລັກນ້ອຍບ່ອນທີ່ພື້ນຜິວມາພົບກັນ — ມູມຫ້ອງ, ຕີນກຳແພງ, ກ້ອງມ້ານັ່ງ. ທົດລອງ: ຖ້າເບິ່ງບໍ່ຖືກຕ້ອງໃນກາດຈໍຂອງທ່ານ, ໃຫ້ປິດ ແລະ ແຈ້ງພວກເຮົາ.",
 "Your graphics driver cannot draw ambient occlusion ({reason}).": "ໄດຣເວີກາຟິກຂອງທ່ານບໍ່ສາມາດແຕ້ມການບັງແສງລ້ອມຮອບໄດ້ ({reason}).",
 "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: ທຸກໜ້າມີວັດສະດຸຂອງຕົນເອງ, ຈຶ່ງບໍ່ມີຫຍັງປ່ຽນ — ເປີດມັນ ແລ້ວທາສີໃສ່ໜ້າ",
-"Pool Water": "ນ້ຳສະລອຍນ້ຳ"
+"Pool Water": "ນ້ຳສະລອຍນ້ຳ",
+"Japanese translation of the interface.": "ການແປສ່ວນຕິດຕໍ່ຜູ້ໃຊ້ເປັນພາສາຍີ່ປຸ່ນ.",
+"Korean translation of the interface.": "ການແປສ່ວນຕິດຕໍ່ຜູ້ໃຊ້ເປັນພາສາເກົາຫຼີ."
 }

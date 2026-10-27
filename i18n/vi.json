@@ -3047,5 +3047,7 @@
   "Rust engine": "Engine Rust",
   "Softly darkens where surfaces meet — corners, the foot of a wall, under a bench. Experimental: if it looks wrong on your graphics card, turn it off and tell us.": "Làm tối nhẹ chỗ các bề mặt gặp nhau — góc nhà, chân tường, dưới ghế. Thử nghiệm: nếu trông không đúng trên card đồ họa của bạn, hãy tắt đi và báo cho chúng tôi.",
   "Your graphics driver cannot draw ambient occlusion ({reason}).": "Trình điều khiển đồ họa của bạn không vẽ được che khuất môi trường ({reason}).",
-  "Pool Water": "Nước hồ bơi"
+  "Pool Water": "Nước hồ bơi",
+  "Japanese translation of the interface.": "Bản dịch giao diện tiếng Nhật.",
+  "Korean translation of the interface.": "Bản dịch giao diện tiếng Hàn."
 }

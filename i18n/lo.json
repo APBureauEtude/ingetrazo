@@ -3006,4 +3006,15 @@
  "Axes": "ແກນພິກັດ",
  "Show the model's red, green and blue drawing axes. Inference along them keeps working while they are hidden.": "ສະແດງແກນແຕ້ມສີແດງ, ສີຂຽວ ແລະ ສີຟ້າຂອງໂມເດວ. ການອ້າງອີງຈຸດຕາມແນວແກນຍັງຄົງເຮັດວຽກໄດ້ເຖິງແມ່ນວ່າຈະຖືກເຊື່ອງຢູ່ກໍຕາມ.",
  "The extension «{name}» failed in the right-click menu and is left out of it until IngeTrazo restarts. Update it or turn it off in the Extension manager.": "ສ່ວນເສີມ «{name}» ເຮັດວຽກຜິດພາດໃນເມນູຄລິກຂວາ ແລະ ຈະຖືກຕັດອອກຈົນກວ່າຈະເປີດ IngeTrazo ໃໝ່. ກະລຸນາອັບເດດ ຫຼື ປິດມັນໄວ້ໃນຕົວຈັດການສ່ວນເສີມ."
+ "Field of View…": "ມຸມມອງການເບິ່ງເຫັນ…",
+  "Change the camera's angle of view, like a lens: wider takes more in, narrower keeps the lines calm.": "ປ່ຽນມຸມມອງພາບຂອງກ້ອງ ຄືກັນກັບເລນ: ມຸມກວ້າງຈະເກັບພາບໄດ້ຫຼາຍຂຶ້ນ, ມຸມແຄບຈະຊ່ວຍໃຫ້ເສັ້ນສາຍເບິ່ງສະຫງົບ.",
+  "Field of view in degrees (10–120):": "ມຸມມອງການເບິ່ງເຫັນເປັນອົງສາ (10–120):",
+  "Field of view applies to perspective; switch to Perspective first.": "ມຸມມອງການເບິ່ງເຫັນໃຊ້ໄດ້ສະເພາະກັບມຸມມອງເພີສເປັກຕິບ (Perspective); ກະລຸນາປ່ຽນເປັນ Perspective ກ່ອນ.",
+  "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: ແຕ່ລະໜ້າຜິວມີວັດສະດຸຂອງຕົນເອງຢູ່ແລ້ວ ຈຶ່ງບໍ່ມີຫຍັງປ່ຽນແປງ — ເປີດມັນຂຶ້ນມາ ແລ້ວໃສ່ວັດສະດຸໃຫ້ແຕ່ລະໜ້າຜິວ",
+  "Ambient occlusion (experimental)": "ແສງເງົາຕົກກະທົບ Ambient Occlusion (ທົດລອງ)",
+  "Softly darkens where surfaces meet — corners, the foot of a wall, under a bench. Experimental: if it looks wrong on your graphics card, turn it off and tell us.": "ສ້າງເງົາອ່ອນໆ ບ່ອນທີ່ພື້ນຜິວມາບັນຈົບກັນ — ຕາມມຸມ, ຕີນຝາ, ກ້ອງຕັ່ງ. ຟີເຈີທົດລອງ: ຖ້າການສະແດງຜົນຜິດພາດໃນກາດຈໍຂອງທ່ານ, ໃຫ້ປິດມັນໄວ້ ແລ້ວແຈ້ງໃຫ້ພວກເຮົາຊາບ.",
+  "Distance:": "ໄລຍະຫ່າງ:",
+  "How far a surface still darkens its neighbour": "ໄລຍະຫ່າງທີ່ພື້ນຜິວຈະສ້າງເງົາບັງພື້ນຜິວໃກ້ຄຽງ",
+  "Intensity:": "ຄວາມເຂັ້ມ:",
+  "Your graphics driver cannot draw ambient occlusion ({reason}).": "ໄດຣເວີກຣາບຟິກຂອງທ່ານບໍ່ສາມາດສະແດງຜົນ Ambient Occlusion ໄດ້ ({reason})."
 }

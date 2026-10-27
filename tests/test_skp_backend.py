@@ -105,6 +105,37 @@ def test_empty_parse_falls_back_to_converter(tmp_path, monkeypatch):
         skp_format.parse_skp(p)
 
 
+def test_a_reader_error_is_logged_with_its_traceback(tmp_path, monkeypatch,
+                                                     caplog):
+    # #497, #157: the reader's own error was swallowed, so a failed import
+    # left nothing to diagnose. The user still gets NeedsConverter.
+    class FailingBackend:
+        name = "failing"
+
+        def available(self):
+            return True
+
+        def supports(self, fmt):
+            return fmt == "skp"
+
+        def parse(self, path, progress=None):
+            raise ValueError("implausible def entity count")
+
+    monkeypatch.setattr(skp_format, "_BACKENDS", [FailingBackend()])
+    p = tmp_path / "legacy.skp"
+    p.write_bytes(_skp_header_bytes())
+    with caplog.at_level("WARNING", logger="formats.skp"):
+        with pytest.raises(skp_format.NeedsConverter):
+            skp_format.parse_skp(p)
+    [record] = [r for r in caplog.records if r.name == "formats.skp"]
+    assert record.levelname == "WARNING"
+    assert "failing" in record.getMessage()
+    assert "legacy.skp" in record.getMessage()
+    assert record.exc_info[0] is ValueError
+    assert "implausible def entity count" in caplog.text
+    assert "Traceback" in caplog.text
+
+
 # ---- OpenSKP adapter (fake model) ---------------------------------------------
 
 def _V(x, y, z=0.0):

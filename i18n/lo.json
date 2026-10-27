@@ -3023,5 +3023,7 @@
 "Softly darkens where surfaces meet — corners, the foot of a wall, under a bench. Experimental: if it looks wrong on your graphics card, turn it off and tell us.": "ເຮັດໃຫ້ມືດລົງເລັກນ້ອຍບ່ອນທີ່ພື້ນຜິວມາພົບກັນ — ມູມຫ້ອງ, ຕີນກຳແພງ, ກ້ອງມ້ານັ່ງ. ທົດລອງ: ຖ້າເບິ່ງບໍ່ຖືກຕ້ອງໃນກາດຈໍຂອງທ່ານ, ໃຫ້ປິດ ແລະ ແຈ້ງພວກເຮົາ.",
 "Your graphics driver cannot draw ambient occlusion ({reason}).": "ໄດຣເວີກາຟິກຂອງທ່ານບໍ່ສາມາດແຕ້ມການບັງແສງລ້ອມຮອບໄດ້ ({reason}).",
 "{name}: every face has its own material, so nothing changed — open it and paint the faces": "{name}: ທຸກໜ້າມີວັດສະດຸຂອງຕົນເອງ, ຈຶ່ງບໍ່ມີຫຍັງປ່ຽນ — ເປີດມັນ ແລ້ວທາສີໃສ່ໜ້າ",
-"Pool Water": "ນ້ຳສະລອຍນ້ຳ"
+"Pool Water": "ນ້ຳສະລອຍນ້ຳ",
+"OpenGL 3.3 not available": "ບໍ່ມີ OpenGL 3.3",
+"IngeTrazo needs OpenGL 3.3, but this computer only offers OpenGL {version} ({renderer}). The viewport stays empty.\n\nUpdate the graphics driver from the NVIDIA, AMD or Intel website. On a laptop with two graphics chips, assign IngeTrazo to the high-performance GPU (Windows: Settings ▸ System ▸ Display ▸ Graphics) and start it again.": "IngeTrazo ຕ້ອງການ OpenGL 3.3, ແຕ່ຄອມພິວເຕີນີ້ມີພຽງ OpenGL {version} ({renderer}). ໜ້າຈໍມຸມມອງຈະຫວ່າງເປົ່າ.\n\nອັບເດດໄດຣເວີກາຟິກຈາກເວັບໄຊຂອງ NVIDIA, AMD ຫຼື Intel. ໃນແລັບທັອບທີ່ມີຊິບກາຟິກສອງອັນ, ໃຫ້ກຳນົດ IngeTrazo ໃຊ້ GPU ປະສິດທິພາບສູງ (Windows: ການຕັ້ງຄ່າ ▸ ລະບົບ ▸ ຈໍສະແດງຜົນ ▸ ກາຟິກ) ແລ້ວເປີດໃໝ່."
 }

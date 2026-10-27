@@ -3047,5 +3047,7 @@
   "Rust engine": "Engine Rust",
   "Softly darkens where surfaces meet — corners, the foot of a wall, under a bench. Experimental: if it looks wrong on your graphics card, turn it off and tell us.": "Làm tối nhẹ chỗ các bề mặt gặp nhau — góc nhà, chân tường, dưới ghế. Thử nghiệm: nếu trông không đúng trên card đồ họa của bạn, hãy tắt đi và báo cho chúng tôi.",
   "Your graphics driver cannot draw ambient occlusion ({reason}).": "Trình điều khiển đồ họa của bạn không vẽ được che khuất môi trường ({reason}).",
-  "Pool Water": "Nước hồ bơi"
+  "Pool Water": "Nước hồ bơi",
+  "OpenGL 3.3 not available": "Không có OpenGL 3.3",
+  "IngeTrazo needs OpenGL 3.3, but this computer only offers OpenGL {version} ({renderer}). The viewport stays empty.\n\nUpdate the graphics driver from the NVIDIA, AMD or Intel website. On a laptop with two graphics chips, assign IngeTrazo to the high-performance GPU (Windows: Settings ▸ System ▸ Display ▸ Graphics) and start it again.": "IngeTrazo cần OpenGL 3.3, nhưng máy tính này chỉ có OpenGL {version} ({renderer}). Khung nhìn sẽ trống.\n\nHãy cập nhật trình điều khiển đồ họa từ trang web của NVIDIA, AMD hoặc Intel. Trên máy tính xách tay có hai chip đồ họa, hãy gán IngeTrazo cho GPU hiệu năng cao (Windows: Cài đặt ▸ Hệ thống ▸ Màn hình ▸ Đồ họa) rồi mở lại."
 }

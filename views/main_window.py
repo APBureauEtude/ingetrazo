@@ -8096,7 +8096,7 @@ class MainWindow(QMainWindow):
             3840, 640, 16384, 320)
         if not ok:
             return
-        image = self.viewport.render_image(width)
+        image = self.viewport.render_image(width, sharp_shadows=True)
         if image is None or image.isNull() or not image.save(str(path)):
             QMessageBox.critical(self, tr("Export Image failed"),
                                  tr("Could not render or save the image."))

@@ -2043,7 +2043,8 @@ class Viewport(QOpenGLWidget):
 
     def render_image(self, width_px: int, height_px: Optional[int] = None,
                      overlays: bool = True,
-                     annotations_only: bool = False) -> Optional["QImage"]:
+                     annotations_only: bool = False,
+                     sharp_shadows: bool = False) -> Optional["QImage"]:
         """Render the current view at ``width_px`` wide (height follows the
         viewport's aspect) and return it as a ``QImage`` — the hi-res 2D
         export. Reuses the exact ``paintGL`` pipeline against a temporary
@@ -2055,7 +2056,12 @@ class Viewport(QOpenGLWidget):
         their own aspect — the caller is responsible for pointing the camera
         and setting its aspect to match) and ``overlays=False``: the overlay
         painters are calibrated to the live widget's aspect and would land
-        misplaced under a composer camera."""
+        misplaced under a composer camera.
+
+        ``sharp_shadows`` (Export image, sheets): the sun's map is drawn
+        for this one picture at ``_SHADOW_EXPORT_SIZE`` instead of the view's
+        2048 — a plaza of 100 m gets 1.2 cm per texel instead of 5 cm — and
+        freed after it, so the view keeps its own map and its memory."""
         if self._gl is None or self._program is None:
             return None
         lw = max(self.width(), 1)
@@ -2068,13 +2074,24 @@ class Viewport(QOpenGLWidget):
 
         prev_fbo = self._scene_fbo
         prev_size = self._fbo_size
+        view_shadow = None
         self.makeCurrent()
         try:
             self._export_size = (width_px, height_px)
+            if sharp_shadows and self._sun_dir_now() is not None:
+                view_shadow = (self._shadow_fbo, self._shadow_key)
+                self._shadow_fbo = self._shadow_key = None
+                self._shadow_size = self._export_shadow_size()
             try:
                 self.paintGL()
                 image = self._scene_fbo.toImage()   # resolves MSAA itself
             finally:
+                if view_shadow is not None:
+                    # Freed here, with the context current; the view's own
+                    # map was never touched and is reused as it was.
+                    self._shadow_fbo = None
+                    self._shadow_fbo, self._shadow_key = view_shadow
+                    self._shadow_size = self._SHADOW_MAP_SIZE
                 self._export_size = None
                 # Drop the big export FBO (destroyed here, context current)
                 # and put the on-screen one back.
@@ -5873,6 +5890,19 @@ class Viewport(QOpenGLWidget):
 
     # ---- Sun shadows (core/sun.py) ------------------------------------------
     _SHADOW_MAP_SIZE = 2048
+    #: The map an exported picture draws with (``render_image``'s
+    #: ``sharp_shadows``): drawn once per picture, so its cost does not
+    #: matter the way the view's does. Capped by the driver's texture size.
+    _SHADOW_EXPORT_SIZE = 8192
+    _shadow_size = _SHADOW_MAP_SIZE
+
+    def _export_shadow_size(self) -> int:
+        try:
+            v = self._gl.glGetIntegerv(GL_MAX_TEXTURE_SIZE)
+            cap = int(v[0] if hasattr(v, "__len__") else v)
+        except (TypeError, ValueError, IndexError):
+            cap = self._SHADOW_MAP_SIZE
+        return max(self._SHADOW_MAP_SIZE, min(self._SHADOW_EXPORT_SIZE, cap))
     #: The .skp translucency rule: materials under 70 % opacity cast no
     #: shadow — the sun passes through glass.
     _SHADOW_OPACITY_MIN = 0.7
@@ -5974,8 +6004,11 @@ class Viewport(QOpenGLWidget):
         if self._shadow_fbo is None:
             fmt = QOpenGLFramebufferObjectFormat()
             fmt.setAttachment(QOpenGLFramebufferObject.CombinedDepthStencil)
-            self._shadow_fbo = QOpenGLFramebufferObject(
-                self._SHADOW_MAP_SIZE, self._SHADOW_MAP_SIZE, fmt)
+            size = self._shadow_size
+            self._shadow_fbo = QOpenGLFramebufferObject(size, size, fmt)
+            while not self._shadow_fbo.isValid() and size > self._SHADOW_MAP_SIZE:
+                size //= 2                   # a driver short of memory
+                self._shadow_fbo = QOpenGLFramebufferObject(size, size, fmt)
         self._render_shadow_map(vp)
         self._shadow_key = key
         self._shadow_vp = vp
@@ -5988,8 +6021,8 @@ class Viewport(QOpenGLWidget):
         with the depth program into the packed-depth FBO. The active
         section cut applies, so severed geometry does not cast. The caller
         restores the scene FBO/program bindings this pass borrows."""
-        size = self._SHADOW_MAP_SIZE
         fbo = self._shadow_fbo
+        size = fbo.width()
         fbo.bind()
         self._gl.glViewport(0, 0, size, size)
         self._gl.glClearColor(1.0, 1.0, 1.0, 1.0)

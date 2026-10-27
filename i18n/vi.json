@@ -3056,5 +3056,12 @@
   "Intersect with Face": "Giao với mặt",
   "Scale…": "Tỷ lệ…",
   "Reset scale": "Đặt lại tỷ lệ",
-  "Type the X, Y, Z scale in the window; Enter or leaving the field applies it.": "Nhập tỷ lệ X, Y, Z trong cửa sổ; nhấn Enter hoặc rời khỏi ô để áp dụng."
+  "Type the X, Y, Z scale in the window; Enter or leaving the field applies it.": "Nhập tỷ lệ X, Y, Z trong cửa sổ; nhấn Enter hoặc rời khỏi ô để áp dụng.",
+  "Sides:": "Số cạnh:",
+  "Segments:": "Phân đoạn:",
+  "How many straight pieces the curve is made of — it is rebuilt in place": "Số đoạn thẳng tạo nên đường cong — được dựng lại tại chỗ",
+  "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "Chỉ cho đường cong phẳng: đường cong này còn là biên của các mặt nằm ngoài mặt phẳng của nó, như mặt bên của một hình trụ đã đẩy",
+  "This curve cannot be rebuilt": "Không thể dựng lại đường cong này",
+  "Diameter": "Đường kính",
+  "Side": "Cạnh"
 }

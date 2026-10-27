@@ -3032,5 +3032,12 @@
  "Intersect with Face": "ตัดกับหน้า",
  "Scale…": "ปรับขนาด…",
  "Reset scale": "รีเซ็ตขนาด",
- "Type the X, Y, Z scale in the window; Enter or leaving the field applies it.": "พิมพ์อัตราส่วนขนาด X, Y, Z ในหน้าต่าง กด Enter หรือออกจากช่องเพื่อนำไปใช้"
+ "Type the X, Y, Z scale in the window; Enter or leaving the field applies it.": "พิมพ์อัตราส่วนขนาด X, Y, Z ในหน้าต่าง กด Enter หรือออกจากช่องเพื่อนำไปใช้",
+ "Sides:": "จำนวนด้าน:",
+ "Segments:": "จำนวนส่วน:",
+ "How many straight pieces the curve is made of — it is rebuilt in place": "จำนวนเส้นตรงที่ประกอบเป็นเส้นโค้ง — สร้างใหม่ในตำแหน่งเดิม",
+ "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "ใช้ได้เฉพาะเส้นโค้งที่แบนราบ: เส้นนี้ยังเป็นขอบของหน้าที่อยู่นอกระนาบของมัน เช่น ด้านข้างของทรงกระบอกที่ดันขึ้น",
+ "This curve cannot be rebuilt": "ไม่สามารถสร้างเส้นโค้งนี้ใหม่ได้",
+ "Diameter": "เส้นผ่านศูนย์กลาง",
+ "Side": "ด้าน"
 }

@@ -3032,5 +3032,12 @@
 "Intersect with Face": "ຕັດກັບໜ້າ",
 "Scale…": "ມາດຕາສ່ວນ…",
 "Reset scale": "ຕັ້ງມາດຕາສ່ວນຄືນໃໝ່",
-"Type the X, Y, Z scale in the window; Enter or leaving the field applies it.": "ພິມມາດຕາສ່ວນ X, Y, Z ໃນໜ້າຕ່າງ; ກົດ Enter ຫຼື ອອກຈາກຊ່ອງເພື່ອນຳໃຊ້."
+"Type the X, Y, Z scale in the window; Enter or leaving the field applies it.": "ພິມມາດຕາສ່ວນ X, Y, Z ໃນໜ້າຕ່າງ; ກົດ Enter ຫຼື ອອກຈາກຊ່ອງເພື່ອນຳໃຊ້.",
+"Sides:": "ຈຳນວນດ້ານ:",
+"Segments:": "ຈຳນວນທ່ອນເສັ້ນ:",
+"How many straight pieces the curve is made of — it is rebuilt in place": "ເສັ້ນໂຄ້ງປະກອບດ້ວຍເສັ້ນຊື່ຈັກທ່ອນ — ສ້າງຄືນໃໝ່ຢູ່ບ່ອນເດີມ",
+"Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "ສະເພາະເສັ້ນໂຄ້ງທີ່ຮາບພຽງ: ເສັ້ນນີ້ຍັງເປັນຂອບຂອງໜ້າທີ່ຢູ່ນອກລະນາບຂອງມັນ ເຊັ່ນ ດ້ານຂ້າງຂອງທໍ່ກະບອກທີ່ຖືກດັນ",
+"This curve cannot be rebuilt": "ບໍ່ສາມາດສ້າງເສັ້ນໂຄ້ງນີ້ຄືນໃໝ່ໄດ້",
+"Diameter": "ເສັ້ນຜ່ານສູນກາງ",
+"Side": "ດ້ານ"
 }

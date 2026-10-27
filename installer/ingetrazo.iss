@@ -103,6 +103,16 @@ Name: "skpdefault"; Description: "{cm:SkpDefault}"; \
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; \
     GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+[InstallDelete]
+; An update copies the new bundle over the old one, and [Files] only adds
+; and replaces: whatever the new version no longer ships stayed behind.
+; 83 files of earlier releases were found in one upgraded install, among
+; them Qt's OpenSSL TLS backend and libssl that 0.5.9 dropped (#564), so
+; the extension manager still failed its certificate check (#783). The
+; bundle's _internal folder is rebuilt whole by [Files]; nothing of the
+; user's lives there (settings, extensions and autosaves are per-user).
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 ; The whole PyInstaller one-dir bundle.
 Source: "..\dist\ingetrazo\*"; DestDir: "{app}"; \

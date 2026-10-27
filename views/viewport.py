@@ -9512,17 +9512,99 @@ class Viewport(QOpenGLWidget):
         """Draw the 3D segment ``p3a``–``p3b`` in screen space, skipping the
         parts hidden behind solid geometry (CPU occlusion sample). A sub-segment
         is drawn only when both its sampled ends are visible, so the line never
-        bleeds over the solid; the silhouette gap is sub-pixel at this density."""
+        bleeds over the solid; the silhouette gap is sub-pixel at this density.
+
+        The samples are projected and tested as one batch
+        (``_project_samples``): doing it point by point rebuilt the camera's
+        projection*view matrix for every sample — 432 rebuilds a frame for
+        eight dimensions — and ran a NumPy 3x3 reduction per sample (#439)."""
+        pts = [p3a + (p3b - p3a) * (i / samples) for i in range(samples + 1)]
         prev_px = None
         prev_vis = False
-        for i in range(samples + 1):
-            t = i / samples
-            w = p3a + (p3b - p3a) * t
-            px = self._world_to_pixel(w)
-            vis = px is not None and not self._occluded_on_screen(w)
+        for px, vis in self._project_samples(pts):
+            vis = px is not None and vis
             if prev_px is not None and px is not None and prev_vis and vis:
                 painter.drawLine(QPointF(*prev_px), QPointF(*px))
             prev_px, prev_vis = px, vis
+
+    def _project_samples(self, pts: list[QVector3D]):
+        """Project ``pts`` to screen pixels and test each one against the
+        frame's depth snapshot, as a single batch: the camera's MVP is built
+        once for the whole run, and the snapshot's 3x3 depth test runs as one
+        NumPy gather instead of a slice-and-max per point (#439).
+
+        The answers are the ones ``_world_to_pixel`` and
+        ``_occluded_on_screen`` give point by point — the live camera's
+        matrix for the pixel, the snapshot's own for the test, the same
+        tolerances — and without a snapshot (or NumPy) this defers to those
+        per-point paths. Returns a list of ``(pixel, visible)`` pairs, with
+        ``pixel`` None for a point behind the camera."""
+        mvp = self.camera.projection_matrix() * self.camera.view_matrix()
+        snap = getattr(self, "_depth_snap", None)
+        if snap is None:
+            return [(self._world_to_pixel(p, mvp),
+                     not self._occluded_on_screen(p)) for p in pts]
+        try:
+            import numpy as np
+        except Exception:  # noqa: BLE001 — never break the paint
+            return [(self._world_to_pixel(p, mvp),
+                     not self._occluded_on_screen(p)) for p in pts]
+        buf, smvp, inv, sw, sh, eye, fwd = snap
+
+        def rows(m):
+            return np.array([[m.row(r).x(), m.row(r).y(),
+                              m.row(r).z(), m.row(r).w()]
+                             for r in range(4)], dtype=np.float64)
+
+        p4 = np.array([(p.x(), p.y(), p.z(), 1.0) for p in pts],
+                      dtype=np.float64)
+        with np.errstate(all="ignore"):
+            # The pixel, with the live camera (as _world_to_pixel).
+            clip = p4 @ rows(mvp).T
+            cw = clip[:, 3]
+            ndc = clip[:, :2] / cw[:, None]
+            pxs = (ndc[:, 0] * 0.5 + 0.5) * self.width()
+            pys = (1.0 - (ndc[:, 1] * 0.5 + 0.5)) * self.height()
+            pixels = [None if c <= 0 else (float(x), float(y))
+                      for c, x, y in zip(cw, pxs, pys)]
+            # The occlusion test, with the snapshot's matrices (as
+            # _occluded_on_screen): untested points stay visible.
+            occluded = np.zeros(len(pts), dtype=bool)
+            c = p4 @ rows(smvp).T
+            w = c[:, 3]
+            nx = c[:, 0] / w
+            ny = c[:, 1] / w
+            ix = ((nx + 1.0) * 0.5 * sw).astype(np.int64)
+            iy = ((ny + 1.0) * 0.5 * sh).astype(np.int64)
+            live = (w > 1e-9) & (ix >= 0) & (ix < sw) & (iy >= 0) & (iy < sh)
+            if live.any():
+                # The FARTHEST depth of the 3x3 around each pixel: gathering
+                # with the indices clamped to the frame reads the edge
+                # pixels twice, which a max does not see — the same values
+                # the per-point clamped slice takes, without copying the
+                # frame to pad it.
+                gx, gy = ix[live], iy[live]
+                d = np.maximum.reduce(
+                    [buf[np.clip(gy + dy, 0, sh - 1),
+                         np.clip(gx + dx, 0, sw - 1)]
+                     for dy in (-1, 0, 1) for dx in (-1, 0, 1)]
+                ).astype(np.float64)
+                near = d < 1.0                       # else background
+                if near.any():
+                    idx = np.flatnonzero(live)[near]
+                    q = np.column_stack(
+                        [nx[idx], ny[idx], d[near] * 2.0 - 1.0,
+                         np.ones(len(idx))]) @ rows(inv).T
+                    qw = q[:, 3]
+                    ok = np.abs(qw) >= 1e-12
+                    surf = q[:, :3] / np.where(ok, qw, 1.0)[:, None]
+                    eye_a = np.array([eye.x(), eye.y(), eye.z()])
+                    fwd_a = np.array([fwd.x(), fwd.y(), fwd.z()])
+                    along_pt = (p4[idx, :3] - eye_a) @ fwd_a
+                    along_surf = (surf - eye_a) @ fwd_a
+                    tol = np.maximum(0.02, 0.003 * np.abs(along_pt))
+                    occluded[idx] = ok & (along_surf < along_pt - tol)
+        return [(px, not occ) for px, occ in zip(pixels, occluded)]
 
     def _draw_inference_marker(self, painter: QPainter) -> None:
         """Green endpoint-style square where the active tool's distance
@@ -10637,9 +10719,16 @@ class Viewport(QOpenGLWidget):
             return ((ndc_x * 0.5 + 0.5) * w, (1.0 - (ndc_y * 0.5 + 0.5)) * h)
         return world_to_pixel
 
-    def _world_to_pixel(self, world: QVector3D) -> Optional[tuple[float, float]]:
-        """World point → screen pixel (or None if behind the camera)."""
-        mvp = self.camera.projection_matrix() * self.camera.view_matrix()
+    def _world_to_pixel(self, world: QVector3D,
+                        mvp: Optional[QMatrix4x4] = None
+                        ) -> Optional[tuple[float, float]]:
+        """World point → screen pixel (or None if behind the camera).
+
+        ``mvp`` lets a caller projecting a run of points in one frame pass
+        the projection*view it already built instead of paying a rebuild —
+        two matrix builds and a multiply — for every point (#439)."""
+        if mvp is None:
+            mvp = self.camera.projection_matrix() * self.camera.view_matrix()
         clip = mvp.map(QVector4D(world.x(), world.y(), world.z(), 1.0))
         if clip.w() <= 0:
             return None

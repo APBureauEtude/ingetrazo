@@ -204,6 +204,7 @@ impl ParityTris {
 fn hypot_of(name: &str) -> PyResult<facegeom::Hypot> {
     match name {
         "libstdc++" => Ok(facegeom::Hypot::LibStdCxx),
+        "msvc" => Ok(facegeom::Hypot::Msvc),
         _ => Err(pyo3::exceptions::PyValueError::new_err("unknown hypot")),
     }
 }
@@ -943,21 +944,23 @@ impl InstanceSet {
     /// The first of ``pts`` (N,3), in order, that nothing hides from
     /// ``eye`` — ``Viewport._occluded_many_now`` asked of each in turn, in
     /// one call: the ray to each point built as ``_unit_rays`` builds it
-    /// (float coordinates, libstdc++'s three-argument hypot, the float
-    /// division), the placements ``cand`` of this set and, when given,
+    /// (float coordinates, the three-argument hypot of ``hypot``, the
+    /// float division), the placements ``cand`` of this set and, when given,
     /// those ``stat_cand`` of ``stat`` (the pick index's own triangles)
     /// asked as there. ``(first, doubts)``: the index of the first point
     /// both call seen (-1: none), and before it, in order, those either
     /// could not call bit for bit — the caller asks them as before. A
     /// point on the eye is seen, as there. Over the plant of #158 the
     /// ~7000 corners a roof hides near the cursor were a dozen calls.
-    #[pyo3(signature = (cand, eye, pts, stat=None, stat_cand=None))]
+    #[pyo3(signature = (cand, eye, pts, stat=None, stat_cand=None, hypot="libstdc++"))]
     fn first_clear<'py>(&self, py: Python<'py>, cand: PyReadonlyArray1<'py, i64>,
                         eye: (f64, f64, f64), pts: PyReadonlyArray2<'py, f64>,
                         stat: Option<PyRef<'py, InstanceSet>>,
-                        stat_cand: Option<PyReadonlyArray1<'py, i64>>)
+                        stat_cand: Option<PyReadonlyArray1<'py, i64>>,
+                        hypot: &str)
         -> PyResult<(i64, Bound<'py, PyArray1<i64>>)> {
         use rayon::prelude::*;
+        let h = hypot_of(hypot)?;
         let c = cand.as_array().to_vec();
         self.check(&c)?;
         let mut mask = vec![false; self.places.len()];
@@ -983,7 +986,7 @@ impl InstanceSet {
         let o = [e[0] as f64, e[1] as f64, e[2] as f64];
         // 0 seen, 1 hidden, 2 doubt.
         let call = |q: [f64; 3]| -> u8 {
-            let Some((d, dist)) = occlusion::unit_ray(e, q) else {
+            let Some((d, dist)) = occlusion::unit_ray(e, q, h) else {
                 return 0;
             };
             let limit = dist - 1e-3;

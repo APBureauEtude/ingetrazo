@@ -43,9 +43,9 @@ CONTRIBUTORS = [
      "drafting work: much of how IngeTrazo draws today.",
      "https://github.com/pacaeiro"),
     ("Gabriel Rodríguez Arregin",
-     "Architect. The units system, the Browser, the Solid Inspector, "
-     "Fillet 3D bevels, Join Segments, Camera ▸ Axes, cleaner exports "
-     "and many everyday editing tools.",
+     "Architect. The units system, the Browser, Layers 2.0, the Solid "
+     "Inspector, Fillet 3D bevels, Bridge, Join Segments, Camera ▸ Axes, "
+     "cleaner exports and many everyday editing tools.",
      "https://github.com/canalsecuario-blip"),
     ("Félix Riestra",
      "The macOS package: IngeTrazo for Mac. Components that come apart "
@@ -152,8 +152,26 @@ CONTRIBUTORS = [
      "https://github.com/francisreboucas"),
     ("pkoska",
      "Fixes for the location map, Move's rotation grips, typed values, "
-     "the Line tool, snapping and the extension manager.",
+     "the Line tool, snapping, long thin rectangles, .skp thumbnails and "
+     "the extension manager's downloads on Windows.",
      "https://github.com/pkoska"),
+    ("Kone Venkatesh",
+     "Fixes deep in the modelling core: windows cut at a box's corner, "
+     "lines over other edges, Follow Me's undo and splitting edges.",
+     "https://github.com/konevenkatesh"),
+    ("Clint Armstrong",
+     "A failed scripted import that gives back what it had removed.",
+     "https://github.com/clinta"),
+    ("nicolasmarc",
+     "DXF polyface and mesh entities imported as faces.",
+     "https://github.com/nicolasmarc"),
+    ("BastelBaus",
+     "DAE imports that keep the file's groups.",
+     "https://github.com/BastelBaus"),
+    ("David",
+     "The choice of tool cursor: the tool's icon, a crosshair or an "
+     "arrow.",
+     "https://github.com/Booshdag-io"),
     ("Matt Van Horn",
      "A fix for the AI Assistant crash in the Flatpak.",
      "https://github.com/mvanhorn"),
@@ -202,11 +220,13 @@ CONTRIBUTORS = [
      "https://github.com/arthurarquitetoamb"),
     ("tony1233200",
      "Fixes for reopened dimensions, New's materials, the extension "
-     "manager, face areas and textures on rotated groups.",
+     "manager, face areas, textures on rotated groups, unnamed groups "
+     "and .skp scale, and a faster viewer.",
      "https://github.com/tony1233200"),
     ("Bogdan Demchenko",
-     "Extension toolbars back in place at start-up, and the Rectangle's "
-     "preview.",
+     "Extension toolbars back in place at start-up, the Rectangle's "
+     "preview, Measure from the line under the cursor, Offset's "
+     "reference and pool water.",
      "https://github.com/hamzah1985"),
     ("Alexis",
      "Ctrl+Enter in the leader-text dialog.",

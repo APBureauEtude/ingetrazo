@@ -219,3 +219,24 @@ def test_the_sky_round_a_silhouette_is_never_darkened(monkeypatch):
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()
+
+
+def test_an_error_left_pending_by_someone_else_does_not_switch_it_off(
+        box_on_floor, monkeypatch):
+    """Opening a big file left a GL error pending from its texture uploads;
+    the pass read it as its own depth resolve failing and stayed off for
+    the whole session, with the box ticked (Marco, playa Yanque)."""
+    vp = box_on_floor
+    off = _render(vp, monkeypatch, "0")
+    real = vp._apply_ambient_occlusion
+
+    def after_a_stray_error(*args, **kwargs):
+        vp._gl.glEnable(0x7FFF)                 # GL_INVALID_ENUM, left pending
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(vp, "_apply_ambient_occlusion", after_a_stray_error)
+    on = _render(vp, monkeypatch, "1")
+    if vp._ao.broken and vp._ao.broken != "depth resolve refused":
+        pytest.skip(f"this driver refuses the pass: {vp._ao.broken}")
+    assert not vp._ao.broken
+    assert ((off - on) > 8).mean() > 0.002      # it did darken the corner

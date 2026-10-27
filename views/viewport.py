@@ -3216,7 +3216,7 @@ class Viewport(QOpenGLWidget):
         self._gl.glStencilFunc(GL_ALWAYS, AO_FOLIAGE_BIT if on else 0, 0xFF)
 
     def _apply_ambient_occlusion(self, w, h, mode, style=None) -> None:
-        """The ambient occlusion pass (#954, the style's experimental switch)
+        """The ambient occlusion pass (#954, the style's switch)
         over the faces the scene FBO holds. Wireframe and X-ray have no
         opaque faces to darken."""
         # The foliage marking ends with the opaque faces, AO or not.
@@ -3231,7 +3231,7 @@ class Viewport(QOpenGLWidget):
         if not self._ao.apply(self._gl, self.context().extraFunctions(),
                               self._scene_fbo, w, h,
                               self.camera.projection_matrix(), settings):
-            if not getattr(self, "_ao_warned", False):
+            if self._ao.broken and not getattr(self, "_ao_warned", False):
                 self._ao_warned = True
                 print(f"[ambient occlusion] off: {self._ao.broken}")
         self._program.bind()

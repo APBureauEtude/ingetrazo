@@ -57,6 +57,9 @@ GL_KEEP = 0x1E00
 #: The stencil bit the foliage cutouts leave (viewport.AO_FOLIAGE_BIT).
 FOLIAGE_BIT = 0x80
 
+#: Refused depth resolves in a row before the pass gives up for the session.
+REFUSALS_TO_GIVE_UP = 3
+
 #: Texture units the passes use — clear of the face passes' 0 (images) and
 #: 1 (the sun's shadow map).
 _UNIT_DEPTH = 4
@@ -114,6 +117,8 @@ class AmbientOcclusion:
         self._progs = None
         #: A driver that refused something: the pass stays off this session.
         self.broken: Optional[str] = None
+        #: Depth resolves refused in a row (see REFUSALS_TO_GIVE_UP).
+        self._refusals = 0
 
     # -- resources ------------------------------------------------------------
     def _program(self, frag: str) -> QOpenGLShaderProgram:
@@ -197,15 +202,26 @@ class AmbientOcclusion:
             gl.glBindFramebuffer(GL_FRAMEBUFFER, scene_fbo.handle())
             return False
 
-        # 1. Resolve the depth.
+        # 1. Resolve the depth. An error some earlier call left pending (a
+        # texture upload while a big file opens) is not ours to answer for:
+        # read it out first, or it switched the pass off for the session.
+        for _ in range(16):
+            if gl.glGetError() == GL_NO_ERROR:
+                break
         gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, scene_fbo.handle())
         gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, self._depth_fbo.handle())
         extra.glBlitFramebuffer(0, 0, w, h, 0, 0, w, h,
                                 GL_DEPTH_BUFFER_BIT, GL_NEAREST)
         if gl.glGetError() != GL_NO_ERROR:
-            self.broken = "depth resolve refused"
+            # One refused frame (the view resizing under a file being
+            # opened) only skips that frame; a driver that keeps refusing
+            # switches the pass off.
+            self._refusals += 1
+            if self._refusals >= REFUSALS_TO_GIVE_UP:
+                self.broken = "depth resolve refused"
             gl.glBindFramebuffer(GL_FRAMEBUFFER, scene_fbo.handle())
             return False
+        self._refusals = 0
 
         gl.glDisable(GL_DEPTH_TEST)
         gl.glDepthMask(False)

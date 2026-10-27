@@ -3253,15 +3253,14 @@ class StylesPanel(QWidget):
                                     "section_fill_color")
         grid.addWidget(self._fill_c, 9, 1)
 
-        # Ambient occlusion (#954): experimental, off in every preset. The
+        # Ambient occlusion (#954): off in every preset. The
         # two values only take edits while the switch is on.
         from views.length_field import LengthSpinBox
         from core.style import AO_DISTANCE_RANGE
-        self._ao = QCheckBox(tr("Ambient occlusion (experimental)"))
+        self._ao = QCheckBox(tr("Ambient occlusion"))
         self._ao.setToolTip(tr(
             "Softly darkens where surfaces meet — corners, the foot of a "
-            "wall, under a bench. Experimental: if it looks wrong on your "
-            "graphics card, turn it off and tell us."))
+            "wall, under a bench."))
         self._ao.toggled.connect(self._apply_edits)
         grid.addWidget(self._ao, 10, 0, 1, 2)
         self._ao_dist_lbl = QLabel(tr("Distance:"))

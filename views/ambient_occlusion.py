@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
-"""Ambient occlusion of the 3D view (#954) — PROTOTYPE.
+"""Ambient occlusion of the 3D view (#954).
 
 The soft darkening where surfaces meet: a wall and its slab, a beam and
 its column, the foot of a cabinet. It is worked out on the picture the
@@ -13,7 +13,7 @@ face passes just drew, from its depth alone, so it never touches the model:
 4. ``ao_apply.frag`` multiplies it onto the scene, before the edges,
    dimensions, text and guides are drawn — those stay as they were.
 
-Switched on per style in the Styles panel (experimental, off in every
+Switched on per style in the Styles panel (off in every
 preset). The environment can force it, for tests and benchmarks:
 ``INGETRAZO_AO=1`` (or 0 to force it off), with
 ``INGETRAZO_AO_RADIUS`` (model units, default 0.5), ``INGETRAZO_AO_INTENSITY``

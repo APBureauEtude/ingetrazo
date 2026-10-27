@@ -62,7 +62,7 @@ class Style:
     # Lives in the STYLE, with the other modeling settings.
     section_fill: bool = True
     section_fill_color: tuple = (0.35, 0.37, 0.41)
-    # Ambient occlusion (#954, experimental): the soft darkening where
+    # Ambient occlusion (#954): the soft darkening where
     # surfaces meet. Off in every preset; the distance is in metres (how
     # far a surface still darkens its neighbour), the intensity 0–2.
     ambient_occlusion: bool = False

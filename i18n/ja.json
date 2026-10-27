@@ -3047,5 +3047,13 @@
   "New name:": "新しい名前:",
   "Active material named '{name}' — click faces to paint it": "アクティブなマテリアル「{name}」 — 面をクリックして塗ります",
   "Add panels…": "パネルを追加…",
-  "Choose which panels the sidebar shows.": "サイドバーに表示するパネルを選びます。"
+  "Choose which panels the sidebar shows.": "サイドバーに表示するパネルを選びます。",
+  "Bridge": "ブリッジ",
+  "Join two faces, a face and a line, or two lines with the faces between them.": "2 つの面、面と線、または 2 本の線を、その間の面でつなぎます。",
+  "Bridge: {n} faces added": "ブリッジ: {n} 個の面を追加しました",
+  "Select two faces, a face and a line, or two lines to bridge": "ブリッジするには、2 つの面、面と線、または 2 本の線を選択してください",
+  "Each line to bridge must be one chain of edges, without branches": "ブリッジする線は、枝分かれのない一続きのエッジでなければなりません",
+  "A face with holes can only be bridged to another face with as many holes": "穴のある面は、同じ数の穴を持つ面とだけブリッジできます",
+  "Both lie on one plane: nothing to bridge": "両方が同じ平面上にあります: ブリッジするものがありません",
+  "The two to bridge must not touch": "ブリッジする 2 つは互いに接していてはいけません"
 }

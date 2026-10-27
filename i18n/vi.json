@@ -3074,5 +3074,13 @@
   "New name:": "Tên mới:",
   "Active material named '{name}' — click faces to paint it": "Vật liệu đang dùng tên '{name}' — nhấp vào các mặt để sơn",
   "Add panels…": "Thêm bảng…",
-  "Choose which panels the sidebar shows.": "Chọn các bảng mà thanh bên hiển thị."
+  "Choose which panels the sidebar shows.": "Chọn các bảng mà thanh bên hiển thị.",
+  "Bridge": "Bắc cầu",
+  "Join two faces, a face and a line, or two lines with the faces between them.": "Nối hai mặt, một mặt và một đường, hoặc hai đường bằng các mặt ở giữa.",
+  "Bridge: {n} faces added": "Bắc cầu: đã thêm {n} mặt",
+  "Select two faces, a face and a line, or two lines to bridge": "Chọn hai mặt, một mặt và một đường, hoặc hai đường để bắc cầu",
+  "Each line to bridge must be one chain of edges, without branches": "Mỗi đường để bắc cầu phải là một chuỗi cạnh liền, không phân nhánh",
+  "A face with holes can only be bridged to another face with as many holes": "Một mặt có lỗ chỉ có thể bắc cầu tới một mặt khác có cùng số lỗ",
+  "Both lie on one plane: nothing to bridge": "Cả hai nằm trên cùng một mặt phẳng: không có gì để bắc cầu",
+  "The two to bridge must not touch": "Hai đối tượng bắc cầu không được chạm nhau"
 }

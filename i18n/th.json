@@ -3050,5 +3050,13 @@
  "New name:": "ชื่อใหม่:",
  "Active material named '{name}' — click faces to paint it": "วัสดุที่ใช้งานชื่อ '{name}' — คลิกหน้าต่างๆ เพื่อทาสี",
  "Add panels…": "เพิ่มแผง…",
- "Choose which panels the sidebar shows.": "เลือกแผงที่จะแสดงในแถบด้านข้าง"
+ "Choose which panels the sidebar shows.": "เลือกแผงที่จะแสดงในแถบด้านข้าง",
+ "Bridge": "เชื่อมสะพาน",
+ "Join two faces, a face and a line, or two lines with the faces between them.": "เชื่อมสองหน้า หน้ากับเส้น หรือสองเส้น ด้วยหน้าที่อยู่ระหว่างกัน",
+ "Bridge: {n} faces added": "เชื่อมสะพาน: เพิ่ม {n} หน้า",
+ "Select two faces, a face and a line, or two lines to bridge": "เลือกสองหน้า หน้ากับเส้น หรือสองเส้นเพื่อเชื่อม",
+ "Each line to bridge must be one chain of edges, without branches": "เส้นที่จะเชื่อมแต่ละเส้นต้องเป็นขอบต่อเนื่องสายเดียว ไม่มีแยกกิ่ง",
+ "A face with holes can only be bridged to another face with as many holes": "หน้าที่มีรูเชื่อมได้กับหน้าอื่นที่มีจำนวนรูเท่ากันเท่านั้น",
+ "Both lie on one plane: nothing to bridge": "ทั้งสองอยู่บนระนาบเดียวกัน: ไม่มีอะไรให้เชื่อม",
+ "The two to bridge must not touch": "สองสิ่งที่จะเชื่อมต้องไม่สัมผัสกัน"
 }

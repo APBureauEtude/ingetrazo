@@ -3047,5 +3047,13 @@
  "New name:": "새 이름:",
  "Active material named '{name}' — click faces to paint it": "활성 재질 '{name}' — 면을 클릭해 칠하세요",
  "Add panels…": "패널 추가…",
- "Choose which panels the sidebar shows.": "사이드바에 표시할 패널을 고릅니다."
+ "Choose which panels the sidebar shows.": "사이드바에 표시할 패널을 고릅니다.",
+ "Bridge": "브리지",
+ "Join two faces, a face and a line, or two lines with the faces between them.": "두 면, 면과 선, 또는 두 선을 그 사이의 면으로 잇습니다.",
+ "Bridge: {n} faces added": "브리지: 면 {n}개 추가",
+ "Select two faces, a face and a line, or two lines to bridge": "브리지하려면 두 면, 면과 선, 또는 두 선을 선택하세요",
+ "Each line to bridge must be one chain of edges, without branches": "브리지할 선은 갈래 없는 하나의 모서리 사슬이어야 합니다",
+ "A face with holes can only be bridged to another face with as many holes": "구멍이 있는 면은 구멍 수가 같은 다른 면과만 브리지할 수 있습니다",
+ "Both lie on one plane: nothing to bridge": "둘 다 한 평면 위에 있습니다: 브리지할 것이 없습니다",
+ "The two to bridge must not touch": "브리지할 두 대상은 서로 닿으면 안 됩니다"
 }

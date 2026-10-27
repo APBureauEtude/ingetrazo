@@ -3045,5 +3045,7 @@
  "Material '{old}' is now '{name}' on every face that wears it": "재질 '{old}'이(가) 그 재질을 쓰는 모든 면에서 '{name}'(으)로 바뀌었습니다",
  "Rename material": "재질 이름 바꾸기",
  "New name:": "새 이름:",
- "Active material named '{name}' — click faces to paint it": "활성 재질 '{name}' — 면을 클릭해 칠하세요"
+ "Active material named '{name}' — click faces to paint it": "활성 재질 '{name}' — 면을 클릭해 칠하세요",
+ "Add panels…": "패널 추가…",
+ "Choose which panels the sidebar shows.": "사이드바에 표시할 패널을 고릅니다."
 }

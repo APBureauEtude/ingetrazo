@@ -3048,5 +3048,7 @@
 "Material '{old}' is now '{name}' on every face that wears it": "ວັດສະດຸ '{old}' ຕອນນີ້ແມ່ນ '{name}' ໃນທຸກໜ້າທີ່ໃຊ້ມັນ",
 "Rename material": "ປ່ຽນຊື່ວັດສະດຸ",
 "New name:": "ຊື່ໃໝ່:",
-"Active material named '{name}' — click faces to paint it": "ວັດສະດຸທີ່ໃຊ້ຢູ່ຊື່ '{name}' — ຄລິກໃສ່ໜ້າເພື່ອທາສີ"
+"Active material named '{name}' — click faces to paint it": "ວັດສະດຸທີ່ໃຊ້ຢູ່ຊື່ '{name}' — ຄລິກໃສ່ໜ້າເພື່ອທາສີ",
+"Add panels…": "ເພີ່ມແຜງ…",
+"Choose which panels the sidebar shows.": "ເລືອກແຜງທີ່ແຖບຂ້າງຈະສະແດງ."
 }

@@ -178,6 +178,16 @@ class PreferencesDialog(QDialog):
             "How fast a drag turns the head in First Person"))
         form.addRow(tr("Mouse-look sensitivity:"), self._look_sens)
 
+        # The pointer while a tool is active: its own icon (the default),
+        # or the classic crosshair or the plain arrow for who prefers them.
+        self._cursor_style = QComboBox()
+        for key, label in (("tool", "The tool's icon"),
+                           ("crosshair", "Crosshair"), ("arrow", "Arrow")):
+            self._cursor_style.addItem(tr(label), key)
+        self._cursor_style.setCurrentIndex(max(0, self._cursor_style.findData(
+            str(_gs.value("cursor_style", "tool", st)).lower())))
+        form.addRow(tr("Tool cursor:"), self._cursor_style)
+
         self._msaa = QComboBox()
         for n in (0, 2, 4, 8):
             self._msaa.addItem(tr("Off") if n == 0 else f"{n}x", n)
@@ -697,6 +707,10 @@ class PreferencesDialog(QDialog):
         st.setValue("nav/invert_wheel",
                     "1" if self._invert.isChecked() else "0")
         self._window.viewport._invert_wheel = self._invert.isChecked()
+        _gs.set_value("cursor_style", self._cursor_style.currentData(), st)
+        reapply = getattr(self._window.viewport, "_apply_tool_cursor", None)
+        if callable(reapply):
+            reapply()                  # the active tool's pointer at once
 
         st.setValue("nav/invert_orbit_y",
                     "1" if self._invert_orbit.isChecked() else "0")

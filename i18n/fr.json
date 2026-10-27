@@ -3186,5 +3186,8 @@
  "Border (two dashes, dot)": "Limite (deux tirets, point)",
  "Lines in their layer's colour": "Lignes à la couleur de leur calque",
  "Each line in the colour of its layer, the faces in their material — a services or zoning plan in colour (recomputes the view).": "Chaque ligne à la couleur de son calque, les faces avec leur matériau — un plan de réseaux ou de zones en couleur (recalcule la vue).",
- "Texts": "Textes"
+ "Texts": "Textes",
+ "Tool cursor:": "Curseur d'outil :",
+ "The tool's icon": "L'icône de l'outil",
+ "Crosshair": "Réticule"
 }

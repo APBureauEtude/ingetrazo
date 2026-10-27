@@ -3187,5 +3187,8 @@
  "Border (two dashes, dot)": "Confine (due tratti, punto)",
  "Lines in their layer's colour": "Linee nel colore del loro livello",
  "Each line in the colour of its layer, the faces in their material — a services or zoning plan in colour (recomputes the view).": "Ogni linea nel colore del suo livello, le facce nel loro materiale — una pianta di impianti o di zone a colori (ricalcola la vista).",
- "Texts": "Testi"
+ "Texts": "Testi",
+ "Tool cursor:": "Cursore dello strumento:",
+ "The tool's icon": "L'icona dello strumento",
+ "Crosshair": "Mirino"
 }

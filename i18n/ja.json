@@ -3186,5 +3186,8 @@
   "{added} layers added, {updated} updated": "{added} 個のレイヤーを追加、{updated} 個を更新しました",
   "{n} moved out of any folder": "{n} 個をフォルダーの外へ移動しました",
   "{n} moved to '{folder}'": "{n} 個を「{folder}」に移動しました",
-  "{n} scenes updated": "{n} 個のシーンを更新しました"
+  "{n} scenes updated": "{n} 個のシーンを更新しました",
+  "Tool cursor:": "ツールのカーソル:",
+  "The tool's icon": "ツールのアイコン",
+  "Crosshair": "十字カーソル"
 }

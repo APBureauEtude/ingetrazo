@@ -3186,5 +3186,8 @@
  "Border (two dashes, dot)": "Grenze (zwei Striche, Punkt)",
  "Lines in their layer's colour": "Linien in der Farbe ihrer Ebene",
  "Each line in the colour of its layer, the faces in their material — a services or zoning plan in colour (recomputes the view).": "Jede Linie in der Farbe ihrer Ebene, die Flächen in ihrem Material – ein Installations- oder Zonenplan in Farbe (berechnet die Ansicht neu).",
- "Texts": "Texte"
+ "Texts": "Texte",
+ "Tool cursor:": "Werkzeugcursor:",
+ "The tool's icon": "Symbol des Werkzeugs",
+ "Crosshair": "Fadenkreuz"
 }

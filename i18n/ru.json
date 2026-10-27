@@ -3186,5 +3186,8 @@
  "Border (two dashes, dot)": "Граница (два штриха, точка)",
  "Lines in their layer's colour": "Линии цветом их слоя",
  "Each line in the colour of its layer, the faces in their material — a services or zoning plan in colour (recomputes the view).": "Каждая линия цветом своего слоя, грани — своим материалом: план инженерных сетей или зон в цвете (пересчитывает вид).",
- "Texts": "Тексты"
+ "Texts": "Тексты",
+ "Tool cursor:": "Курсор инструмента:",
+ "The tool's icon": "Значок инструмента",
+ "Crosshair": "Перекрестие"
 }

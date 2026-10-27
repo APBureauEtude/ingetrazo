@@ -3186,5 +3186,8 @@
  "{added} layers added, {updated} updated": "레이어 {added}개 추가, {updated}개 업데이트됨",
  "{n} moved out of any folder": "{n}개를 폴더 밖으로 이동했습니다",
  "{n} moved to '{folder}'": "{n}개를 '{folder}'(으)로 이동했습니다",
- "{n} scenes updated": "장면 {n}개 업데이트됨"
+ "{n} scenes updated": "장면 {n}개 업데이트됨",
+ "Tool cursor:": "도구 커서:",
+ "The tool's icon": "도구 아이콘",
+ "Crosshair": "십자선"
 }

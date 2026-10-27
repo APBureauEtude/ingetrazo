@@ -3189,5 +3189,8 @@
 "{added} layers added, {updated} updated": "ເພີ່ມ {added} ຊັ້ນວຽກ, ອັບເດດ {updated}",
 "{n} moved out of any folder": "ຍ້າຍ {n} ອອກຈາກໂຟນເດີແລ້ວ",
 "{n} moved to '{folder}'": "ຍ້າຍ {n} ໄປ '{folder}' ແລ້ວ",
-"{n} scenes updated": "ອັບເດດ {n} ສາກແລ້ວ"
+"{n} scenes updated": "ອັບເດດ {n} ສາກແລ້ວ",
+"Tool cursor:": "ເຄີເຊີເຄື່ອງມື:",
+"The tool's icon": "ໄອຄອນຂອງເຄື່ອງມື",
+"Crosshair": "ເຄື່ອງໝາຍບວກ"
 }

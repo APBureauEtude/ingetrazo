@@ -3194,5 +3194,8 @@
  "Border (two dashes, dot)": "Granica (dwie kreski, kropka)",
  "Lines in their layer's colour": "Linie w kolorze swojej warstwy",
  "Each line in the colour of its layer, the faces in their material — a services or zoning plan in colour (recomputes the view).": "Każda linia w kolorze swojej warstwy, ściany w swoim materiale — plan instalacji lub stref w kolorze (przelicza widok).",
- "Texts": "Teksty"
+ "Texts": "Teksty",
+ "Tool cursor:": "Kursor narzędzia:",
+ "The tool's icon": "Ikona narzędzia",
+ "Crosshair": "Krzyżyk"
 }

@@ -3189,5 +3189,8 @@
  "Border (two dashes, dot)": "Batas (dua putus, titik)",
  "Lines in their layer's colour": "Garis dengan warna layernya",
  "Each line in the colour of its layer, the faces in their material — a services or zoning plan in colour (recomputes the view).": "Setiap garis dengan warna layernya, muka dengan materialnya — denah instalasi atau zona berwarna (menghitung ulang tampilan).",
- "Texts": "Teks"
+ "Texts": "Teks",
+ "Tool cursor:": "Kursor alat:",
+ "The tool's icon": "Ikon alat",
+ "Crosshair": "Tanda silang"
 }

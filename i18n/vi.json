@@ -3213,5 +3213,8 @@
   "{added} layers added, {updated} updated": "Đã thêm {added} lớp, cập nhật {updated}",
   "{n} moved out of any folder": "Đã đưa {n} ra khỏi mọi thư mục",
   "{n} moved to '{folder}'": "Đã chuyển {n} vào '{folder}'",
-  "{n} scenes updated": "Đã cập nhật {n} cảnh"
+  "{n} scenes updated": "Đã cập nhật {n} cảnh",
+  "Tool cursor:": "Con trỏ công cụ:",
+  "The tool's icon": "Biểu tượng của công cụ",
+  "Crosshair": "Dấu chữ thập"
 }

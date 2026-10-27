@@ -3187,5 +3187,8 @@
  "Border (two dashes, dot)": "边界线（双划、点）",
  "Lines in their layer's colour": "线条使用所在图层的颜色",
  "Each line in the colour of its layer, the faces in their material — a services or zoning plan in colour (recomputes the view).": "每条线使用所在图层的颜色，面保留其材质 — 彩色的设备或分区平面图（重新计算视图）。",
- "Texts": "文字"
+ "Texts": "文字",
+ "Tool cursor:": "工具光标：",
+ "The tool's icon": "工具图标",
+ "Crosshair": "十字线"
 }

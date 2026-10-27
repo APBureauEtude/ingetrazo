@@ -3193,5 +3193,8 @@
  "Border (two dashes, dot)": "Limite (dois traços e ponto)",
  "Lines in their layer's colour": "Linhas na cor da sua camada",
  "Each line in the colour of its layer, the faces in their material — a services or zoning plan in colour (recomputes the view).": "Cada linha na cor da sua camada e as faces com o seu material — uma planta de instalações ou de zonas em cor (recalcula a vista).",
- "Texts": "Textos"
+ "Texts": "Textos",
+ "Tool cursor:": "Cursor da ferramenta:",
+ "The tool's icon": "O ícone da ferramenta",
+ "Crosshair": "Cruz"
 }

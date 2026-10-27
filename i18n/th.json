@@ -3189,5 +3189,8 @@
  "{added} layers added, {updated} updated": "เพิ่ม {added} เลเยอร์ อัปเดต {updated} เลเยอร์",
  "{n} moved out of any folder": "ย้าย {n} รายการออกจากโฟลเดอร์แล้ว",
  "{n} moved to '{folder}'": "ย้าย {n} รายการไปที่ '{folder}' แล้ว",
- "{n} scenes updated": "อัปเดต {n} ฉากแล้ว"
+ "{n} scenes updated": "อัปเดต {n} ฉากแล้ว",
+ "Tool cursor:": "เคอร์เซอร์เครื่องมือ:",
+ "The tool's icon": "ไอคอนของเครื่องมือ",
+ "Crosshair": "กากบาท"
 }

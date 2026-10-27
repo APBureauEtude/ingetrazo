@@ -182,7 +182,12 @@ def _off_axis_px(vp, cursor):
     (V(4.0, 1.05), "reference"),       # square off the wall: the purple line
     (V(5.0, 1.05), "from_point"),      # the post's corner, foot on the diagonal
 ])
-def test_a_thin_rectangle_keeps_its_width(far, rule):
+def test_a_thin_rectangle_keeps_its_width(far, rule, monkeypatch):
+    # The hover reads the live modifiers: a Shift left over from another
+    # test's last key event would lock the axis under this one.
+    from PySide6.QtGui import QGuiApplication
+    monkeypatch.setattr(QGuiApplication, "keyboardModifiers",
+                        staticmethod(lambda: Qt.NoModifier))
     win, vp = _scene()
     try:
         assert _off_axis_px(vp, far) < vp.snap_threshold_px

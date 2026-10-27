@@ -3063,5 +3063,14 @@
   "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "Chỉ cho đường cong phẳng: đường cong này còn là biên của các mặt nằm ngoài mặt phẳng của nó, như mặt bên của một hình trụ đã đẩy",
   "This curve cannot be rebuilt": "Không thể dựng lại đường cong này",
   "Diameter": "Đường kính",
-  "Side": "Cạnh"
+  "Side": "Cạnh",
+  "Material name": "Tên vật liệu",
+  "Rename the active material — on every face that wears it. The library keeps its own name.": "Đổi tên vật liệu đang dùng — trên mọi mặt mang nó. Thư viện vẫn giữ tên riêng.",
+  "Change the active colour — on every face that wears it": "Đổi màu đang dùng — trên mọi mặt mang màu đó",
+  "(modified)": "(đã sửa)",
+  "There is already a material called '{name}'": "Đã có một vật liệu tên '{name}'",
+  "Material '{old}' is now '{name}' on every face that wears it": "Vật liệu '{old}' giờ là '{name}' trên mọi mặt mang nó",
+  "Rename material": "Đổi tên vật liệu",
+  "New name:": "Tên mới:",
+  "Active material named '{name}' — click faces to paint it": "Vật liệu đang dùng tên '{name}' — nhấp vào các mặt để sơn"
 }

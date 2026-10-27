@@ -3036,5 +3036,14 @@
  "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "평면 곡선에만 해당: 이 곡선은 밀어 올린 원기둥의 옆면처럼 평면 밖의 면에도 경계가 됩니다",
  "This curve cannot be rebuilt": "이 곡선은 다시 만들 수 없습니다",
  "Diameter": "지름",
- "Side": "변"
+ "Side": "변",
+ "Material name": "재질 이름",
+ "Rename the active material — on every face that wears it. The library keeps its own name.": "활성 재질의 이름을 바꿉니다 — 그 재질을 쓰는 모든 면에서. 라이브러리의 이름은 그대로입니다.",
+ "Change the active colour — on every face that wears it": "활성 색상을 바꿉니다 — 그 색을 쓰는 모든 면에서",
+ "(modified)": "(수정됨)",
+ "There is already a material called '{name}'": "'{name}' 이름의 재질이 이미 있습니다",
+ "Material '{old}' is now '{name}' on every face that wears it": "재질 '{old}'이(가) 그 재질을 쓰는 모든 면에서 '{name}'(으)로 바뀌었습니다",
+ "Rename material": "재질 이름 바꾸기",
+ "New name:": "새 이름:",
+ "Active material named '{name}' — click faces to paint it": "활성 재질 '{name}' — 면을 클릭해 칠하세요"
 }

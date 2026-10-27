@@ -3039,5 +3039,14 @@
  "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "ใช้ได้เฉพาะเส้นโค้งที่แบนราบ: เส้นนี้ยังเป็นขอบของหน้าที่อยู่นอกระนาบของมัน เช่น ด้านข้างของทรงกระบอกที่ดันขึ้น",
  "This curve cannot be rebuilt": "ไม่สามารถสร้างเส้นโค้งนี้ใหม่ได้",
  "Diameter": "เส้นผ่านศูนย์กลาง",
- "Side": "ด้าน"
+ "Side": "ด้าน",
+ "Material name": "ชื่อวัสดุ",
+ "Rename the active material — on every face that wears it. The library keeps its own name.": "เปลี่ยนชื่อวัสดุที่ใช้งานอยู่ — บนทุกหน้าที่ใช้วัสดุนั้น ไลบรารียังคงใช้ชื่อเดิม",
+ "Change the active colour — on every face that wears it": "เปลี่ยนสีที่ใช้งานอยู่ — บนทุกหน้าที่ใช้สีนั้น",
+ "(modified)": "(แก้ไขแล้ว)",
+ "There is already a material called '{name}'": "มีวัสดุชื่อ '{name}' อยู่แล้ว",
+ "Material '{old}' is now '{name}' on every face that wears it": "วัสดุ '{old}' เปลี่ยนเป็น '{name}' บนทุกหน้าที่ใช้วัสดุนั้นแล้ว",
+ "Rename material": "เปลี่ยนชื่อวัสดุ",
+ "New name:": "ชื่อใหม่:",
+ "Active material named '{name}' — click faces to paint it": "วัสดุที่ใช้งานชื่อ '{name}' — คลิกหน้าต่างๆ เพื่อทาสี"
 }

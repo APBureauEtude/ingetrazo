@@ -3039,5 +3039,14 @@
 "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "ສະເພາະເສັ້ນໂຄ້ງທີ່ຮາບພຽງ: ເສັ້ນນີ້ຍັງເປັນຂອບຂອງໜ້າທີ່ຢູ່ນອກລະນາບຂອງມັນ ເຊັ່ນ ດ້ານຂ້າງຂອງທໍ່ກະບອກທີ່ຖືກດັນ",
 "This curve cannot be rebuilt": "ບໍ່ສາມາດສ້າງເສັ້ນໂຄ້ງນີ້ຄືນໃໝ່ໄດ້",
 "Diameter": "ເສັ້ນຜ່ານສູນກາງ",
-"Side": "ດ້ານ"
+"Side": "ດ້ານ",
+"Material name": "ຊື່ວັດສະດຸ",
+"Rename the active material — on every face that wears it. The library keeps its own name.": "ປ່ຽນຊື່ວັດສະດຸທີ່ໃຊ້ຢູ່ — ໃນທຸກໜ້າທີ່ໃຊ້ມັນ. ຫ້ອງສະໝຸດຍັງຮັກສາຊື່ຂອງມັນໄວ້.",
+"Change the active colour — on every face that wears it": "ປ່ຽນສີທີ່ໃຊ້ຢູ່ — ໃນທຸກໜ້າທີ່ໃຊ້ສີນັ້ນ",
+"(modified)": "(ດັດແກ້ແລ້ວ)",
+"There is already a material called '{name}'": "ມີວັດສະດຸຊື່ '{name}' ແລ້ວ",
+"Material '{old}' is now '{name}' on every face that wears it": "ວັດສະດຸ '{old}' ຕອນນີ້ແມ່ນ '{name}' ໃນທຸກໜ້າທີ່ໃຊ້ມັນ",
+"Rename material": "ປ່ຽນຊື່ວັດສະດຸ",
+"New name:": "ຊື່ໃໝ່:",
+"Active material named '{name}' — click faces to paint it": "ວັດສະດຸທີ່ໃຊ້ຢູ່ຊື່ '{name}' — ຄລິກໃສ່ໜ້າເພື່ອທາສີ"
 }

@@ -3036,5 +3036,14 @@
   "Only for a flat curve: this one also bounds faces out of its plane, such as the side of a pushed cylinder": "平らな曲線のみ: この曲線は押し出した円柱の側面のように、平面の外にある面の境界にもなっています",
   "This curve cannot be rebuilt": "この曲線は作り直せません",
   "Diameter": "直径",
-  "Side": "辺"
+  "Side": "辺",
+  "Material name": "マテリアル名",
+  "Rename the active material — on every face that wears it. The library keeps its own name.": "アクティブなマテリアルの名前を変更します — それを使うすべての面で。ライブラリの名前はそのままです。",
+  "Change the active colour — on every face that wears it": "アクティブな色を変更します — それを使うすべての面で",
+  "(modified)": "（変更済み）",
+  "There is already a material called '{name}'": "「{name}」という名前のマテリアルはすでにあります",
+  "Material '{old}' is now '{name}' on every face that wears it": "マテリアル「{old}」は、それを使うすべての面で「{name}」になりました",
+  "Rename material": "マテリアル名を変更",
+  "New name:": "新しい名前:",
+  "Active material named '{name}' — click faces to paint it": "アクティブなマテリアル「{name}」 — 面をクリックして塗ります"
 }

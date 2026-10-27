@@ -17,6 +17,11 @@ follow [SemVer](https://semver.org).
   abrirse** cuando la última carpeta usada estaba en una unidad de red que
   ya no responde (#948): ahora empiezan en la carpeta del documento o en
   Documentos.
+- **Las sombras del sol ya no se ven pixeladas** en el borde: cada muestra
+  se suaviza entre los puntos del mapa de sombras, y la orilla queda lisa en
+  vez de en escalones (de 4 cm en una plaza, de 30 cm en una planta de
+  280 m). El detalle fino de cerca en modelos grandes llega en la 0.6.1
+  (#958).
 
 ## [0.5.10] — 2026-10-26
 

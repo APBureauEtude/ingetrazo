@@ -19,15 +19,25 @@ sección 0.5.10.1, más abajo.
 
 ### Añadido
 
+- **Capas 2.0** (#652, @canalsecuario-blip en #728): las capas tienen
+  pestaña propia junto al Navegador, con ojo, candado, aislar, capa activa,
+  color, tipo y grosor de línea, transparencia e impresión por capa,
+  carpetas, filtros y menú contextual completo. Una **barra Capas** cambia
+  la capa activa o mueve la selección a otra. Lo nuevo (grupos, cotas,
+  textos, guías) va a la capa activa; sin capa activa, las guías, cotas y
+  textos van a sus capas automáticas «Guías», «Dimensiones» y «Textos».
+  «Color por capa» en el estilo. En las láminas, cada capa con su tipo y
+  grosor de línea, «No imprimir» y leyenda; el DXF lleva una capa DXF por
+  capa del modelo, con su color y tipo de línea. Los .igz guardados abren
+  igual en la 0.5.10.
 - **La oclusión ambiental deja de ser experimental** (#954): la casilla de
   Estilos se llama ahora «Oclusión ambiental» y sigue apagada en todos los
-  estilos. Se afinaron los tres defectos de la ronda Windows: el halo
-  oscuro y dentado junto al borde de pilares y tablas (el cielo junto a un
-  objeto ya no se oscurece nunca), la figura recortada en bloques detrás de
-  un poste y el moteado en «nubes» de las caras grandes y lisas. Además, un
-  error gráfico pasajero al abrir un archivo grande ya no la apaga para
-  toda la sesión. Apagada, la imagen es idéntica a la de antes; encendida
-  cuesta lo mismo que en la 0.5.10.1.
+  estilos. Se afinaron los defectos de la ronda Windows: el halo oscuro
+  y dentado junto al borde de pilares y tablas (el cielo junto a un objeto
+  ya no se oscurece nunca) y el moteado en «nubes» de las caras grandes y
+  lisas. Además, un error gráfico pasajero al abrir un archivo grande ya no
+  la apaga para toda la sesión. Apagada, la imagen es idéntica a la de
+  antes; encendida cuesta lo mismo que en la 0.5.10.1.
 - **Sombras nítidas en las imágenes exportadas y en las láminas**: la vista
   reparte el mapa de sombras sobre todo el modelo, así que en una plaza de
   100 m cada punto cubre 5 cm y la sombra sale suave. Al exportar imagen
@@ -41,24 +51,13 @@ sección 0.5.10.1, más abajo.
   tablas de una banca proyectan su sombra una por una. Al orbitar, mover o
   editar vuelve al mapa de siempre, así que la órbita no se hace más lenta;
   al quedarse quieta hay un solo cuadro de unos 40 ms en el modelo SPR.
-- **Capas 2.0** (#652, @canalsecuario-blip en #728): las capas tienen
-  pestaña propia junto al Navegador, con ojo, candado, aislar, capa activa,
-  color, tipo y grosor de línea, transparencia e impresión por capa,
-  carpetas, filtros y menú contextual completo. Una **barra Capas** cambia
-  la capa activa o mueve la selección a otra. Lo nuevo (grupos, cotas,
-  textos, guías) va a la capa activa; sin capa activa, las guías, cotas y
-  textos van a sus capas automáticas «Guías», «Dimensiones» y «Textos».
-  «Color por capa» en el estilo. En las láminas, cada capa con su tipo y
-  grosor de línea, «No imprimir» y leyenda; el DXF lleva una capa DXF por
-  capa del modelo, con su color y tipo de línea. Los .igz guardados abren
-  igual en la 0.5.10.
 - **Cinco idiomas nuevos:** japonés (@nonasige-ui, #597), coreano
   (@ultracat, #785), vietnamita (@vandang890615, #936), lao
   (@bounkirdni-2025, #850) y tailandés (@PRIDA-TAKON, #824). IngeTrazo
   arranca en ese idioma la primera vez si el sistema lo usa; se cambia en
   Preferencias ▸ Idioma.
-- **Línea bloqueada que encuentra aristas y caras** (#245, @pacaeiro en #876): con
-  una dirección bloqueada (flechas, Mayús o la referencia), el cursor sobre
+- **Línea bloqueada que encuentra aristas y caras** (#245, @pacaeiro en
+  #876): con una dirección bloqueada (flechas, Mayús o la referencia), el cursor sobre
   una arista ofrece el punto donde la línea bloqueada corta la recta de esa
   arista («Intersección con arista», con su prolongación punteada), y sobre
   una cara, donde atraviesa su plano («Intersección con cara»). Sirve en
@@ -92,9 +91,9 @@ sección 0.5.10.1, más abajo.
   paneles (@canalsecuario-blip, #797), la misma lista de Ventana ▸ Paneles.
 - **Campos de lámina en inglés y alemán** (@pkoska, #899): `{project}`,
   `{projekt}`… además de los nombres en español de siempre.
-- **Elegir el cursor de las herramientas** (@Booshdag-io, #858): en Preferencias,
-  «Cursor de herramienta» ofrece el icono de la herramienta (como siempre,
-  por defecto), la cruz clásica o la flecha.
+- **Elegir el cursor de las herramientas** (@Booshdag-io en #858): en
+  Preferencias, «Cursor de herramienta» ofrece el icono de la herramienta
+  (como siempre, por defecto), la cruz clásica o la flecha.
 - **Agua de piscina**, un segundo material de agua en la biblioteca (#941,
   @hamzah1985).
 

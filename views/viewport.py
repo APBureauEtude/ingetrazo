@@ -1798,8 +1798,9 @@ class Viewport(QOpenGLWidget):
         # for Help ▸ About, written to the log folder, and announced to the
         # main window so a CPU-drawn viewport says so before anyone wonders
         # why orbiting crawls (a Windows box without a working driver).
-        from core.glinfo import read_gl_info, write_gl_report
+        from core.glinfo import meets_gl_requirement, read_gl_info, write_gl_report
         self.gl_info = read_gl_info(self._gl)
+        self.gl_info["supported"] = meets_gl_requirement(self.gl_info["version"])
         from PySide6.QtCore import QCoreApplication
         from PySide6.QtGui import QGuiApplication
         self.gl_info["platform"] = QGuiApplication.platformName()
@@ -1808,6 +1809,13 @@ class Viewport(QOpenGLWidget):
             self.gl_info["fallback"] = _app.property("gl_fallback") or ""
         write_gl_report(self.gl_info)
         self.glReady.emit(self.gl_info)
+        if not self.gl_info["supported"]:
+            # Below GL 3.3 the shaders cannot compile (issue #751). Make no
+            # GL object on this context, so none is freed on it at exit
+            # either; paintGL only clears, and the main window explains.
+            self._program = None              # a previous context's, if any
+            self._gl.glClearColor(0.93, 0.94, 0.96, 1.0)
+            return
         # GL cleanup has exactly one legal moment: the context's own farewell.
         # (initializeGL re-runs if the context is ever recreated; each context
         # gets its own connection, which is precisely what we want.)
@@ -1909,7 +1917,7 @@ class Viewport(QOpenGLWidget):
     def resizeGL(self, w: int, h: int) -> None:
         # Qt passes framebuffer-pixel sizes here (already scaled by DPR), so
         # this is the authoritative source for FBO and viewport dimensions.
-        if self._gl is None:
+        if self._gl is None or self._program is None:
             return
         self._gl.glViewport(0, 0, w, h)
         self.camera.set_aspect(w, h)
@@ -2027,7 +2035,9 @@ class Viewport(QOpenGLWidget):
         self._depth_clean = None          # see the read-back at the end
         self._sync_axes()
         self._sync_projection()
-        if self._gl is None or self._program is None:
+        if self._program is None:
+            if self._gl is not None:          # a context below GL 3.3
+                self._gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
             return
         _pt0 = _time_mod.perf_counter() if _PERF else 0.0
 
@@ -5399,7 +5409,8 @@ class Viewport(QOpenGLWidget):
     def upload_terrain(self, terrain) -> None:
         """Build the terrain VBO (pos+uv) and its mosaic texture from a
         :class:`~georef.terrain.TerrainObject`."""
-        if terrain is None or not terrain.vertices or not terrain.triangles:
+        if (terrain is None or not terrain.vertices or not terrain.triangles
+                or self._program is None):        # no GL 3.3 to draw it
             self._terrain_count = 0
             return
         self.makeCurrent()
@@ -5485,7 +5496,7 @@ class Viewport(QOpenGLWidget):
         is slow enough that the caller does it off the GUI thread); anything
         missing simply draws untextured rather than blocking here.
         """
-        if mesh is None or mesh.triangle_count == 0:
+        if mesh is None or mesh.triangle_count == 0 or self._program is None:
             self.release_photo_textures()
             self._photo_count = 0
             self.update()
@@ -6079,7 +6090,7 @@ class Viewport(QOpenGLWidget):
         self._preview_groups = set(map(id, groups))
         self._preview_epoch = getattr(self, "_preview_epoch", 0) + 1
         self._preview_offset = QVector3D(0.0, 0.0, 0.0)
-        if not self._preview_groups:
+        if not self._preview_groups or self._program is None:
             return
         self.makeCurrent()
         try:

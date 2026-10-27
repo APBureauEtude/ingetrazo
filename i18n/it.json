@@ -1533,6 +1533,8 @@
  "− Row": "− Riga",
  "⚠ {name} (load error)": "⚠ {name} (errore di caricamento)",
  "IngeTrazo is drawing with the software renderer ({renderer}): the viewport will be slow. Update the graphics driver, or assign IngeTrazo to the high-performance GPU in Windows graphics settings.": "IngeTrazo sta disegnando con il renderer software ({renderer}): la viewport sarà lenta. Aggiorna il driver grafico oppure assegna IngeTrazo alla GPU ad alte prestazioni nelle impostazioni grafiche di Windows.",
+ "OpenGL 3.3 not available": "OpenGL 3.3 non disponibile",
+ "IngeTrazo needs OpenGL 3.3, but this computer only offers OpenGL {version} ({renderer}). The viewport stays empty.\n\nUpdate the graphics driver from the NVIDIA, AMD or Intel website. On a laptop with two graphics chips, assign IngeTrazo to the high-performance GPU (Windows: Settings ▸ System ▸ Display ▸ Graphics) and start it again.": "IngeTrazo richiede OpenGL 3.3, ma questo computer offre solo OpenGL {version} ({renderer}). La viewport resta vuota.\n\nAggiorna il driver grafico dal sito di NVIDIA, AMD o Intel. Su un portatile con due chip grafici, assegna IngeTrazo alla GPU ad alte prestazioni (Windows: Impostazioni ▸ Sistema ▸ Schermo ▸ Grafica) e riavvialo.",
  "IngeTrazo asked Windows for the high-performance GPU; it applies the next time you open the program.": "IngeTrazo ha richiesto a Windows la GPU ad alte prestazioni; si applica alla prossima apertura del programma.",
  "The AI bridge is listening on 127.0.0.1:{port}. Connect a Claude client:": "Il bridge IA è in ascolto su 127.0.0.1:{port}. Collega un client Claude:",
  "Claude Code (in a terminal):": "Claude Code (in un terminale):",

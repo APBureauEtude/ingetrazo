@@ -3029,5 +3029,8 @@
 "OpenGL 3.3 not available": "ບໍ່ມີ OpenGL 3.3",
 "IngeTrazo needs OpenGL 3.3, but this computer only offers OpenGL {version} ({renderer}). The viewport stays empty.\n\nUpdate the graphics driver from the NVIDIA, AMD or Intel website. On a laptop with two graphics chips, assign IngeTrazo to the high-performance GPU (Windows: Settings ▸ System ▸ Display ▸ Graphics) and start it again.": "IngeTrazo ຕ້ອງການ OpenGL 3.3, ແຕ່ຄອມພິວເຕີນີ້ມີພຽງ OpenGL {version} ({renderer}). ໜ້າຈໍມຸມມອງຈະຫວ່າງເປົ່າ.\n\nອັບເດດໄດຣເວີກາຟິກຈາກເວັບໄຊຂອງ NVIDIA, AMD ຫຼື Intel. ໃນແລັບທັອບທີ່ມີຊິບກາຟິກສອງອັນ, ໃຫ້ກຳນົດ IngeTrazo ໃຊ້ GPU ປະສິດທິພາບສູງ (Windows: ການຕັ້ງຄ່າ ▸ ລະບົບ ▸ ຈໍສະແດງຜົນ ▸ ກາຟິກ) ແລ້ວເປີດໃໝ່.",
 "Intersect with Edge": "ຕັດກັບຂອບ",
-"Intersect with Face": "ຕັດກັບໜ້າ"
+"Intersect with Face": "ຕັດກັບໜ້າ",
+"Scale…": "ມາດຕາສ່ວນ…",
+"Reset scale": "ຕັ້ງມາດຕາສ່ວນຄືນໃໝ່",
+"Type the X, Y, Z scale in the window; Enter or leaving the field applies it.": "ພິມມາດຕາສ່ວນ X, Y, Z ໃນໜ້າຕ່າງ; ກົດ Enter ຫຼື ອອກຈາກຊ່ອງເພື່ອນຳໃຊ້."
 }

@@ -4042,21 +4042,39 @@ class Viewport(QOpenGLWidget):
     @staticmethod
     def _instances_in_frustum(lo, hi, planes, margin=0.0):
         """Mask of the boxes ``lo``/``hi`` not wholly outside one of the
-        frustum ``planes`` — moved ``margin`` world units outward."""
+        frustum ``planes`` — moved ``margin`` world units outward.
+
+        A box whose bounds are not finite is always kept: ±inf is what a
+        placement with no known extent is stored as, a NaN can creep into
+        a huge model's coordinates, and neither can be proven outside —
+        the rule ``_bounding_spheres`` and ``_visible_spans`` already
+        keep for unknown extents. Running the products on them anyway
+        multiplied inf by a zero plane component (``invalid value
+        encountered in multiply``, issue #952) and let the NaN comparison
+        drop the box."""
         import numpy as np
+        lo = np.asarray(lo)
+        hi = np.asarray(hi)
+        keep = np.ones(len(lo), dtype=bool)
+        finite = np.isfinite(lo).all(axis=1) & np.isfinite(hi).all(axis=1)
+        idx = np.flatnonzero(finite)
+        if not len(idx):
+            return keep
+        flo, fhi = lo[idx], hi[idx]
+        fkeep = np.ones(len(idx), dtype=bool)
         # Same p-vertex test as ``_aabb_visible``, all boxes at once — a
         # plane at a time on the box columns (the (planes, boxes, 3) array
         # it used to build was most of a frame's gather, #158); the same
         # products and sums, in the same order.
-        keep = np.ones(len(lo), dtype=bool)
         for pl in planes:
             nx, ny, nz, d = (float(c) for c in pl)
             if margin:
                 d += margin * (nx * nx + ny * ny + nz * nz) ** 0.5
-            px = hi[:, 0] if nx >= 0.0 else lo[:, 0]
-            py = hi[:, 1] if ny >= 0.0 else lo[:, 1]
-            pz = hi[:, 2] if nz >= 0.0 else lo[:, 2]
-            keep &= ((px * nx + py * ny) + pz * nz) + d >= 0.0
+            px = fhi[:, 0] if nx >= 0.0 else flo[:, 0]
+            py = fhi[:, 1] if ny >= 0.0 else flo[:, 1]
+            pz = fhi[:, 2] if nz >= 0.0 else flo[:, 2]
+            fkeep &= ((px * nx + py * ny) + pz * nz) + d >= 0.0
+        keep[idx] = fkeep
         return keep
 
     #: An instance whose bounding sphere spans less than this many

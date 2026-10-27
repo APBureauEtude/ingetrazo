@@ -129,6 +129,13 @@ def test_people_and_images_go_grey_with_the_rest(tmp_path, mode):
             return img.pixelColor(int(x * r), int(y * r))
 
         spots = (V(-3, 0, 1), V(5, 0, 1))       # the person, the image
+        # A figure's texture is loaded on a timer: wait for it to show.
+        from PySide6.QtTest import QTest
+        for _ in range(40):
+            if all(c.red() > 150 and c.green() < 80
+                   for c in (colour(p) for p in spots)):
+                break
+            QTest.qWait(50)
         before = [colour(p) for p in spots]
         for c in before:
             assert c.red() > 150 and c.green() < 80, c.name()

@@ -30,7 +30,8 @@ LANGUAGE_NAMES = {"en": "English", "es": "Español",
                   "pt-BR": "Português (Brasil)", "zh-CN": "简体中文", "it": "Italiano",
                   "id": "Bahasa Indonesia", "fr": "Français", "de": "Deutsch",
                   "pl": "Polski", "ru": "Русский", "vi": "Tiếng Việt",
-                  "lo": "ລາວ", "th": "ไทย"}
+                  "lo": "ລາວ", "th": "ไทย",
+                  "ja": "日本語"}
 
 _catalog: dict[str, str] = {}
 _lang = "en"

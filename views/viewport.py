@@ -2209,6 +2209,8 @@ class Viewport(QOpenGLWidget):
         _fmark("shadowmap")
 
         fc = self._frame_cache_key(mvp, w, h, style, mode)
+        settled = self._frame_cache_track(
+            fc[0] if fc is not None else tuple(mvp.data()))
         if fc is None:
             self._paint_static(mvp, w, h, style, mode, _fmark,
                                self._hover_entity)
@@ -2217,7 +2219,15 @@ class Viewport(QOpenGLWidget):
             # changed (a pointer move): see _frame_cache_key.
             if not self._frame_cache_restore(fc, w, h):
                 self._paint_static(mvp, w, h, style, mode, _fmark, None)
-                self._frame_cache_store(fc, w, h)
+                # Keep the picture only once the view has settled: while
+                # the camera moves, every frame's key is new, so the copy
+                # (~0.8 ms of an orbit frame, issue #944) was stored and
+                # never restored. The frame after the last camera move
+                # stores instead; a change that is not the camera (a
+                # selection, an edit) keeps the same MVP and stores at
+                # once, as before.
+                if settled:
+                    self._frame_cache_store(fc, w, h)
             self._paint_hover(mvp, w, h)
 
         # Rubber band preview. Loose drawing tools float it on top (depth test
@@ -3009,6 +3019,16 @@ class Viewport(QOpenGLWidget):
                 self._faces_count, self._edges_count, self._sel_faces_count,
                 self._selected_count, self.camera.fov_deg,
                 self.camera.perspective)
+
+    def _frame_cache_track(self, mvp_key) -> bool:
+        """Note this frame's view (``mvp_key``: the frame cache key's MVP
+        element, or the MVP itself when there is no key) and answer
+        whether it is the same as the last frame's — the view has
+        settled, so a picture kept now can be restored by the frames
+        after it. While the camera moves every frame's differs."""
+        prev = getattr(self, "_frame_cache_prev_mvp", None)
+        self._frame_cache_prev_mvp = mvp_key
+        return prev == mvp_key
 
     def _frame_cache_store(self, key, w, h) -> None:
         """Keep the scene FBO's colour and depth as the static passes left
@@ -5278,6 +5298,7 @@ class Viewport(QOpenGLWidget):
         for name in self._LAZY_GL:
             if getattr(self, name, None) is not None:
                 setattr(self, name, None)
+        self._frame_cache_prev_mvp = None   # the kept picture is forgotten
         self._fbo_size = (0, 0)
         if getattr(self, "_proto_draw", None):
             self._proto_draw = {}

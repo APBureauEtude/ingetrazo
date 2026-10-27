@@ -2583,7 +2583,7 @@ class Viewport(QOpenGLWidget):
         self._draw_section_fill(mode, style)
         # Ambient occlusion (#954): onto the opaque faces only — the glass
         # below, the billboards, highlights and every edge come after it.
-        self._apply_ambient_occlusion(w, h, mode)
+        self._apply_ambient_occlusion(w, h, mode, style)
 
         # Translucent material runs (.skp trans with useTrans): drawn
         # after everything opaque, blended, depth-tested but not depth-
@@ -3090,15 +3090,15 @@ class Viewport(QOpenGLWidget):
         self._program.setUniformValue(self._loc_hard_cutout, 1 if on else 0)
         self._gl.glStencilFunc(GL_ALWAYS, AO_FOLIAGE_BIT if on else 0, 0xFF)
 
-    def _apply_ambient_occlusion(self, w, h, mode) -> None:
-        """The ambient occlusion pass (#954, prototype: ``INGETRAZO_AO=1``)
+    def _apply_ambient_occlusion(self, w, h, mode, style=None) -> None:
+        """The ambient occlusion pass (#954, the style's experimental switch)
         over the faces the scene FBO holds. Wireframe and X-ray have no
         opaque faces to darken."""
         # The foliage marking ends with the opaque faces, AO or not.
         self._gl.glDisable(GL_STENCIL_TEST)
         self._gl.glStencilMask(0xFF)
         from views import ambient_occlusion as _ao
-        settings = _ao.settings_from_env()
+        settings = _ao.settings_for(style)
         if settings is None or mode in ("wireframe", "xray"):
             return
         if getattr(self, "_ao", None) is None:

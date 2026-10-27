@@ -13,7 +13,9 @@ face passes just drew, from its depth alone, so it never touches the model:
 4. ``ao_apply.frag`` multiplies it onto the scene, before the edges,
    dimensions, text and guides are drawn — those stay as they were.
 
-Prototype switch (no interface yet): ``INGETRAZO_AO=1``, with
+Switched on per style in the Styles panel (experimental, off in every
+preset). The environment can force it, for tests and benchmarks:
+``INGETRAZO_AO=1`` (or 0 to force it off), with
 ``INGETRAZO_AO_RADIUS`` (model units, default 0.5), ``INGETRAZO_AO_INTENSITY``
 (0–2, default 1.0) and ``INGETRAZO_AO_SAMPLES`` (default 16);
 ``INGETRAZO_AO_DEBUG=1`` shows the bare map instead of the picture.
@@ -69,11 +71,26 @@ def _env_float(name: str, default: float) -> float:
 
 
 def settings_from_env() -> Optional[dict]:
-    """The prototype's settings, or None when it is off."""
+    """The settings forced from the environment, or None when it is off."""
     if os.environ.get("INGETRAZO_AO", "0") in ("", "0"):
         return None
     return {"radius": max(_env_float("INGETRAZO_AO_RADIUS", 0.5), 1e-4),
             "intensity": _env_float("INGETRAZO_AO_INTENSITY", 1.0),
+            "samples": int(max(4, min(64, _env_float("INGETRAZO_AO_SAMPLES",
+                                                      16))))}
+
+
+def settings_for(style) -> Optional[dict]:
+    """What this frame draws with: the style's switch and values (Styles
+    panel), unless ``INGETRAZO_AO`` is set — 1 forces it on with the
+    environment's values, 0 forces it off (tests, benchmarks)."""
+    forced = os.environ.get("INGETRAZO_AO")
+    if forced is not None and forced != "":
+        return settings_from_env()
+    if style is None or not getattr(style, "ambient_occlusion", False):
+        return None
+    return {"radius": max(float(style.ao_distance), 1e-4),
+            "intensity": float(style.ao_intensity),
             "samples": int(max(4, min(64, _env_float("INGETRAZO_AO_SAMPLES",
                                                       16))))}
 

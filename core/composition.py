@@ -18,6 +18,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Optional
 
+from core.i18n import current_language
 from core.i18n import tr as _tr
 
 #: ISO 216 portrait sizes, mm (width, height).
@@ -1529,6 +1530,21 @@ def _migrate_fixed_scale_labels(c: "Composicion") -> None:
 #: before painting a sheet (canvas or print), read by ``expand_fields``.
 _FIELD_CTX: dict = {}
 
+#: Each field by its Spanish name — the one documents and the catalogs
+#: carry — with its English and German names. All three expand alike.
+FIELD_NAMES = {
+    "proyecto": ("project", "projekt"),
+    "autor": ("author", "verfasser"),
+    "lamina": ("sheet", "plannr"),
+    "escala": ("scale", "massstab"),
+    "escena": ("scene", "szene"),
+    "fecha": ("date", "datum"),
+    "archivo": ("file", "datei"),
+    "nombre": ("name", "planname"),
+    "hoja": ("page", "blatt"),
+    "total": ("total", "gesamt"),
+}
+
 
 def set_field_context(comp=None, scene=None, path=None, index=None,
                       total=None) -> None:
@@ -1558,7 +1574,7 @@ def field_values(frame_uid: str = "") -> dict:
             scene_name = f.view_key[6:]          # the main frame's, else any
             break
     idx, total = _FIELD_CTX.get("index"), _FIELD_CTX.get("total")
-    return {
+    vals = {
         "proyecto": (getattr(caj, "proyecto", "") or "") if caj else "",
         "autor": (getattr(caj, "autor", "") or "") if caj else "",
         "lamina": ((getattr(caj, "lamina", "") or "") if caj else "")
@@ -1571,6 +1587,24 @@ def field_values(frame_uid: str = "") -> dict:
         "hoja": str(idx + 1) if idx is not None else "",
         "total": str(total) if total else "",
     }
+    for es, names in FIELD_NAMES.items():
+        for name in names:
+            vals.setdefault(name, vals[es])
+    return vals
+
+
+def local_field_names(text: str) -> str:
+    """``text`` with each ``{campo}`` it names spelled the way the
+    language running spells it: ``{projekt}`` in German, ``{project}`` in
+    English. Every other language keeps the Spanish names."""
+    col = {"en": 0, "de": 1}.get(current_language())
+    if col is None:
+        return text
+    import re
+    return re.sub(r"\{([a-z]+)\}",
+                  lambda m: ("{%s}" % FIELD_NAMES[m.group(1)][col]
+                             if m.group(1) in FIELD_NAMES else m.group(0)),
+                  text)
 
 
 _FIELD_RE = None
@@ -1579,7 +1613,8 @@ _FIELD_RE = None
 def expand_fields(text, frame_uid: str = "") -> str:
     """Replace ``{proyecto}``, ``{lamina}``, ``{escala}``, ``{escena}``,
     ``{fecha}``, ``{archivo}``, ``{autor}``, ``{nombre}``, ``{hoja}`` and
-    ``{total}`` with the sheet's live values (QGIS-style dynamic text).
+    ``{total}`` — or their English and German names, see ``FIELD_NAMES`` —
+    with the sheet's live values (QGIS-style dynamic text).
     Unknown fields — the scale label's ``{n}`` included — stay as typed."""
     global _FIELD_RE
     if not text or "{" not in text:

@@ -3680,6 +3680,13 @@ class MakeGroupCommand(Command):
                                 (_key(e.a) in grouped and _key(e.b) in grouped)):
                 m.remove_edge(e)
                 scene.selection.discard(e)
+        # The corners only the grouped geometry used are left behind by the
+        # removals above — they do not cascade on purpose — so a box handed
+        # to a component left eight invisible vertices in the loose mesh,
+        # still in the position registry, ready to catch the next thing
+        # drawn there. Sweep them in the same step: the snapshot below takes
+        # them back on undo.
+        m.purge_debris()
 
     def undo(self, scene) -> None:
         if self.group in scene.groups:
@@ -4738,6 +4745,15 @@ class DeleteGroupCommand(Command):
         self.index = owner.index(self.group)
         owner.remove(self.group)
         scene.selection.discard(self.group)
+        # Deleting a group is the moment the user expects the loose mesh to
+        # be the loose mesh again: whatever left a vertex with nothing on it
+        # — a grouping, an operation that removed geometry without sweeping —
+        # no edge draws it, no face holds it, and the position registry still
+        # hands it to whatever is drawn there next. It is not part of the
+        # group being removed (its own mesh travels with it, undo restores it
+        # whole), so sweeping it here cannot lose anything the user can see
+        # or undo back to.
+        scene.mesh.purge_debris()
         scene.version += 1
 
     def undo(self, scene) -> None:

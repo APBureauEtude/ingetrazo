@@ -722,6 +722,34 @@ def _content_ver(vp):
     return getattr(sc, "content_version", sc.version)
 
 
+def _snap_dropped_loose(vp):
+    """Ids of the loose edges the inference must not land on, cached per scene
+    version. An EMPTY set means ``Viewport._snap_scene`` may hand the raw
+    scene over, with no list to build on a hover.
+
+    The engine walked the loose mesh as it is, so an edge hidden on its own —
+    Hide with the eraser, the seam of a smoothed surface, an edge on a hidden
+    layer — still offered its endpoints and its line. The cursor lit up on
+    geometry that draws nothing, and a line drawn to that spot cut the face
+    underneath at a point the user could not see: the "phantom corner" that
+    segmented a fresh face out of nowhere. Render, pick and ``bounds()``
+    already skip those edges; this asks the same rule
+    (:meth:`Scene.edge_snappable`) once per change instead of once per edge
+    per hover.
+
+    Module-level, like :func:`_cache_ver`, so the stub viewports in tests hit
+    it too."""
+    scene = vp.scene
+    key = (_cache_ver(vp), id(scene.mesh), len(scene.mesh.edges),
+           bool(getattr(scene, "show_hidden_geometry", False)))
+    memo = getattr(vp, "_loose_snap_drops_cache", None)
+    if memo is not None and memo[0] == key:
+        return memo[1]
+    drops = {id(e) for e in scene.edges if not scene.edge_snappable(e)}
+    vp._loose_snap_drops_cache = (key, drops)
+    return drops
+
+
 def _ctx_changed(vp, before):
     """``History.context_changed`` (stub viewports in tests have no
     history, or one without it)."""
@@ -13041,6 +13069,7 @@ class Viewport(QOpenGLWidget):
         ea: list = []
         eb: list = []
         esel: list = []
+        esnap: list = []
         esoft: list = []
         for e in scene.edges:
             edges.append(e)
@@ -13055,6 +13084,13 @@ class Viewport(QOpenGLWidget):
                         and (not getattr(e, "hidden", False)
                              or bool(getattr(scene, "show_hidden_geometry",
                                              False))))
+            # Snapping is a different question from selecting: a locked
+            # edge is no target for a click and a fine target for a
+            # dimension, while an edge that draws nothing is neither. The
+            # same rule the snap scene applies (Scene.edge_snappable), kept
+            # here so the corner a from-point acquires cannot come from a
+            # line the user cannot see.
+            esnap.append(scene.edge_snappable(e))
 
         idx = SimpleNamespace(
             entities=entities,
@@ -13074,6 +13110,7 @@ class Viewport(QOpenGLWidget):
             edge_a=np.asarray(ea, dtype=np.float64) if edges else None,
             edge_b=np.asarray(eb, dtype=np.float64) if edges else None,
             edge_sel=np.asarray(esel, dtype=bool) if edges else None,
+            edge_snap=np.asarray(esnap, dtype=bool) if edges else None,
             edge_soft=np.asarray(esoft, dtype=bool) if edges else None,
             gedge_a=gedge_a,
             gedge_b=gedge_b,
@@ -14283,7 +14320,10 @@ class Viewport(QOpenGLWidget):
         pseudo-edges (``Guide.a/.b`` span the long segment), and — when the
         cursor position is given — the group edges near it plus the face-me
         billboard anchors, so drawing and dimensioning over an imported
-        reference model snaps to its corners and edges."""
+        reference model snaps to its corners and edges.
+
+        Loose edges the scene itself says are not there (hidden, or on a
+        hidden layer) are left out — see :func:`_snap_dropped_loose`."""
         # Guide lines are clipped to the part in front of the camera so the
         # snap engine gets projectable endpoints (an endpoint behind the eye
         # used to kill on-line snapping in ordinary 3D views); guide POINTS
@@ -14358,13 +14398,20 @@ class Viewport(QOpenGLWidget):
                                   QVector3D(gp.position)))
         big = (px is not None
                and len(self.scene.edges) > _LOOSE_SNAP_CAP)
-        if not lines and not near and sp is None and not big and excl is None:
+        if not lines and not near and sp is None and not big and excl is None \
+                and not _snap_dropped_loose(self):
             return self.scene
         if big:
-            loose = self._nearby_loose_edges(px, py)
+            # Only the edges near the cursor are considered, so ask each one
+            # (dozens) rather than walking a mesh of 160k to build the drop
+            # set above.
+            loose = [e for e in self._nearby_loose_edges(px, py)
+                     if self.scene.edge_snappable(e)]
         else:
             loose = list(self.scene.edges)
-        loose = [e for e in loose if not getattr(e, "hidden", False)]
+            drops = _snap_dropped_loose(self)
+            if drops:
+                loose = [e for e in loose if id(e) not in drops]
         if excl is not None and excl[0]:
             loose = [e for e in loose if id(e) not in excl[0]]
         if sp is not None:
@@ -14809,6 +14856,16 @@ class Viewport(QOpenGLWidget):
         order = cand[np.argsort(d[cand])]
         if not len(order):
             return None
+        # A corner only an edge that draws nothing holds is not on screen:
+        # acquiring it as a from-point is how a phantom point gets into the
+        # next face (the same rule the snap scene applies to the edges).
+        snap_ok = None if n == 0 else getattr(idx, "edge_snap", None)
+        if snap_ok is not None:
+            order = np.asarray([i for i in order
+                                if i >= 2 * n or snap_ok[int(i) % n]],
+                               dtype=order.dtype)
+            if not len(order):
+                return None
         # The nearest one, alone first (usually the answer); then the
         # rest in batches of 8, 16, 32… sharing one occlusion pass, as the
         # snap engine reads its candidates. One ray per candidate, in turn,
@@ -14868,6 +14925,11 @@ class Viewport(QOpenGLWidget):
             lp = (ax, ay, bx, by, oka & okb)
         if lp is not None:
             ax, ay, bx, by, ok = lp
+            # Corners only an edge that draws nothing holds are not on
+            # screen (see pick_vertex).
+            snap_ok = getattr(idx, "edge_snap", None)
+            if snap_ok is not None:
+                ok = ok & snap_ok
             parts += [(ax, ay, ok, idx.edge_a), (bx, by, ok, idx.edge_b)]
         fx = getattr(idx, "gedge_fixed", None)
         m = fx[1] if fx is not None else 0

@@ -273,6 +273,18 @@ def test_frame_cache_track_reports_a_settled_view():
     assert vp._frame_cache_track((0.0, 2.0)) is True     # settled
 
 
+def _one_paint(vp):
+    """Exactly one paint per camera step, as an orbit gets: ``_frame``
+    paints twice (the update, then the grab), and the second one already
+    sees a settled view."""
+    import views.viewport as V_
+    was, V_._FRAME_CACHE = V_._FRAME_CACHE, True
+    try:
+        return vp.grabFramebuffer()
+    finally:
+        V_._FRAME_CACHE = was
+
+
 def test_the_picture_is_kept_once_the_view_settles(win, monkeypatch):
     w, vp = win
     stores = []
@@ -286,9 +298,9 @@ def test_the_picture_is_kept_once_the_view_settles(win, monkeypatch):
     kept = len(stores)
     for view in ("top", "front", "iso", "top"):
         vp.camera.set_view(view)        # an orbit: every frame moves
-        _frame(vp, True)
+        _one_paint(vp)
     assert len(stores) == kept, "a moving view stored pictures it never reuses"
     for _ in range(3):                  # the view stands still now
-        _frame(vp, True)
+        _one_paint(vp)
     assert len(stores) == kept + 1, "the settled frame did not keep the picture"
     assert vp._frame_cache is not None

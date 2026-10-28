@@ -146,6 +146,19 @@ def swatch_icon(rgb) -> QIcon:
 NO_COLOUR_SLASH = QColor(214, 48, 49)
 
 
+def layers_signature(scene) -> tuple:
+    """Everything the Layers rows are drawn from — each layer's own state,
+    the folders, the active layer and «colour by layer». The same value
+    twice means the rows would come out the same: an edit of the model
+    (a push, a move) leaves it as it was and does not rebuild the list."""
+    style = getattr(scene, "display_style", None)
+    folders = tuple(L.folders_of(scene))
+    return (tuple(repr(sorted(vars(ly).items())) for ly in scene.layers),
+            folders, tuple(L.folder_parent(scene, f) for f in folders),
+            L.active_layer(scene),
+            bool(getattr(style, "color_by_layer", False)))
+
+
 def layer_swatch(ly) -> QIcon:
     """A layer's swatch. The default layer with no colour picked has none
     of its own, and must not pass for one: an empty (base-coloured) swatch
@@ -761,6 +774,7 @@ class LayersPanel(QWidget):
         self._updating = False
         self._collapsed: set[str] = set()
         self._counts: dict[str, int] = {}
+        self._counted_version = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(4)
@@ -1023,6 +1037,7 @@ class LayersPanel(QWidget):
                                                     False)))
         self.color_by_layer.blockSignals(False)
         self._updating = False
+        self._drawn_signature = self._signature()
         self._count_timer.start(300)
 
     #: Column order on screen (logical columns), and the indent per level —
@@ -1251,7 +1266,9 @@ class LayersPanel(QWidget):
         """How many entities carry each layer — faces, edges, objects and
         annotations, inside groups too."""
         from core.purge import layer_counts
-        counts = layer_counts(self._scene())
+        scene = self._scene()
+        self._counted_version = scene.content_version
+        counts = layer_counts(scene)
         self._counts = counts
         self._updating = True
         for it in self._all_items():
@@ -2337,9 +2354,37 @@ class LayersPanel(QWidget):
 
     # ---- The window's scene-changed signal -------------------------------------
     def on_scene_changed(self) -> None:
+        """Refreshed now when on screen, on showing otherwise — like the
+        Browser and the components tray. Behind another tab, rebuilding the
+        rows was 7 ms of every edit on plaza, and the counts that follow
+        walk the whole model: 0.15 s of every edit on the plant of #158
+        (release_check 0.5.11). A window not shown yet (scripts, tests)
+        refreshes at once, as before."""
         if self.tree.state() == QAbstractItemView.EditingState:
             return                          # never under an open name editor
+        if self._window.isVisible() and not self.isVisible():
+            self._stale = True
+            return
+        if (self._signature() == getattr(self, "_drawn_signature", None)
+                and self.tree.topLevelItemCount()):
+            # The rows are what they were: only the selection's mark and,
+            # after a change of the model, the counts follow. The filter
+            # too: «Selection» shows the layers of what is picked.
+            self._mark_selection()
+            self._apply_filter()
+            if self._scene().content_version != self._counted_version:
+                self._count_timer.start(300)
+            return
         self.refresh()
+
+    def _signature(self) -> tuple:
+        return (layers_signature(self._scene()), tuple(self._isolated))
+
+    def showEvent(self, ev) -> None:
+        super().showEvent(ev)
+        if getattr(self, "_stale", False):
+            self._stale = False
+            self.refresh()
 
 
 class LayersDock(QDockWidget):

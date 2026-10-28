@@ -2109,3 +2109,45 @@ def test_a_frame_can_ink_its_lines_in_their_layer_colours(monkeypatch):
         comp.close()
         win._saved_version = win.viewport.scene.version
         win.close()
+
+
+def test_an_edit_of_the_model_does_not_rebuild_the_rows(win):
+    """The rows are rebuilt when what they show changes, not on every edit:
+    a rebuild on every change of the scene was 9 ms of each edit on plaza
+    (release_check 0.5.11). The counts still follow the edit."""
+    panel = win.layers_dock.panel
+    scene = win.viewport.scene
+    scene.layers += [Layer("Muros")]
+    win.layers_dock.show()
+    win.layers_dock.raise_()
+    _app.processEvents()
+    panel.refresh()
+    first = panel.tree.topLevelItem(0)
+    m = Mesh()
+    a, b = QVector3D(0, 0, 0), QVector3D(1, 0, 0)
+    e = m.add_edge(a, b)
+    e.layer = "Muros"
+    g = Group(m, name="g")
+    scene.groups.append(g)
+    scene.version += 1
+    win.viewport.notify_scene_changed()
+    assert panel.tree.topLevelItem(0) is first          # not rebuilt
+    panel.update_counts()                               # the timer's call
+    assert panel._counts.get("Muros") == 1
+    scene.layer("Muros").color = (1.0, 0.0, 0.0)
+    win.viewport.notify_scene_changed()
+    assert panel.tree.topLevelItem(0) is not first      # a layer changed
+
+
+def test_behind_another_tab_the_panel_waits_until_shown(win):
+    panel = win.layers_dock.panel
+    scene = win.viewport.scene
+    win.layers_dock.hide()
+    _app.processEvents()
+    assert not panel.isVisible()
+    scene.layers += [Layer("Nueva")]
+    win.viewport.notify_scene_changed()
+    assert "Nueva" not in _shown(panel)                 # not rebuilt hidden
+    win.layers_dock.show()
+    _app.processEvents()
+    assert "Nueva" in _shown(panel)

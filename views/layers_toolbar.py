@@ -174,10 +174,16 @@ class LayerCombo(QComboBox):
         scene = self.scene()
         if scene is None or self.view().isVisible():
             return                           # never under an open list
-        self._filling = True
         # The selection's layers get a dot in the list (the box itself keeps
         # showing the active layer).
-        self.selection_layers = L.selection_layers(scene)
+        selection_layers = L.selection_layers(scene)
+        from views.layers_panel import layers_signature
+        drawn = (layers_signature(scene), frozenset(selection_layers))
+        if drawn == getattr(self, "_drawn", None) and self.count():
+            return      # an edit of the model: the rows are what they were
+        self._drawn = drawn
+        self._filling = True
+        self.selection_layers = selection_layers
         self.clear()
         for ly in scene.layers:
             self.addItem(_row_icon(ly, scene), ly.name)

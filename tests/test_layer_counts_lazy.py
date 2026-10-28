@@ -13,8 +13,8 @@ import pytest
 
 import core._native as _native
 from core import mesh as M
-from core.layers import layer_of
-from core.purge import layer_carriers, layer_counts
+from core.layers import DEFAULT_LAYER, layer_of
+from core.purge import layer_carriers, layer_counts, used_layers
 from core.scene import Scene
 from formats import igz
 from tests.test_deferred_mesh import _meshes, _random_scene
@@ -54,10 +54,12 @@ def test_counting_a_lazy_document_builds_nothing_and_counts_the_same(
     assert lazy, "the fixture must leave group meshes lazy"
 
     got = layer_counts(scene)
+    used = used_layers(scene)
 
     assert all(type(m) is M.DeferredMesh for m in lazy)
     built = Counter(layer_of(e) for e in layer_carriers(scene))
     assert got == dict(built)
+    assert used == {DEFAULT_LAYER} | set(built)
 
 
 def test_an_eager_document_counts_as_before(tmp_path):

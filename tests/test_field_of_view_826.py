@@ -9,7 +9,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 if QApplication.instance() is None:
     QApplication([])
@@ -46,6 +46,51 @@ def test_field_of_view_is_set_kept_and_reset(tmp_path):
         cam.perspective = False
         assert not win.set_field_of_view(30.0)
         assert cam.fov_deg == 70.0
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()
+
+
+def test_dialog_slider_and_number_preview_the_same_angle():
+    from views.field_of_view_dialog import FieldOfViewDialog
+    from views.main_window import MainWindow
+    win = MainWindow()
+    try:
+        cam = win.viewport.camera
+        eye = cam.eye()
+        dialog = FieldOfViewDialog(
+            win, cam.fov_deg, *win.FOV_RANGE, win.set_field_of_view)
+
+        dialog.slider.setValue(70)
+        assert dialog.value() == 70.0
+        assert cam.fov_deg == 70.0
+        assert (cam.eye() - eye).length() < 1e-6
+
+        dialog.spin.setValue(35.0)
+        assert dialog.slider.value() == 35
+        assert cam.fov_deg == 35.0
+    finally:
+        win._saved_version = win.viewport.scene.version
+        win.close()
+
+
+def test_cancel_restores_the_angle_before_the_live_preview(monkeypatch):
+    from views import field_of_view_dialog
+    from views.main_window import MainWindow
+
+    class CancelAfterDragging(field_of_view_dialog.FieldOfViewDialog):
+        def exec(self):
+            self.slider.setValue(70)
+            assert self.parent().viewport.camera.fov_deg == 70.0
+            return QDialog.Rejected
+
+    monkeypatch.setattr(field_of_view_dialog, "FieldOfViewDialog",
+                        CancelAfterDragging)
+    win = MainWindow()
+    try:
+        assert win.viewport.camera.fov_deg == 45.0
+        win._ask_field_of_view()
+        assert win.viewport.camera.fov_deg == 45.0
     finally:
         win._saved_version = win.viewport.scene.version
         win.close()

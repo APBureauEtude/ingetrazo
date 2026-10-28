@@ -5860,14 +5860,18 @@ class MainWindow(QMainWindow):
         if not cam.perspective:
             self.set_field_of_view(cam.fov_deg)     # says why, changes nothing
             return
-        from PySide6.QtWidgets import QInputDialog
+        from PySide6.QtWidgets import QDialog
+        from views.field_of_view_dialog import FieldOfViewDialog
         lo, hi = self.FOV_RANGE
-        value, ok = QInputDialog.getDouble(
-            self, tr("Field of view"),
-            tr("Field of view in degrees (10–120):"),
-            float(cam.fov_deg), lo, hi, 0)
-        if ok:
-            self.set_field_of_view(value)
+        original = float(cam.fov_deg)
+        dialog = FieldOfViewDialog(
+            self, original, lo, hi, self.set_field_of_view)
+        if dialog.exec() == QDialog.Accepted:
+            self.set_field_of_view(dialog.value())
+        else:
+            # Changes are previewed while the slider moves; Cancel still has
+            # the same meaning as in the old one-shot input dialog.
+            self.set_field_of_view(original)
 
     def _reset_camera_home(self) -> None:
         """A new drawing opens on the default view (iso, 20 m out), not on

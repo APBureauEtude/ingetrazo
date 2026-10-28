@@ -4,10 +4,10 @@ All notable changes to IngeTrazo are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com); versions
 follow [SemVer](https://semver.org).
 
-## [0.5.11] — 2026-10-30
+## [0.5.11] — 2026-10-27
 
 **Capas 2.0, la oclusión ambiental deja de ser experimental, sombras
-nítidas al exportar y en la vista quieta, cinco idiomas nuevos, el gestor
+nítidas al exportar y en la vista quieta, cuatro idiomas nuevos, el gestor
 de extensiones que vuelve a conectar en Windows y más de treinta aportes
 de la comunidad.**
 
@@ -51,11 +51,13 @@ sección 0.5.10.1, más abajo.
   tablas de una banca proyectan su sombra una por una. Al orbitar, mover o
   editar vuelve al mapa de siempre, así que la órbita no se hace más lenta;
   al quedarse quieta hay un solo cuadro de unos 40 ms en el modelo SPR.
-- **Cinco idiomas nuevos:** japonés (@nonasige-ui, #597), coreano
-  (@ultracat, #785), vietnamita (@vandang890615, #936), lao
-  (@bounkirdni-2025, #850) y tailandés (@PRIDA-TAKON, #824). IngeTrazo
-  arranca en ese idioma la primera vez si el sistema lo usa; se cambia en
-  Preferencias ▸ Idioma.
+- **Cuatro idiomas nuevos:** japonés (@nonasige-ui, #597), coreano
+  (@ultracat, #785), vietnamita (@vandang890615, #936) y tailandés
+  (@PRIDA-TAKON, #824). IngeTrazo arranca en ese idioma la primera vez si
+  el sistema lo usa; se cambia en Preferencias ▸ Idioma. La traducción al
+  lao (@bounkirdni-2025, #850) ya viene en el programa, pero todavía no se
+  ofrece: en Windows las vocales y los tonos salían separados de su
+  consonante, y vuelve en la próxima versión cuando eso esté resuelto.
 - **Línea bloqueada que encuentra aristas y caras** (#245, @pacaeiro en
   #876): con una dirección bloqueada (flechas, Mayús o la referencia), el cursor sobre
   una arista ofrece el punto donde la línea bloqueada corta la recta de esa

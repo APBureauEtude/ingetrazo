@@ -75,19 +75,19 @@
   <url type="vcs-browser">https://github.com/ingelibre/ingetrazo</url>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.5.11" date="2026-10-30">
+    <release version="0.5.11" date="2026-10-27">
       <description>
         <p>Layers 2.0 with their own tab, colour, line type and weight per
         layer and printing per layer; ambient occlusion is no longer
         experimental; sharp sun shadows in exported pictures, in sheets and
-        in a still view; Japanese, Korean, Vietnamese, Lao and Thai; the
+        in a still view; Japanese, Korean, Vietnamese and Thai; the
         extension manager downloads again on a fresh Windows; and over
         thirty community contributions.</p>
         <p xml:lang="es">Capas 2.0 con pestaña propia, color, tipo y grosor
         de línea e impresión por capa; la oclusión ambiental deja de ser
         experimental; sombras del sol nítidas en las imágenes exportadas,
-        en las láminas y con la vista quieta; japonés, coreano, vietnamita,
-        lao y tailandés; el gestor de extensiones vuelve a descargar en un
+        en las láminas y con la vista quieta; japonés, coreano, vietnamita
+        y tailandés; el gestor de extensiones vuelve a descargar en un
         Windows recién instalado; y más de treinta aportes de la
         comunidad.</p>
       </description>

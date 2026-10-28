@@ -590,10 +590,13 @@ def main() -> int:
         conn = server.nextPendingConnection()
         if conn is None:
             return
+        path = ""
         if conn.waitForReadyRead(300):
             path = bytes(conn.readAll()).decode("utf-8", "replace").strip()
-            if path:
-                _open_document_in(window, Path(path))
+        # ACK BEFORE opening: the launcher waits for it only 1.5 s and then
+        # starts a window of its own. Opening may ask about unsaved changes
+        # (#956) or take longer than that on a big model, and the file then
+        # came up twice, here and in a second window (round Windows 0.5.11).
         conn.write(b"ok\n")            # ACK so the caller knows we are alive
         conn.flush()
         conn.waitForBytesWritten(300)
@@ -601,6 +604,9 @@ def main() -> int:
         window.show()
         window.raise_()
         window.activateWindow()
+        if path:
+            from PySide6.QtCore import QTimer as _Timer
+            _Timer.singleShot(0, lambda: _open_document_in(window, Path(path)))
 
     if server is not None:
         server.newConnection.connect(_handle_second_launch)

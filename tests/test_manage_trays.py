@@ -82,8 +82,8 @@ def test_a_section_is_in_one_tray_at_a_time():
 def test_place_counts_the_index_without_the_moved_section():
     layout = TrayLayout()
     layout.place("entity_info", "tray_properties", 1)   # one down
-    assert layout.trays["tray_properties"][:3] == ["layers", "entity_info",
-                                                  "scenes"]
+    assert layout.trays["tray_properties"][:3] == ["scenes", "entity_info",
+                                                  "materials"]
     layout.place("parts", "tray_properties", 0)         # to the top
     assert layout.trays["tray_properties"][0] == "parts"
     layout.place("bim", "tray_properties", 99)          # clamped, moved over
@@ -233,8 +233,7 @@ def test_trays_and_their_sections_are_the_same_at_the_next_start():
         dock = win.tray_manager.docks[mine]
         assert dock.objectName() == mine and dock.windowTitle() == "Mine"
         assert _keys(dock) == ["materials"]
-        assert _keys(win.tray) == ["parts", "entity_info", "layers",
-                                   "components"]
+        assert _keys(win.tray) == ["parts", "entity_info", "components"]
         assert _dock_of(win.tray.scenes) is None
     finally:
         _close(win)
@@ -311,15 +310,15 @@ def test_a_section_header_menu_moves_it_up_and_down():
     win = _window()
     try:
         stack = win.tray.widget()
-        layers = next(s for s in stack.sections() if s.key == "layers")
-        menu = stack.section_menu(layers)
+        scenes = next(s for s in stack.sections() if s.key == "scenes")
+        menu = stack.section_menu(scenes)
         up, down = menu.actions()[:2]
         up.trigger()
-        assert _keys(win.tray)[:2] == ["layers", "entity_info"]
-        menu = stack.section_menu(layers)
+        assert _keys(win.tray)[:2] == ["scenes", "entity_info"]
+        menu = stack.section_menu(scenes)
         assert not menu.actions()[0].isEnabled()        # already on top
         menu.actions()[1].trigger()
-        assert _keys(win.tray)[:2] == ["entity_info", "layers"]
+        assert _keys(win.tray)[:2] == ["entity_info", "scenes"]
         assert "Manage Trays…" in [a.text() for a in menu.actions()]
     finally:
         _close(win)

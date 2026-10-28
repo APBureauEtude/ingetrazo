@@ -51,7 +51,7 @@ def _init_language() -> None:
 
     Reads the persisted choice from :class:`QSettings`; on first run, falls back
     to Spanish when the OS locale is Spanish, Brazilian Portuguese when it is
-    Portuguese, English otherwise.
+    Portuguese, Korean when it is Korean, English otherwise.
     """
     saved = QSettings().value("language")
     if not saved:
@@ -62,6 +62,8 @@ def _init_language() -> None:
             # The Brazilian Portuguese catalogue (PR #54, @dafrobozao)
             # serves every Portuguese locale until a pt-PT one exists.
             saved = "pt-BR"
+        elif system.language() == QLocale.Korean:
+            saved = "ko"
         else:
             saved = "en"
     i18n.set_language(str(saved))
@@ -79,20 +81,59 @@ class _ButtonsOnlyTranslator(QTranslator):
     _CONTEXTS = frozenset({"QPlatformTheme", "QMessageBox",
                            "QDialogButtonBox"})
 
+    _BUILTIN = {
+        "vi": {
+            "&OK": "&Đồng ý",
+            "OK": "Đồng ý",
+            "&Cancel": "Hủy",
+            "Cancel": "Hủy",
+            "&Yes": "&Có",
+            "Yes": "Có",
+            "&No": "&Không",
+            "No": "Không",
+            "&Save": "&Lưu",
+            "Save": "Lưu",
+            "&Discard": "&Hủy thay đổi",
+            "Discard": "Hủy thay đổi",
+            "&Close": "&Đóng",
+            "Close": "Đóng",
+            "&Apply": "&Áp dụng",
+            "Apply": "Áp dụng",
+            "&Open": "&Mở",
+            "Open": "Mở",
+            "&Help": "&Trợ giúp",
+            "Help": "Trợ giúp",
+            "Don't Save": "Không lưu",
+            "&Don't Save": "&Không lưu",
+            "Reset": "Đặt lại",
+            "Restore Defaults": "Khôi phục mặc định",
+        }
+    }
+
     def __init__(self) -> None:
         super().__init__()
         self._qt = QTranslator()
+        self._lang = ""
 
     def load_qt(self, lang: str) -> bool:
+        self._lang = lang
+        if lang in self._BUILTIN:
+            return True
         folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
         return self._qt.load(f"qtbase_{lang.replace('-', '_')}", folder)
 
     def isEmpty(self) -> bool:
+        if self._lang in self._BUILTIN:
+            return False
         return self._qt.isEmpty()
 
     def translate(self, context, source, disambiguation=None, n=-1):
         if context not in self._CONTEXTS:
             return None                   # not ours: Qt keeps its text
+        if self._lang in self._BUILTIN:
+            trans = self._BUILTIN[self._lang].get(source)
+            if trans:
+                return trans
         return self._qt.translate(context, source, disambiguation, n)
 
 
@@ -149,6 +190,20 @@ def _open_document_in(window, doc: "Path") -> None:
         window.load_extensions()
     ext = doc.suffix.lower()
     if ext == ".igz" or ext in getattr(window, "file_openers", {}):
+        # A document REPLACES the drawing this window holds. File ▸ Open
+        # and Open Recent ask about unsaved changes before they call
+        # open_path; a path arriving from outside — a double-click handed
+        # over by the single instance, a macOS FileOpen event — had nobody
+        # asking, so the running drawing went away silently (issue #956).
+        # Ask here, at the seam every outside route shares. A cold launch
+        # holds nothing to lose, so the question is a no-op there, and an
+        # import (the .skp branch below) only ADDS to the drawing and is
+        # not asked, like File ▸ Import.
+        from core.i18n import tr
+        confirm = getattr(window, "_confirm_discard", None)
+        if confirm is not None and not confirm(
+                tr("Discard current drawing and open another?")):
+            return
         window.open_path(doc)       # an extension's own type goes to its opener
     elif ext == ".skp":
         from PySide6.QtCore import QTimer
@@ -535,10 +590,13 @@ def main() -> int:
         conn = server.nextPendingConnection()
         if conn is None:
             return
+        path = ""
         if conn.waitForReadyRead(300):
             path = bytes(conn.readAll()).decode("utf-8", "replace").strip()
-            if path:
-                _open_document_in(window, Path(path))
+        # ACK BEFORE opening: the launcher waits for it only 1.5 s and then
+        # starts a window of its own. Opening may ask about unsaved changes
+        # (#956) or take longer than that on a big model, and the file then
+        # came up twice, here and in a second window (round Windows 0.5.11).
         conn.write(b"ok\n")            # ACK so the caller knows we are alive
         conn.flush()
         conn.waitForBytesWritten(300)
@@ -546,6 +604,9 @@ def main() -> int:
         window.show()
         window.raise_()
         window.activateWindow()
+        if path:
+            from PySide6.QtCore import QTimer as _Timer
+            _Timer.singleShot(0, lambda: _open_document_in(window, Path(path)))
 
     if server is not None:
         server.newConnection.connect(_handle_second_launch)

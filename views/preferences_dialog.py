@@ -54,6 +54,7 @@ _DXF_UNITS = (("mm", "Millimetres"), ("cm", "Centimetres"), ("m", "Metres"),
               ("in", "Inches"), ("ft", "Feet"))
 _REST_MODES = (("normal", "Show normally"), ("fade", "Fade"),
                ("hide", "Hide (fastest)"))
+_UNITS_FOR_NEW_KEY = "units/use_for_new_documents"
 
 
 class PreferencesDialog(QDialog):
@@ -201,6 +202,16 @@ class PreferencesDialog(QDialog):
         self._look_sens.setToolTip(tr(
             "How fast a drag turns the head in First Person"))
         form.addRow(tr("Mouse-look sensitivity:"), self._look_sens)
+
+        # The pointer while a tool is active: its own icon (the default),
+        # or the classic crosshair or the plain arrow for who prefers them.
+        self._cursor_style = QComboBox()
+        for key, label in (("tool", "The tool's icon"),
+                           ("crosshair", "Crosshair"), ("arrow", "Arrow")):
+            self._cursor_style.addItem(tr(label), key)
+        self._cursor_style.setCurrentIndex(max(0, self._cursor_style.findData(
+            str(_gs.value("cursor_style", "tool", st)).lower())))
+        form.addRow(tr("Tool cursor:"), self._cursor_style)
 
         self._msaa = QComboBox()
         for n in (0, 2, 4, 8):
@@ -409,12 +420,15 @@ class PreferencesDialog(QDialog):
         # separator, preview): everything a readout is shown with. Its rows
         # and the ones below share one form, like the other pages.
         self._units_panel = UnitsPanel(current)
+        self._initial_units = self._units_panel.settings()
         form = self._units_panel.form
         # Issue #121: the choice used to live only in the open document, so
         # every new file went back to metres.
         self._units_for_new = QCheckBox(tr("Also use for new documents"))
         self._units_for_new.setChecked(
-            _units.new_document_units() == current)
+            str(st.value(_UNITS_FOR_NEW_KEY, "1")).lower() not in ("0", "false"))
+        self._units_for_new_explicit = False
+        self._units_for_new.toggled.connect(self._units_for_new_toggled)
         form.addRow("", self._units_for_new)
         from views.units_start_dialog import ask_at_start
         self._units_at_start = QCheckBox(tr("Ask which units to use at startup"))
@@ -612,6 +626,9 @@ class PreferencesDialog(QDialog):
         self._rest_fade_value.setText(f"{self._rest_fade.value()} %")
         self._rest_fade.setEnabled(self._rest.currentData() == "fade")
 
+    def _units_for_new_toggled(self, _checked: bool) -> None:
+        self._units_for_new_explicit = True
+
     def accept(self) -> None:  # noqa: D102 — QDialog override
         st = QSettings()
 
@@ -622,9 +639,19 @@ class PreferencesDialog(QDialog):
         if scene is not None and chosen != _units.model_units_of(scene):
             _units.apply_units(scene, chosen)
             scene.version += 1
-            self._window.viewport.update()
-        if self._units_for_new.isChecked():
-            _units.remember_new_document_units(chosen)
+            notify = getattr(self._window.viewport, "notify_scene_changed", None)
+            if callable(notify):
+                notify()
+            else:
+                self._window.viewport.update()
+        for_new = self._units_for_new.isChecked()
+        # The checkbox is a remembered preference, independent of the model.
+        # An unrelated edit must not copy this model's units over a newer
+        # default chosen in another window. Explicit opt-in copies them too.
+        if chosen != self._initial_units or self._units_for_new_explicit:
+            st.setValue(_UNITS_FOR_NEW_KEY, "1" if for_new else "0")
+            if for_new:
+                _units.remember_new_document_units(chosen)
         from views.units_start_dialog import set_ask_at_start
         set_ask_at_start(self._units_at_start.isChecked())
 
@@ -713,6 +740,10 @@ class PreferencesDialog(QDialog):
         st.setValue("nav/invert_wheel",
                     "1" if self._invert.isChecked() else "0")
         self._window.viewport._invert_wheel = self._invert.isChecked()
+        _gs.set_value("cursor_style", self._cursor_style.currentData(), st)
+        reapply = getattr(self._window.viewport, "_apply_tool_cursor", None)
+        if callable(reapply):
+            reapply()                  # the active tool's pointer at once
 
         st.setValue("nav/invert_orbit_y",
                     "1" if self._invert_orbit.isChecked() else "0")

@@ -120,6 +120,14 @@ class TrayBand(QWidget):
         font.setBold(True)
         self._name.setFont(font)
         lay.addWidget(self._name, 1)
+        self._add_btn = _tool_button()
+        self._add_btn.setObjectName("add_panels_button")
+        self._add_btn.setText("+")
+        self._add_btn.setToolTip(tr("Add panels…"))
+        self._add_btn.setStatusTip(tr("Choose which panels the sidebar shows."))
+        self._add_btn.clicked.connect(
+            lambda: main._open_panels_menu(self._add_btn))
+        lay.addWidget(self._add_btn)
         self._btn = _tool_button()
         self._btn.setToolTip(tr(
             "Take the trays out into a window of their own"))

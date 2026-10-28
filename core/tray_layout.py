@@ -27,9 +27,10 @@ import uuid
 #: The factory trays and their sections, in order. A tray id is its
 #: dock's ``objectName`` (which the saved window layout is keyed by).
 DEFAULT_SECTIONS: dict[str, tuple[str, ...]] = {
-    "tray_properties": ("entity_info", "layers", "scenes", "materials",
+    "tray_properties": ("entity_info", "scenes", "materials",
                         "components", "parts"),
     "tray_project_browser": ("browser",),
+    "tray_layers": ("layers",),
     "tray_bim": ("bim",),
     "tray_georef": ("base_map", "survey"),
 }

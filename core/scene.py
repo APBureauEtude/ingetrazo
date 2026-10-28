@@ -66,6 +66,14 @@ class Scene:
         __import__("core.layers", fromlist=["Layer"]).Layer(
             __import__("core.layers", fromlist=["DEFAULT_LAYER"]).DEFAULT_LAYER)
     ])
+    # The layer new objects go to (core.layers.active_layer); None = the
+    # default layer.
+    active_layer: str | None = None
+    # Folder names of the Layers panel, in order — empty folders included
+    # (a layer names its own folder in ``Layer.folder``).
+    layer_folders: list = field(default_factory=list)
+    # Folder → the folder it sits in (absent: at the top).
+    folder_parents: dict = field(default_factory=dict)
     # Named materials (core.materials.Material), name → Material. The
     # registry gives identity to paint recipes; faces keep their baked
     # attrs (color/texture) as the render truth and optionally carry
@@ -119,7 +127,8 @@ class Scene:
     plugin_data: dict = field(default_factory=dict)
     dimension_style: dict = field(default_factory=lambda: {
         "decimals": 2, "units": "m", "font_size": 9, "color": [45, 55, 75],
-        "norma": "iso", "base_step_mm": 8.0, "ends": "arrow"})
+        "norma": "iso", "base_step_mm": 8.0, "ends": "arrow",
+        "show_unit": True})
     # Back-face tint override (RGB 0..1), e.g. adopted from an imported
     # .skp's style so unpainted faces read like they did for the author.
     # ``None`` = the viewport's default blue-grey.
@@ -272,6 +281,29 @@ class Scene:
             return False
         return self._layer_state(entity)[0]
 
+    def edge_snappable(self, edge) -> bool:
+        """Whether the inference may land on ``edge`` — the visibility rule
+        the render, ``bounds()`` and the pick already follow.
+
+        An EDGE can be hidden on its own (Hide with the eraser, the seams of
+        a smoothed surface) without hiding what it bounds, and the draw
+        passes skip it: no line, no profile. The snap engine did not ask, so
+        the point offered to the cursor existed nowhere on screen — and a
+        line drawn to it landed on a spot the user could not see, cutting
+        the face it lay on (the "phantom vertex" segmentations). Hidden
+        EDGES come back for inference only with Camera ▸ Hidden Geometry
+        on, the same switch that draws them as a ghost and makes them
+        selectable.
+
+        A visible, plain edge is unaffected: nothing here filters curves
+        (``soft``), locked geometry, guides or group edges, which have their
+        own rules.
+        """
+        if not self.entity_visible(edge):
+            return False
+        return (not getattr(edge, "hidden", False)
+                or bool(getattr(self, "show_hidden_geometry", False)))
+
     def edit_definition(self):
         """The shared prototype mesh of the component instance open at the
         innermost level, or ``None`` (at the root, or inside a classic
@@ -330,7 +362,8 @@ class Scene:
         """The section plane currently cutting the model, or ``None``."""
         for sp in self.section_planes:
             if sp.active:
-                return sp
+                # A plane on a hidden layer cuts nothing (#316).
+                return sp if self._layer_state(sp)[0] else None
         return None
 
     def set_active_section(self, plane) -> None:
@@ -667,7 +700,8 @@ class Scene:
                 or not self.show_section_cuts
                 or self.show_hidden_objects or self.show_hidden_geometry
                 or self.custom_scales or self.back_face_color is not None
-                or len(self.layers) > 1):
+                or len(self.layers) > 1 or self.layer_folders
+                or self.active_layer):
             self.mesh.clear()
             self.groups.clear()
             self.dimensions.clear()
@@ -685,6 +719,9 @@ class Scene:
             self.selection.clear()
             from core.layers import DEFAULT_LAYER, Layer
             self.layers = [Layer(DEFAULT_LAYER)]
+            self.active_layer = None
+            self.layer_folders = []
+            self.folder_parents = {}
             self.georef = None
             self.tile_layer = None
             self.terrain = None

@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        batch: [2]
+        batch: [4]
     # In the private development repository Actions minutes are counted, and a
     # push to main has already passed both suites locally before it went up:
     # there the gate runs on pull requests (and by hand) only. The public

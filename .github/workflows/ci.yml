@@ -30,7 +30,11 @@ permissions:
 
 jobs:
   tests:
-    name: pytest (not slow)
+    name: pytest (not slow, batch ${{ matrix.batch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        batch: [1, 2, 3, 4, 5, 6]
     # In the private development repository Actions minutes are counted, and a
     # push to main has already passed both suites locally before it went up:
     # there the gate runs on pull requests (and by hand) only. The public
@@ -72,4 +76,4 @@ jobs:
         # scripts/pytest_batches.py).
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python scripts/pytest_batches.py -m "not slow" tests
+        run: python scripts/pytest_batches.py --only-batch ${{ matrix.batch }} -m "not slow" tests

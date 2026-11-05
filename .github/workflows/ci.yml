@@ -22,7 +22,7 @@ on:
 # A force-push to a PR branch cancels the now-obsolete run instead of
 # queueing behind it.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        batch: [6]
+        batch: [2, 4, 6]
     # In the private development repository Actions minutes are counted, and a
     # push to main has already passed both suites locally before it went up:
     # there the gate runs on pull requests (and by hand) only. The public

@@ -31,18 +31,23 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("-m", dest="marker", default=None)
     ap.add_argument("--batches", type=int, default=6)
+    ap.add_argument("--only-batch", type=int, default=None)
     ap.add_argument("path", nargs="?", default="tests")
     args = ap.parse_args()
 
     files = sorted(str(p) for p in Path(args.path).glob("test_*.py"))
     n = max(1, min(args.batches, len(files)))
     chunks = [files[i::n] for i in range(n)]   # interleaved: even weights
+    if args.only_batch is not None and not 1 <= args.only_batch <= n:
+        ap.error("--only-batch must be between 1 and --batches")
     totals: dict[str, int] = {}
     crashed = []
     t0 = time.monotonic()
     env = dict(os.environ, QT_QPA_PLATFORM=os.environ.get(
         "QT_QPA_PLATFORM", "offscreen"))
     for i, chunk in enumerate(chunks, 1):
+        if args.only_batch is not None and i != args.only_batch:
+            continue
         cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
         if args.marker:
             cmd += ["-m", args.marker]
